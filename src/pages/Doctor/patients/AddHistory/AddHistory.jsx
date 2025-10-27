@@ -6,8 +6,9 @@ import { resetDoctorState } from "../../../../features/doctor/doctorSlice";
 import { FileText, Save, ArrowLeft, CheckCircle } from "lucide-react";
 
 export default function AddHistory() {
-  const { id } = useParams();
-  const patientId = id; // Map the id parameter to patientId for consistency
+  const { patientId, id } = useParams();
+  // Use patientId if available, otherwise fall back to id for compatibility
+  const finalPatientId = patientId || id;
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { loading, error, addHistorySuccess, patientHistory: history, patientHistoryLoading: historyLoading, patientHistoryError: historyError } = useSelector((state) => state.doctor);
@@ -151,10 +152,10 @@ export default function AddHistory() {
 
   // Fetch existing history data if available
   useEffect(() => {
-    if (patientId) {
-      dispatch(fetchPatientHistory(patientId));
+    if (finalPatientId) {
+      dispatch(fetchPatientHistory(finalPatientId));
     }
-  }, [dispatch, patientId]);
+  }, [dispatch, finalPatientId]);
 
   // Populate form with existing data when history is loaded
   useEffect(() => {
@@ -170,10 +171,10 @@ export default function AddHistory() {
     if (addHistorySuccess) {
       setTimeout(() => {
         dispatch(resetDoctorState());
-        navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${patientId}`);
+        navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${finalPatientId}`);
       }, 1500);
     }
-  }, [addHistorySuccess, dispatch, navigate, patientId]);
+  }, [addHistorySuccess, dispatch, navigate, finalPatientId]);
 
   const handleChange = (e) => {
     const { name, value, type, checked, files } = e.target;
@@ -194,18 +195,18 @@ export default function AddHistory() {
     e.preventDefault();
     
     // Basic validation
-    if (!patientId) {
+    if (!finalPatientId) {
       console.error('Patient ID is required');
       return;
     }
     
-    console.log('Submitting history for patient:', patientId);
+    console.log('Submitting history for patient:', finalPatientId);
     console.log('Form data:', formData);
     
     // Add patientId to the form data
     const historyDataWithPatientId = {
       ...formData,
-      patientId: patientId
+      patientId: finalPatientId
     };
     
     console.log('History data with patient ID:', historyDataWithPatientId);
@@ -960,7 +961,7 @@ export default function AddHistory() {
               <div className="flex gap-4 pt-6 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={() => navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${patientId}`)}
+                  onClick={() => navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${finalPatientId}`)}
                   className="px-6 py-3 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-xs"
                 >
                   <ArrowLeft className="h-4 w-4" />

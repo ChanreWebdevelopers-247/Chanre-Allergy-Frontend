@@ -398,12 +398,7 @@ export default function Sidebar(props) {
                 isActive={isActive("/dashboard/doctor/test-requests")}
               />
               
-              <SidebarLink
-                to="/dashboard/doctor/completed-reports"
-                label="Completed Reports"
-                icon={<FaCheckCircle />}
-                isActive={isActive("/dashboard/doctor/completed-reports")}
-              />
+              
               
               <SidebarLink
                 to="/dashboard/doctor/notifications"

@@ -17,6 +17,17 @@ export const createPatient = createAsyncThunk(
       toast.success('Patient added successfully!');
       return response.data;
     } catch (err) {
+      // Handle duplicate patient error with more information
+      if (err.response?.status === 400 && err.response?.data?.existingPatient) {
+        const existingPatient = err.response.data.existingPatient;
+        const errorMsg = `Patient already exists!\nName: ${existingPatient.name}\nUH ID: ${existingPatient.uhId}\nPhone: ${existingPatient.phone}${existingPatient.email ? `\nEmail: ${existingPatient.email}` : ''}`;
+        toast.error(errorMsg, {
+          autoClose: 6000,
+          style: { whiteSpace: 'pre-line' }
+        });
+        return rejectWithValue(errorMsg);
+      }
+      
       const errorMsg = err.response?.data?.message || 'Failed to add patient';
       toast.error(errorMsg);
       return rejectWithValue(errorMsg);

@@ -4,6 +4,7 @@ import {
   getCenterAppointments, 
   updateAppointmentStatus 
 } from '../../services/api';
+import { SERVER_CONFIG } from '../../config/environment';
 
 const AppointmentManagement = () => {
   const [appointments, setAppointments] = useState([]);
@@ -262,7 +263,43 @@ const AppointmentManagement = () => {
                   {selectedAppointment.symptoms && (
                     <p><strong>Symptoms:</strong> {selectedAppointment.symptoms}</p>
                   )}
+                  {selectedAppointment.previousHistory && (
+                    <p><strong>Medical History:</strong> {selectedAppointment.previousHistory}</p>
+                  )}
                 </div>
+
+                {/* Uploaded Medical History Documents */}
+                {selectedAppointment.medicalHistoryDocs && selectedAppointment.medicalHistoryDocs.length > 0 && (
+                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h5 className="text-sm font-semibold text-blue-800 mb-2 flex items-center">
+                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Uploaded Documents ({selectedAppointment.medicalHistoryDocs.length})
+                    </h5>
+                    <div className="space-y-2">
+                      {selectedAppointment.medicalHistoryDocs.map((doc, index) => (
+                        <div key={index} className="flex items-center justify-between bg-white p-2 rounded border border-blue-100">
+                          <div className="flex items-center space-x-2 flex-1 min-w-0">
+                            <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span className="text-xs text-gray-700 truncate">{doc.originalName}</span>
+                            <span className="text-xs text-gray-500">({(doc.size / 1024).toFixed(2)} KB)</span>
+                          </div>
+                          <a
+                            href={`${SERVER_CONFIG.BACKEND_URL}/${doc.path}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-2 text-blue-600 hover:text-blue-800 text-xs font-semibold whitespace-nowrap"
+                          >
+                            View
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mb-4">

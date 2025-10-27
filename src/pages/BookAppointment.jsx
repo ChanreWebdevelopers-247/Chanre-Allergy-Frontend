@@ -32,6 +32,7 @@ const BookAppointment = () => {
     contactMethod: 'phone',
     preferredContactTime: '',
     notes: '',
+    medicalHistoryDocs: [],
     patientLocation: {
       latitude: null,
       longitude: null,
@@ -112,6 +113,17 @@ const BookAppointment = () => {
     }));
   };
 
+  const handlePhoneChange = (e) => {
+    // Only allow digits
+    const value = e.target.value.replace(/\D/g, '');
+    // Limit to 10 digits
+    const limitedValue = value.slice(0, 10);
+    setFormData(prev => ({
+      ...prev,
+      patientPhone: limitedValue
+    }));
+  };
+
   const handleCenterSelect = (center) => {
     setSelectedCenter(center);
     setStep(2);
@@ -151,13 +163,36 @@ const BookAppointment = () => {
     }
   };
 
+  const handleFileChange = (e) => {
+    const files = Array.from(e.target.files);
+    setFormData(prev => ({
+      ...prev,
+      medicalHistoryDocs: [...prev.medicalHistoryDocs, ...files]
+    }));
+  };
+
+  const removeFile = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      medicalHistoryDocs: prev.medicalHistoryDocs.filter((_, i) => i !== index)
+    }));
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
     // Validation
     const requiredFields = [
-      'patientName', 'patientEmail', 'patientPhone', 'patientAge', 
-      'patientGender', 'patientAddress', 'preferredDate', 'preferredTime', 'reasonForVisit'
+      'patientName', 'patientPhone', 'patientAge', 
+      'patientGender', 'patientAddress', 'preferredDate', 'preferredTime'
     ];
     
     for (const field of requiredFields) {
@@ -165,6 +200,13 @@ const BookAppointment = () => {
         toast.error(`${field.replace(/([A-Z])/g, ' $1').toLowerCase()} is required`);
         return;
       }
+    }
+
+    // Validate phone number - must be exactly 10 digits
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(formData.patientPhone)) {
+      toast.error('Phone number must be exactly 10 digits');
+      return;
     }
 
     if (!selectedCenter) {
@@ -193,7 +235,19 @@ const BookAppointment = () => {
         }));
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to book appointment');
+      const errorMessage = error.response?.data?.message || 'Failed to book appointment';
+      
+      // Check if there's an existing appointment
+      if (error.response?.data?.existingAppointment) {
+        const existing = error.response.data.existingAppointment;
+        toast.error(
+          errorMessage + '\n' + 
+          `Your current appointment: ${existing.confirmationCode} at ${existing.centerName}`
+        );
+      } else {
+        toast.error(errorMessage);
+      }
+      
       console.error('Error booking appointment:', error);
     } finally {
       setLoading(false);
@@ -406,14 +460,13 @@ const BookAppointment = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1">Email Address *</label>
+                      <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1">Email Address <span className="text-gray-500 text-xs font-normal">(Optional)</span></label>
                       <input
                         type="email"
                         name="patientEmail"
                         value={formData.patientEmail}
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2490eb] focus:border-[#2490eb] bg-white text-sm sm:text-base"
-                        required
                       />
                     </div>
                     <div>
@@ -422,10 +475,15 @@ const BookAppointment = () => {
                         type="tel"
                         name="patientPhone"
                         value={formData.patientPhone}
-                        onChange={handleInputChange}
+                        onChange={handlePhoneChange}
+                        placeholder="Enter 10 digit phone number"
+                        maxLength={10}
+                        pattern="[0-9]{10}"
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2490eb] focus:border-[#2490eb] bg-white text-sm sm:text-base"
                         required
                       />
+                      <p className="text-xs text-gray-500 mt-1">Enter 10 digits only (numbers)</p>
+                      <p className="text-xs text-amber-600 mt-1">⚠️ You can only book one appointment at a time with this phone number</p>
                     </div>
                     <div>
                       <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1">Age *</label>
@@ -574,15 +632,14 @@ const BookAppointment = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Reason for Visit *</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Reason for Visit <span className="text-gray-500 text-xs font-normal">(Optional)</span></label>
                     <textarea
                       name="reasonForVisit"
                       value={formData.reasonForVisit}
                       onChange={handleInputChange}
                       rows="3"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2490eb] focus:border-transparent"
-                      placeholder="Describe your main concern or reason for the appointment"
-                      required
+                      placeholder="Describe your main concern or reason for the appointment (optional)"
                     />
                   </div>
                   <div>
@@ -620,6 +677,74 @@ const BookAppointment = () => {
                       placeholder="Any additional information you'd like to share"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* File Upload Section */}
+              <div className="mt-6">
+                <div className="border-t border-gray-200 pt-6">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Upload Medical History Documents <span className="text-gray-500 text-xs font-normal">(Optional)</span>
+                  </label>
+                  <p className="text-xs text-gray-600 mb-3">
+                    Upload previous medical reports, prescriptions, test results, or any relevant documents (PDF, Word, Images). Max 5 files, 10MB each.
+                  </p>
+                  
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-[#2490eb] transition-colors">
+                    <div className="flex flex-col items-center justify-center">
+                      <input
+                        type="file"
+                        multiple
+                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt"
+                        onChange={handleFileChange}
+                        className="hidden"
+                        id="fileUpload"
+                      />
+                      <label
+                        htmlFor="fileUpload"
+                        className="cursor-pointer flex flex-col items-center justify-center w-full"
+                      >
+                        <svg className="w-10 h-10 text-[#2490eb] mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span className="text-sm text-gray-600 font-medium">
+                          Click to upload files or drag and drop
+                        </span>
+                        <span className="text-xs text-gray-500 mt-1">
+                          PDF, DOC, DOCX, JPG, PNG, TXT (Max 10MB each)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Display uploaded files */}
+                  {formData.medicalHistoryDocs.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-sm font-semibold text-gray-700">Uploaded Files:</p>
+                      {formData.medicalHistoryDocs.map((file, index) => (
+                        <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-200">
+                          <div className="flex items-center space-x-3">
+                            <svg className="w-5 h-5 text-[#2490eb]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <div>
+                              <p className="text-sm font-medium text-gray-800">{file.name}</p>
+                              <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeFile(index)}
+                            className="text-red-600 hover:text-red-800 transition-colors"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -756,6 +881,7 @@ const BookAppointment = () => {
                     contactMethod: 'phone',
                     preferredContactTime: '',
                     notes: '',
+                    medicalHistoryDocs: [],
                     patientLocation: {
                       latitude: null,
                       longitude: null,

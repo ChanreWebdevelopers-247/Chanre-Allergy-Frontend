@@ -167,7 +167,35 @@ export const getNearbyCenters = async (latitude, longitude, radius = 50) => {
 
 export const bookAppointment = async (appointmentData) => {
   try {
-    const response = await API.post('/patient-appointments/book', appointmentData);
+    // Create FormData to handle file uploads
+    const formData = new FormData();
+    
+    // Add all text fields
+    Object.keys(appointmentData).forEach(key => {
+      if (key === 'medicalHistoryDocs' && Array.isArray(appointmentData[key])) {
+        // Handle file uploads - append files to FormData
+        appointmentData[key].forEach((file, index) => {
+          if (file instanceof File) {
+            formData.append('medicalHistoryDocs', file);
+          }
+        });
+      } else if (key !== 'medicalHistoryDocs') {
+        // Add non-file fields
+        if (appointmentData[key] !== null && appointmentData[key] !== undefined) {
+          if (typeof appointmentData[key] === 'object') {
+            formData.append(key, JSON.stringify(appointmentData[key]));
+          } else {
+            formData.append(key, appointmentData[key]);
+          }
+        }
+      }
+    });
+
+    const response = await API.post('/patient-appointments/book', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      }
+    });
     return response.data;
   } catch (error) {
     console.error('Error booking appointment:', error);

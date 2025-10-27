@@ -205,6 +205,11 @@ const AddPatient = () => {
       dispatch(resetPatientState());
       navigate("/dashboard/centeradmin/patients/patientlist");
     }
+    
+    // Display error if it exists and handle duplicate patient case
+    if (error) {
+      console.log('Patient creation error:', error);
+    }
   }, [success, error, dispatch, navigate]);
 
   return (

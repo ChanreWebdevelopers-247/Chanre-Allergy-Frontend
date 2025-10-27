@@ -5,6 +5,7 @@ import {
   updateAppointmentStatus,
   updateAppointmentDetails 
 } from '../../services/api';
+import { SERVER_CONFIG } from '../../config/environment';
 
 const AppointmentApprovals = () => {
   const [allAppointments, setAllAppointments] = useState([]);
@@ -131,21 +132,36 @@ const AppointmentApprovals = () => {
     }
   };
 
-  const handleApprove = async (appointmentId) => {
+  const handleApprove = async (appointmentId, appointment) => {
+    // Open edit modal with preferred date/time for user to confirm or edit
+    openEditModal(appointment);
+  };
+
+  const handleDirectApprove = async () => {
+    if (!editFormData.confirmedDate || !editFormData.confirmedTime) {
+      toast.error('Please select both date and time');
+      return;
+    }
+
     try {
-      setUpdateLoading(true);
-      const response = await updateAppointmentStatus(appointmentId, 'confirmed');
+      setEditLoading(true);
+      const response = await updateAppointmentDetails(selectedAppointment._id, {
+        confirmedDate: new Date(editFormData.confirmedDate).toISOString(),
+        confirmedTime: editFormData.confirmedTime,
+        notes: editFormData.notes,
+        status: 'confirmed'
+      });
+      
       if (response.success) {
         toast.success('Appointment approved successfully!');
-        setShowModal(false);
-        setSelectedAppointment(null);
+        closeEditModal();
         fetchAppointments();
       }
     } catch (error) {
       toast.error('Failed to approve appointment');
       console.error('Error approving appointment:', error);
     } finally {
-      setUpdateLoading(false);
+      setEditLoading(false);
     }
   };
 
@@ -180,9 +196,17 @@ const AppointmentApprovals = () => {
   const openEditModal = (appointment) => {
     console.log('Opening edit modal for appointment:', appointment);
     setSelectedAppointment(appointment);
+    // If no confirmed date exists, use preferred date as default
+    let defaultDate = '';
+    if (appointment.confirmedDate) {
+      defaultDate = new Date(appointment.confirmedDate).toISOString().split('T')[0];
+    } else if (appointment.preferredDate) {
+      defaultDate = new Date(appointment.preferredDate).toISOString().split('T')[0];
+    }
+    
     setEditFormData({
-      confirmedDate: appointment.confirmedDate ? new Date(appointment.confirmedDate).toISOString().split('T')[0] : '',
-      confirmedTime: appointment.confirmedTime || appointment.preferredTime,
+      confirmedDate: defaultDate,
+      confirmedTime: appointment.confirmedTime || appointment.preferredTime || '',
       notes: appointment.notes || ''
     });
     setShowEditModal(true);
@@ -234,6 +258,9 @@ const AppointmentApprovals = () => {
       setEditLoading(false);
     }
   };
+
+  // Determine if this is an approval or edit action
+  const isApprovalAction = selectedAppointment && selectedAppointment.status === 'pending';
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -547,7 +574,7 @@ const AppointmentApprovals = () => {
                           {appointment.status === 'pending' && (
                             <>
                               <button
-                                onClick={() => handleApprove(appointment._id)}
+                                onClick={() => handleApprove(appointment._id, appointment)}
                                 disabled={updateLoading}
                                 className="flex-1 sm:flex-none inline-flex items-center justify-center px-2 sm:px-3 py-1.5 sm:py-2 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                                 title="Approve Appointment"
@@ -751,7 +778,7 @@ const AppointmentApprovals = () => {
                             {appointment.status === 'pending' && (
                               <>
                                 <button
-                                  onClick={() => handleApprove(appointment._id)}
+                                  onClick={() => handleApprove(appointment._id, appointment)}
                                   disabled={updateLoading}
                                   className="inline-flex items-center px-2 lg:px-3 py-1.5 lg:py-2 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow-md"
                                   title="Approve Appointment"
@@ -1216,6 +1243,46 @@ const AppointmentApprovals = () => {
                             <p className="text-slate-600 bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-200 text-xs sm:text-sm leading-relaxed">{selectedAppointment.notes}</p>
                           </div>
                         )}
+
+                        {/* Uploaded Medical History Documents */}
+                        {selectedAppointment.medicalHistoryDocs && selectedAppointment.medicalHistoryDocs.length > 0 && (
+                          <div className="bg-white p-3 sm:p-4 rounded-lg border border-slate-200 shadow-sm">
+                            <h5 className="font-semibold text-slate-700 mb-2 sm:mb-3 flex items-center text-sm sm:text-base">
+                              <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-2 text-[#2490eb]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              Uploaded Medical Documents ({selectedAppointment.medicalHistoryDocs.length})
+                            </h5>
+                            <div className="space-y-2">
+                              {selectedAppointment.medicalHistoryDocs.map((doc, index) => (
+                                <div key={index} className="flex items-center justify-between bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-200 hover:bg-blue-50 transition-colors">
+                                  <div className="flex items-center space-x-2 flex-1 min-w-0">
+                                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-[#2490eb] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                    </svg>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs sm:text-sm font-medium text-slate-800 truncate">{doc.originalName}</p>
+                                      <p className="text-xs text-slate-500">
+                                        {(doc.size / 1024).toFixed(2)} KB
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <a
+                                    href={`${SERVER_CONFIG.BACKEND_URL}/${doc.path}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center px-2 sm:px-3 py-1 sm:py-2 bg-[#2490eb] text-white text-xs font-semibold rounded-lg hover:bg-[#14457b] transition-all duration-200 whitespace-nowrap ml-2"
+                                  >
+                                    <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    View
+                                  </a>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1226,7 +1293,7 @@ const AppointmentApprovals = () => {
                   {selectedAppointment.status === 'pending' && (
                     <>
                       <button
-                        onClick={() => handleApprove(selectedAppointment._id)}
+                        onClick={() => handleApprove(selectedAppointment._id, selectedAppointment)}
                         disabled={updateLoading}
                         className="w-full sm:w-auto inline-flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-200 shadow-lg hover:shadow-xl text-sm sm:text-base"
                       >
@@ -1268,9 +1335,16 @@ const AppointmentApprovals = () => {
             <div className="relative top-4 sm:top-10 mx-auto p-3 sm:p-5 border w-11/12 max-w-2xl shadow-2xl rounded-xl bg-white border-slate-200">
               <div className="mt-3">
                 <div className="flex justify-between items-start mb-4 sm:mb-6">
-                  <h3 className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-800">
-                    Edit Appointment - {selectedAppointment.patientName}
-                  </h3>
+                  <div>
+                    <h3 className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-800">
+                      {isApprovalAction ? 'Approve Appointment' : 'Edit Appointment'} - {selectedAppointment.patientName}
+                    </h3>
+                    {isApprovalAction && (
+                      <p className="text-xs sm:text-sm text-slate-600 mt-1">
+                        Review and confirm the appointment schedule
+                      </p>
+                    )}
+                  </div>
                   <button
                     onClick={closeEditModal}
                     className="text-slate-400 hover:text-slate-600 transition-colors p-2 rounded-lg hover:bg-slate-100"
@@ -1305,7 +1379,7 @@ const AppointmentApprovals = () => {
 
                   {/* Edit Form */}
                   <div className="bg-gradient-to-br from-slate-50 to-blue-50 p-3 sm:p-4 lg:p-6 rounded-xl border border-slate-200">
-                    <h4 className="font-bold text-slate-800 mb-3 sm:mb-4 text-base sm:text-lg">Schedule Final Appointment</h4>
+                    <h4 className="font-bold text-slate-800 mb-3 sm:mb-4 text-base sm:text-lg">{isApprovalAction ? 'Confirm Appointment Schedule' : 'Schedule Final Appointment'}</h4>
                     <div className="space-y-3 sm:space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         <div>
@@ -1384,21 +1458,21 @@ const AppointmentApprovals = () => {
                     Cancel
                   </button>
                   <button
-                    onClick={handleUpdateAppointment}
+                    onClick={isApprovalAction ? handleDirectApprove : handleUpdateAppointment}
                     disabled={editLoading}
-                    className="w-full sm:w-auto inline-flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 bg-[#2490eb] text-white rounded-xl hover:bg-[#14457b] disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-200 shadow-lg hover:shadow-xl text-sm sm:text-base"
+                    className={`w-full sm:w-auto inline-flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 ${isApprovalAction ? 'bg-green-600 hover:bg-green-700' : 'bg-[#2490eb] hover:bg-[#14457b]'} text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-200 shadow-lg hover:shadow-xl text-sm sm:text-base`}
                   >
                     {editLoading ? (
                       <>
                         <div className="inline-block animate-spin rounded-full h-3 h-4 w-3 w-4 border-b-2 border-white mr-2"></div>
-                        Updating...
+                        {isApprovalAction ? 'Approving...' : 'Updating...'}
                       </>
                     ) : (
                       <>
                         <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
-                        Confirm Appointment
+                        {isApprovalAction ? 'Approve Appointment' : 'Confirm Appointment'}
                       </>
                     )}
                   </button>
