@@ -21,6 +21,7 @@ import {
   FaMoneyBillWave,
   FaCalculator,
   FaCalendarCheck,
+  FaCog,
 } from 'react-icons/fa';
 
 export default function Sidebar(props) {
@@ -255,6 +256,12 @@ export default function Sidebar(props) {
                 label="Center Profile"
                 icon={<FaHospitalAlt />}
                 isActive={isActive("/dashboard/centeradmin/center-profile")}
+              />
+              <SidebarLink
+                to="/dashboard/centeradmin/settings"
+                label="Settings"
+                icon={<FaCog />}
+                isActive={isActive("/dashboard/centeradmin/settings")}
               />
               <SidebarLink
                 to="/dashboard/centeradmin/appointment-approvals"

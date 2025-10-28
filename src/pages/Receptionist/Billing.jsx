@@ -95,6 +95,24 @@ function ReceptionistBilling() {
   const [discounts, setDiscounts] = useState(0);
   const [notes, setNotes] = useState('');
   
+  // Discount management
+  const [discountType, setDiscountType] = useState('percentage'); // 'percentage' or 'amount'
+  const [discountPercentage, setDiscountPercentage] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [discountReason, setDiscountReason] = useState('');
+  
+  // Center discount settings
+  const [centerDiscountSettings, setCenterDiscountSettings] = useState({
+    staff: 10,
+    senior: 20,
+    student: 15,
+    employee: 10,
+    insurance: 0,
+    referral: 5,
+    promotion: 10,
+    charity: 100
+  });
+  
   // ✅ NEW: Lab test search state
   const [testSearchTerm, setTestSearchTerm] = useState('');
   const [showTestDropdown, setShowTestDropdown] = useState(false);
@@ -136,6 +154,25 @@ function ReceptionistBilling() {
       dispatch(fetchReceptionistBillingRequests());
     }
   }, [dispatch, user, token]);
+
+  // Fetch center discount settings
+  useEffect(() => {
+    const fetchCenterDiscountSettings = async () => {
+      if (!user?.centerId) return;
+      
+      try {
+        const centerId = typeof user.centerId === 'object' ? user.centerId._id : user.centerId;
+        const response = await API_CONFIG.get(`/centers/${centerId}/fees`);
+        if (response.data?.discountSettings) {
+          setCenterDiscountSettings(response.data.discountSettings);
+        }
+      } catch (error) {
+        console.error('Error fetching center discount settings:', error);
+      }
+    };
+
+    fetchCenterDiscountSettings();
+  }, [user]);
 
   // Enhanced function to get partial payment data from localStorage
   const getPartialPaymentData = (requestId) => {
@@ -346,7 +383,19 @@ function ReceptionistBilling() {
   };
 
   const subTotal = items.reduce((s, it) => s + (Number(it.quantity || 0) * Number(it.unitPrice || 0)), 0);
-  const grandTotal = Math.max(0, subTotal + Number(taxes || 0) - Number(discounts || 0));
+  
+  // Calculate discount based on type
+  let calculatedDiscount = 0;
+  if (discountType === 'percentage') {
+    calculatedDiscount = subTotal * (discountPercentage / 100);
+  } else if (discountType === 'amount') {
+    calculatedDiscount = discountAmount || 0;
+  } else {
+    // Fallback to old discounts value
+    calculatedDiscount = Number(discounts || 0);
+  }
+  
+  const grandTotal = Math.max(0, subTotal + Number(taxes || 0) - calculatedDiscount);
 
   // Calculate billing workflow statistics (including completed and Report_Sent)
   const workflowStats = useMemo(() => {
@@ -380,6 +429,11 @@ function ReceptionistBilling() {
       setTaxes(req.billing.taxes || 0);
       setDiscounts(req.billing.discounts || 0);
       setNotes(req.billing.notes || '');
+      // Reset new discount fields
+      setDiscountType('percentage');
+      setDiscountPercentage(0);
+      setDiscountAmount(0);
+      setDiscountReason('');
     } else if (req.selectedTests && Array.isArray(req.selectedTests) && req.selectedTests.length > 0) {
       // ✅ NEW: If selectedTests exist, automatically populate items
       setItems(req.selectedTests.map(test => ({
@@ -391,6 +445,11 @@ function ReceptionistBilling() {
       setTaxes(0);
       setDiscounts(0);
       setNotes('');
+      // Reset discount fields
+      setDiscountType('percentage');
+      setDiscountPercentage(0);
+      setDiscountAmount(0);
+      setDiscountReason('');
       toast.success(`Automatically loaded ${req.selectedTests.length} test(s) from request with codes and prices`);
     } else {
       // Fallback to old method with testType
@@ -430,6 +489,11 @@ function ReceptionistBilling() {
       setTaxes(0);
       setDiscounts(0);
       setNotes('');
+      // Reset discount fields
+      setDiscountType('percentage');
+      setDiscountPercentage(0);
+      setDiscountAmount(0);
+      setDiscountReason('');
     }
   };
 
@@ -438,6 +502,11 @@ function ReceptionistBilling() {
     setTestSearchTerm('');
     setShowTestDropdown(false);
     setActiveItemIndex(null);
+    // Reset discount fields
+    setDiscountType('percentage');
+    setDiscountPercentage(0);
+    setDiscountAmount(0);
+    setDiscountReason('');
   };
 
   // ✅ NEW: Search lab tests
@@ -631,10 +700,24 @@ function ReceptionistBilling() {
       unitPrice: Number(item.unitPrice)
     }));
     
+    // Calculate discount value
+    let calculatedDiscountValue = 0;
+    if (discountType === 'percentage') {
+      calculatedDiscountValue = subTotal * (discountPercentage / 100);
+    } else if (discountType === 'amount') {
+      calculatedDiscountValue = discountAmount || 0;
+    } else {
+      calculatedDiscountValue = Number(discounts || 0);
+    }
+    
     const payload = { 
       items: cleanedItems, 
       taxes: Number(taxes || 0), 
-      discounts: Number(discounts || 0), 
+      discounts: calculatedDiscountValue, 
+      discountType: discountType,
+      discountPercentage: discountType === 'percentage' ? discountPercentage : undefined,
+      discountAmount: discountType === 'amount' ? discountAmount : undefined,
+      discountReason: discountReason,
       currency: 'INR', 
       notes 
     };
@@ -1649,8 +1732,8 @@ function ReceptionistBilling() {
 
           {/* Enhanced Bill Generation Modal */}
           {selected && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-              <div className="bg-white w-full max-w-4xl rounded-xl shadow-2xl border border-slate-200">
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm overflow-y-auto">
+              <div className="bg-white w-full max-w-6xl max-h-[95vh] rounded-xl shadow-2xl border border-slate-200 flex flex-col my-4">
                 <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
                   <div>
                     <div className="text-sm text-slate-500 font-medium">Generate Invoice</div>
@@ -1666,7 +1749,7 @@ function ReceptionistBilling() {
                     <X className="h-6 w-6 text-slate-600" />
                   </button>
                 </div>
-                <div className="p-6 space-y-6">
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[800px]">
                       <thead>
@@ -1834,16 +1917,159 @@ function ReceptionistBilling() {
                         step="0.01" 
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">Discounts</label>
-                      <input 
-                        type="number" 
-                        className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200" 
-                        value={discounts} 
-                        onChange={(e) => setDiscounts(Number(e.target.value))} 
-                        min={0} 
-                        step="0.01" 
-                      />
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Discount Type
+                      </label>
+                      <div className="flex gap-4 mb-3">
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name="discountType"
+                            value="percentage"
+                            checked={discountType === 'percentage'}
+                            onChange={(e) => {
+                              setDiscountType('percentage');
+                              setDiscountPercentage(0);
+                              setDiscountReason('');
+                            }}
+                            className="mr-2"
+                          />
+                          <span className="text-sm text-slate-700">By Percentage (%)</span>
+                        </label>
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name="discountType"
+                            value="amount"
+                            checked={discountType === 'amount'}
+                            onChange={(e) => {
+                              setDiscountType('amount');
+                              setDiscountAmount(0);
+                              setDiscountReason('');
+                            }}
+                            className="mr-2"
+                          />
+                          <span className="text-sm text-slate-700">By Amount (₹)</span>
+                        </label>
+                      </div>
+
+                      {/* Discount by Percentage */}
+                      {discountType === 'percentage' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                              Select Discount Reason
+                            </label>
+                            <select
+                              value={discountReason}
+                              onChange={(e) => {
+                                const selectedReason = e.target.value;
+                                if (selectedReason) {
+                                  const discountPercentage = selectedReason === 'other' ? 0 : centerDiscountSettings[selectedReason] || 0;
+                                  setDiscountReason(selectedReason);
+                                  setDiscountPercentage(discountPercentage);
+                                } else {
+                                  setDiscountReason('');
+                                  setDiscountPercentage(0);
+                                }
+                              }}
+                              className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            >
+                              <option value="">Select discount reason or enter custom %...</option>
+                              <option value="staff">Staff Discount ({centerDiscountSettings.staff}%)</option>
+                              <option value="senior">Senior Citizen Discount ({centerDiscountSettings.senior}%)</option>
+                              <option value="student">Student Discount ({centerDiscountSettings.student}%)</option>
+                              <option value="employee">Employee Discount ({centerDiscountSettings.employee}%)</option>
+                              <option value="insurance">Insurance Coverage ({centerDiscountSettings.insurance}%)</option>
+                              <option value="referral">Referral Discount ({centerDiscountSettings.referral}%)</option>
+                              <option value="promotion">Promotional Discount ({centerDiscountSettings.promotion}%)</option>
+                              <option value="charity">Charity Case ({centerDiscountSettings.charity}%)</option>
+                              <option value="other">Custom Discount (Enter manually below)</option>
+                            </select>
+                            {discountReason && discountReason !== 'other' && (
+                              <p className="text-xs text-green-600 mt-1">
+                                ✅ Discount percentage automatically set to {discountPercentage}%
+                              </p>
+                            )}
+                            {discountReason === 'other' && (
+                              <p className="text-xs text-orange-600 mt-1">
+                                📝 Enter custom discount percentage below
+                              </p>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                              Discount Percentage (%)
+                            </label>
+                            <input
+                              type="number"
+                              value={discountPercentage}
+                              onChange={(e) => setDiscountPercentage(Number(e.target.value))}
+                              className={`w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
+                                discountReason && discountReason !== 'other' ? 'bg-blue-50 border-blue-300' : ''
+                              }`}
+                              placeholder={discountReason ? 'Auto-filled from reason' : '0'}
+                              min="0"
+                              max="100"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">
+                              {discountReason 
+                                ? `💡 Auto-filled from selected reason - you can edit this value if needed`
+                                : '💡 Select a reason above to auto-fill, or enter a custom percentage'
+                              }
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Discount by Amount */}
+                      {discountType === 'amount' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                              Discount Amount (₹)
+                            </label>
+                            <input
+                              type="number"
+                              value={discountAmount}
+                              onChange={(e) => setDiscountAmount(Number(e.target.value))}
+                              className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                              placeholder="0"
+                              min="0"
+                              step="0.01"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                              Discount Reason
+                            </label>
+                            <select
+                              value={discountReason}
+                              onChange={(e) => setDiscountReason(e.target.value)}
+                              className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            >
+                              <option value="">Select reason...</option>
+                              <option value="staff">Staff Discount</option>
+                              <option value="senior">Senior Citizen Discount</option>
+                              <option value="student">Student Discount</option>
+                              <option value="employee">Employee Discount</option>
+                              <option value="insurance">Insurance Coverage</option>
+                              <option value="referral">Referral Discount</option>
+                              <option value="promotion">Promotional Discount</option>
+                              <option value="charity">Charity Case</option>
+                              <option value="other">Other (Please specify in notes)</option>
+                            </select>
+                            {discountReason === 'other' && (
+                              <p className="text-xs text-orange-600 mt-1">
+                                📝 Please specify the reason in the notes field below
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-end">
                       <div className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg px-4 py-3">
@@ -1867,50 +2093,40 @@ function ReceptionistBilling() {
                      </p>
                   </div>
                 </div>
-                <div className="p-6 border-t border-slate-200 flex items-center justify-between bg-slate-50">
-                  <div className="text-sm text-slate-600">
-                    <p className="flex items-center mb-1">
-                      <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
-                      Bill will be generated with a unique invoice number
-                    </p>
-                    <p className="flex items-center">
-                      <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
-                      Test request status will change to "Billing Generated"
-                    </p>
+                <div className="p-6 border-t border-slate-200 flex items-center justify-between flex-shrink-0 bg-slate-50 sticky bottom-0">
+                  <button 
+                    onClick={closeBillModal} 
+                    className="px-6 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors duration-200 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={handleGenerate} 
+                      disabled={loading} 
+                      className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200 font-medium shadow-sm"
+                    >
+                      {loading ? 'Generating...' : 'Save Bill'}
+                    </button>
+                    {selected?.billing?.invoiceNumber && (
+                      <>
+                        <button 
+                          onClick={() => handleViewInvoice(selected._id)} 
+                          className="px-6 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors duration-200 font-medium shadow-sm"
+                        >
+                          <FileText className="h-4 w-4 mr-2 inline" />
+                          View Invoice
+                        </button>
+                        <button 
+                          onClick={() => handleDownloadInvoice(selected._id)} 
+                          className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200 font-medium shadow-sm"
+                        >
+                          <Download className="h-4 w-4 mr-2 inline" />
+                          Download Invoice
+                        </button>
+                      </>
+                    )}
                   </div>
-                                     <div className="flex items-center gap-3">
-                     <button 
-                       onClick={closeBillModal} 
-                       className="px-4 py-2 text-sm rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors duration-200 font-medium"
-                     >
-                       Cancel
-                     </button>
-                     <button 
-                       onClick={handleGenerate} 
-                       disabled={loading} 
-                       className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200 font-medium shadow-sm"
-                     >
-                       {loading ? 'Generating...' : 'Save Bill'}
-                     </button>
-                     {selected?.billing?.invoiceNumber && (
-                       <>
-                         <button 
-                           onClick={() => handleViewInvoice(selected._id)} 
-                           className="px-6 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors duration-200 font-medium shadow-sm"
-                         >
-                           <FileText className="h-4 w-4 mr-2 inline" />
-                           View Invoice
-                         </button>
-                         <button 
-                           onClick={() => handleDownloadInvoice(selected._id)} 
-                           className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200 font-medium shadow-sm"
-                         >
-                           <Download className="h-4 w-4 mr-2 inline" />
-                           Download Invoice
-                         </button>
-                       </>
-                     )}
-                   </div>
                 </div>
               </div>
             </div>

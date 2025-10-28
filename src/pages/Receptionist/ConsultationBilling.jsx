@@ -162,6 +162,29 @@ export default function ConsultationBilling() {
     }
   };
 
+  // Fetch center fees and discount settings
+  const fetchCenterFees = async () => {
+    const centerId = getCenterId();
+    if (centerId) {
+      try {
+        const response = await API.get(`/centers/${centerId}/fees`);
+        if (response.data?.fees) {
+          setCenterFees({
+            registrationFee: response.data.fees.registrationFee || 150,
+            consultationFee: response.data.fees.consultationFee || 850,
+            serviceFee: response.data.fees.serviceFee || 150
+          });
+        }
+        if (response.data?.discountSettings) {
+          setCenterDiscountSettings(response.data.discountSettings);
+        }
+      } catch (error) {
+        console.error('Error fetching center fees:', error);
+        // Keep default values if API fails
+      }
+    }
+  };
+
   // Search and filtering states
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredPatients, setFilteredPatients] = useState([]);
@@ -177,6 +200,25 @@ export default function ConsultationBilling() {
   const [showPendingBillsNotification, setShowPendingBillsNotification] = useState(false);
 
   // NEW WORKFLOW STATES
+  // Center fees management
+  const [centerFees, setCenterFees] = useState({
+    registrationFee: 150,
+    consultationFee: 850,
+    serviceFee: 150
+  });
+  
+  // Center discount settings
+  const [centerDiscountSettings, setCenterDiscountSettings] = useState({
+    staff: 10,
+    senior: 20,
+    student: 15,
+    employee: 10,
+    insurance: 0,
+    referral: 5,
+    promotion: 10,
+    charity: 100
+  });
+  
   // Step 1: Create Invoice
   const [showCreateInvoiceModal, setShowCreateInvoiceModal] = useState(false);
   const [invoiceFormData, setInvoiceFormData] = useState({
@@ -185,7 +227,10 @@ export default function ConsultationBilling() {
     serviceCharges: [{ name: '', amount: '', description: '' }],
     notes: '',
     taxPercentage: 0,
+    discountType: 'percentage', // 'percentage' or 'amount'
     discountPercentage: 0,
+    discountAmount: 0,
+    discountReason: '',
     appointmentTime: ''
   });
 
@@ -196,7 +241,6 @@ export default function ConsultationBilling() {
   const [paymentData, setPaymentData] = useState({
     amount: '',
     paymentMethod: 'cash',
-    paymentType: 'full', // full or partial
     notes: '',
     appointmentTime: '',
     consultationType: 'OP' // OP, IP, or followup
@@ -216,7 +260,7 @@ export default function ConsultationBilling() {
   const [refundData, setRefundData] = useState({
     amount: '',
     refundMethod: 'cash',
-    refundType: 'partial', // 'partial' or 'full'
+    refundType: 'withPenalty', // 'withPenalty' or 'full' 
     reason: '',
     notes: '',
     patientBehavior: 'okay' // 'okay' or 'rude' - determines penalty policy
@@ -254,6 +298,7 @@ export default function ConsultationBilling() {
   useEffect(() => {
     dispatch(fetchReceptionistPatients());
     fetchCenterInfo(); // Fetch center information when component mounts
+    fetchCenterFees(); // Fetch center fees when component mounts
   }, [dispatch]);
 
   // Removed auto-selection logic for reassigned patients
@@ -499,14 +544,21 @@ export default function ConsultationBilling() {
     // Set invoice creation time
     setInvoiceCreationTime(new Date());
     
-    // Pre-populate form based on patient status
+    // Pre-populate form based on patient status and center fees
     setInvoiceFormData({
-      registrationFee: isNew ? 150 : 0,
-      consultationFee: 850,
-      serviceCharges: [{ name: '', amount: '', description: '' }],
+      registrationFee: isNew ? centerFees.registrationFee : 0,
+      consultationFee: centerFees.consultationFee,
+      serviceCharges: [{ 
+        name: 'Service Charges', 
+        amount: centerFees.serviceFee.toString(), 
+        description: 'Standard service charges' 
+      }],
       notes: `Invoice for ${patient.name}`,
       taxPercentage: 0,
-      discountPercentage: 0
+      discountType: 'percentage',
+      discountPercentage: 0,
+      discountAmount: 0,
+      discountReason: ''
     });
     
     setShowCreateInvoiceModal(true);
@@ -526,7 +578,10 @@ export default function ConsultationBilling() {
         serviceCharges: invoiceFormData.serviceCharges.filter(s => s.name && s.amount),
         notes: invoiceFormData.notes,
         taxPercentage: invoiceFormData.taxPercentage,
-        discountPercentage: invoiceFormData.discountPercentage
+        discountType: invoiceFormData.discountType,
+        discountPercentage: invoiceFormData.discountPercentage,
+        discountAmount: invoiceFormData.discountAmount,
+        discountReason: invoiceFormData.discountReason
       };
 
       console.log('Creating invoice:', invoiceData);
@@ -814,7 +869,7 @@ export default function ConsultationBilling() {
         invoiceId: invoiceNumber,
         amount: parseFloat(paymentData.amount),
         paymentMethod: paymentData.paymentMethod,
-        paymentType: paymentData.paymentType,
+        paymentType: 'full',
         notes: paymentData.notes,
         appointmentTime: paymentData.appointmentTime,
         consultationType: paymentData.consultationType
@@ -836,7 +891,6 @@ export default function ConsultationBilling() {
         setPaymentData({
           amount: '',
           paymentMethod: 'cash',
-          paymentType: 'partial',
           notes: '',
           appointmentTime: '',
           consultationType: 'OP'
@@ -974,20 +1028,32 @@ export default function ConsultationBilling() {
       return;
     }
 
-    if (!refundData.amount || parseFloat(refundData.amount) <= 0) {
-      toast.error('Please enter a valid refund amount');
+    // Calculate refund amount based on type
+    const availableAmount = selectedPatient.billing.reduce((sum, bill) => 
+      sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0);
+    
+    let calculatedRefundAmount = 0;
+    if (refundData.refundType === 'withPenalty') {
+      calculatedRefundAmount = Math.max(0, availableAmount - penaltyAmount);
+    } else {
+      calculatedRefundAmount = availableAmount;
+    }
+
+    if (calculatedRefundAmount <= 0) {
+      toast.error('No amount available for refund');
       return;
     }
 
     try {
       const refundPayload = {
         patientId: selectedPatient._id,
-        amount: parseFloat(refundData.amount),
+        amount: calculatedRefundAmount,
         refundMethod: refundData.refundMethod,
         refundType: refundData.refundType,
         reason: refundData.reason.trim(),
         notes: refundData.notes,
-        patientBehavior: refundData.patientBehavior // Include patient behavior for penalty policy
+        patientBehavior: refundData.patientBehavior, // Include patient behavior for penalty policy
+        penaltyAmount: refundData.refundType === 'withPenalty' ? penaltyAmount : 0
       };
 
       console.log('Processing refund:', refundPayload);
@@ -995,7 +1061,7 @@ export default function ConsultationBilling() {
       const response = await API.post('/billing/process-refund', refundPayload);
       
       if (response.data.success) {
-        toast.success(`${refundData.refundType === 'full' ? 'Full' : 'Partial'} refund processed successfully!`);
+        toast.success(`${refundData.refundType === 'withPenalty' ? 'Refund with penalty' : 'Full'} refund processed successfully!`);
         setShowRefundModal(false);
         
         // Refresh patient data
@@ -1281,6 +1347,21 @@ export default function ConsultationBilling() {
     const totalAmount = patient.billing.reduce((sum, bill) => sum + (bill.amount || 0), 0);
     const totalPaid = patient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
     
+    // Get discount information from billing records
+    const firstBill = patient.billing[0];
+    const discountType = firstBill?.discountType || 'percentage';
+    const discountPercentage = firstBill?.discountPercentage || 0;
+    const discountAmount = firstBill?.discountAmount || 0;
+    const discountReason = firstBill?.discountReason || '';
+    
+    // Calculate discount based on type
+    let calculatedDiscount = 0;
+    if (discountType === 'percentage') {
+      calculatedDiscount = totalAmount * (discountPercentage / 100);
+    } else if (discountType === 'amount') {
+      calculatedDiscount = discountAmount;
+    }
+    
     // Prepare service charges
     const serviceCharges = patient.billing
       .filter(bill => bill.type === 'service')
@@ -1342,10 +1423,14 @@ export default function ConsultationBilling() {
       serviceCharges,
       totals: {
         subtotal: totalAmount,
-        discount: 0,
+        discount: calculatedDiscount,
         tax: 0,
-        total: totalAmount
+        total: totalAmount - calculatedDiscount
       },
+      discountType,
+      discountPercentage,
+      discountAmount,
+      discountReason,
       invoiceNumber: patient.billing[0]?.invoiceNumber || `INV-${patient._id.slice(-6)}`,
       date: new Date(),
       generatedBy: user?.name || 'Receptionist',
@@ -2283,8 +2368,8 @@ export default function ConsultationBilling() {
 
       {/* Create Invoice Modal */}
       {showCreateInvoiceModal && selectedPatient && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col my-4">
             {/* Header - Fixed */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
               <h3 className="text-lg font-semibold text-slate-800">
@@ -2301,8 +2386,8 @@ export default function ConsultationBilling() {
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-6">
             
-            <form onSubmit={handleInvoiceFormSubmit} className="space-y-4">
-              {/* Registration Fee */}
+            <form id="invoice-form" onSubmit={handleInvoiceFormSubmit} className="space-y-4">
+              {/* Registration Fee - Frozen/Read-Only */}
               {isPatientNew(selectedPatient) && (
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
@@ -2310,15 +2395,19 @@ export default function ConsultationBilling() {
                 </label>
                 <input
                   type="number"
-                    value={invoiceFormData.registrationFee}
-                    onChange={(e) => setInvoiceFormData({...invoiceFormData, registrationFee: parseFloat(e.target.value) || 0})}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-                    placeholder="150"
+                  value={invoiceFormData.registrationFee}
+                  readOnly
+                  disabled
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
+                  placeholder="150"
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  💡 This fee is set by your center administrator and cannot be modified
+                </p>
               </div>
               )}
 
-              {/* Consultation Fee */}
+              {/* Consultation Fee - Frozen/Read-Only */}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
                   Consultation Fee (₹)
@@ -2326,10 +2415,14 @@ export default function ConsultationBilling() {
                 <input
                   type="number"
                   value={invoiceFormData.consultationFee}
-                  onChange={(e) => setInvoiceFormData({...invoiceFormData, consultationFee: parseFloat(e.target.value) || 0})}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                  readOnly
+                  disabled
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
                   placeholder="850"
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  💡 This fee is set by your center administrator and cannot be modified
+                </p>
               </div>
 
               {/* Service Charges */}
@@ -2403,8 +2496,7 @@ export default function ConsultationBilling() {
             </div>
             </div>
 
-              {/* Tax and Discount */}
-              <div className="grid grid-cols-2 gap-4">
+              {/* Tax */}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
                     Tax Percentage (%)
@@ -2419,20 +2511,163 @@ export default function ConsultationBilling() {
                     max="100"
                 />
               </div>
+
+              {/* Discount Type Selection */}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
-                    Discount Percentage (%)
+                  Discount Type
                 </label>
-                  <input
-                    type="number"
-                    value={invoiceFormData.discountPercentage}
-                    onChange={(e) => setInvoiceFormData({...invoiceFormData, discountPercentage: parseFloat(e.target.value) || 0})}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-                    placeholder="0"
-                    min="0"
-                    max="100"
-                  />
+                <div className="flex gap-4 mb-3">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="discountType"
+                      value="percentage"
+                      checked={invoiceFormData.discountType === 'percentage'}
+                      onChange={(e) => setInvoiceFormData({...invoiceFormData, discountType: e.target.value, discountReason: '', discountPercentage: 0})}
+                      className="mr-2"
+                    />
+                    <span className="text-xs text-slate-700">By Percentage (%)</span>
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="discountType"
+                      value="amount"
+                      checked={invoiceFormData.discountType === 'amount'}
+                      onChange={(e) => setInvoiceFormData({...invoiceFormData, discountType: e.target.value, discountReason: '', discountAmount: 0})}
+                      className="mr-2"
+                    />
+                    <span className="text-xs text-slate-700">By Amount (₹)</span>
+                  </label>
                 </div>
+
+                {/* Discount by Percentage */}
+                {invoiceFormData.discountType === 'percentage' && (
+                  <div className="space-y-3">
+                    {/* Discount Reason - Show first for easy selection */}
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-2">
+                        Select Discount Reason
+                      </label>
+                      <select
+                        value={invoiceFormData.discountReason}
+                        onChange={(e) => {
+                          const selectedReason = e.target.value;
+                          if (selectedReason) {
+                            // Auto-apply the discount percentage based on selected reason
+                            const discountPercentage = selectedReason === 'other' ? 0 : centerDiscountSettings[selectedReason] || 0;
+                            setInvoiceFormData({
+                              ...invoiceFormData, 
+                              discountReason: selectedReason,
+                              discountPercentage: discountPercentage
+                            });
+                          } else {
+                            setInvoiceFormData({...invoiceFormData, discountReason: '', discountPercentage: 0});
+                          }
+                        }}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                      >
+                        <option value="">Select discount reason or enter custom %...</option>
+                        <option value="staff">Staff Discount ({centerDiscountSettings.staff}%)</option>
+                        <option value="senior">Senior Citizen Discount ({centerDiscountSettings.senior}%)</option>
+                        <option value="student">Student Discount ({centerDiscountSettings.student}%)</option>
+                        <option value="employee">Employee Discount ({centerDiscountSettings.employee}%)</option>
+                        <option value="insurance">Insurance Coverage ({centerDiscountSettings.insurance}%)</option>
+                        <option value="referral">Referral Discount ({centerDiscountSettings.referral}%)</option>
+                        <option value="promotion">Promotional Discount ({centerDiscountSettings.promotion}%)</option>
+                        <option value="charity">Charity Case ({centerDiscountSettings.charity}%)</option>
+                        <option value="other">Custom Discount (Enter manually below)</option>
+                      </select>
+                      {invoiceFormData.discountReason && invoiceFormData.discountReason !== 'other' && (
+                        <p className="text-xs text-green-600 mt-1">
+                          ✅ Discount percentage automatically set to {invoiceFormData.discountPercentage}%
+                        </p>
+                      )}
+                      {invoiceFormData.discountReason === 'other' && (
+                        <p className="text-xs text-orange-600 mt-1">
+                          📝 Enter custom discount percentage below
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Manual Discount Percentage Input */}
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-2">
+                        Discount Percentage (%)
+                      </label>
+                      <input
+                        type="number"
+                        value={invoiceFormData.discountPercentage}
+                        onChange={(e) => setInvoiceFormData({...invoiceFormData, discountPercentage: parseFloat(e.target.value) || 0})}
+                        className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs ${
+                          invoiceFormData.discountReason && invoiceFormData.discountReason !== 'other' 
+                            ? 'bg-blue-50 border-blue-300' 
+                            : ''
+                        }`}
+                        placeholder={invoiceFormData.discountReason ? 'Auto-filled from reason' : '0'}
+                        min="0"
+                        max="100"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        {invoiceFormData.discountReason 
+                          ? `💡 Auto-filled from selected reason - you can edit this value if needed`
+                          : '💡 Select a reason above to auto-fill, or enter a custom percentage'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Discount by Amount */}
+                {invoiceFormData.discountType === 'amount' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-2">
+                        Discount Amount (₹)
+                      </label>
+                      <input
+                        type="number"
+                        value={invoiceFormData.discountAmount}
+                        onChange={(e) => setInvoiceFormData({...invoiceFormData, discountAmount: parseFloat(e.target.value) || 0})}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                        placeholder="0"
+                        min="0"
+                      />
+                    </div>
+
+                    {/* Discount Reason - Only show if discount amount > 0 */}
+                    {invoiceFormData.discountAmount > 0 && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-2">
+                        Discount Reason *
+                      </label>
+                      <select
+                        value={invoiceFormData.discountReason}
+                        onChange={(e) => setInvoiceFormData({...invoiceFormData, discountReason: e.target.value})}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                        required
+                      >
+                        <option value="">Select reason...</option>
+                        <option value="staff">Staff Discount</option>
+                        <option value="senior">Senior Citizen Discount</option>
+                        <option value="student">Student Discount</option>
+                        <option value="employee">Employee Discount</option>
+                        <option value="insurance">Insurance Coverage</option>
+                        <option value="referral">Referral Discount</option>
+                        <option value="promotion">Promotional Discount</option>
+                        <option value="charity">Charity Case</option>
+                        <option value="other">Other (Please specify in notes)</option>
+                      </select>
+                      {invoiceFormData.discountReason === 'other' && (
+                        <p className="text-xs text-orange-600 mt-1">
+                          📝 Please specify the reason in the notes field below
+                        </p>
+                      )}
+                    </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Notes */}
@@ -2570,7 +2805,18 @@ export default function ConsultationBilling() {
                     const subtotal = invoiceFormData.registrationFee + invoiceFormData.consultationFee + 
                       invoiceFormData.serviceCharges.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
                     const taxAmount = subtotal * (invoiceFormData.taxPercentage / 100);
-                    const discountAmount = subtotal * (invoiceFormData.discountPercentage / 100);
+                    
+                    // Calculate discount based on type
+                    let discountAmount = 0;
+                    let discountLabel = '';
+                    if (invoiceFormData.discountType === 'percentage') {
+                      discountAmount = subtotal * (invoiceFormData.discountPercentage / 100);
+                      discountLabel = `Discount (${invoiceFormData.discountPercentage}%)`;
+                    } else if (invoiceFormData.discountType === 'amount') {
+                      discountAmount = invoiceFormData.discountAmount || 0;
+                      discountLabel = 'Discount Amount';
+                    }
+                    
                     const total = subtotal + taxAmount - discountAmount;
                     
                     return (
@@ -2587,7 +2833,7 @@ export default function ConsultationBilling() {
                         )}
                         {discountAmount > 0 && (
                           <div className="flex justify-between text-green-600">
-                            <span>Discount:</span>
+                            <span>{discountLabel}:</span>
                             <span>-₹{discountAmount.toFixed(2)}</span>
                 </div>
                         )}
@@ -2601,28 +2847,31 @@ export default function ConsultationBilling() {
               </div>
               </div>
 
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateInvoiceModal(false)}
-                  className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-xs font-medium"
-                >
-                  Create Invoice & Preview
-                </button>
-              </div>
             </form>
             </div>
             
             {/* Footer - Fixed */}
-            <div className="border-t border-gray-200 p-4 flex-shrink-0">
-              <div className="text-xs text-gray-500 text-center">
-                📄 Invoice will be generated and previewed after creation
+            <div className="border-t border-gray-200 p-4 flex-shrink-0 bg-slate-50 sticky bottom-0">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-500">
+                  📄 Invoice will be generated and previewed after creation
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateInvoiceModal(false)}
+                    className="px-6 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="invoice-form"
+                    className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium"
+                  >
+                    Create Invoice & Preview
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2660,15 +2909,14 @@ export default function ConsultationBilling() {
                       // Set the generated invoice for payment processing
                       setGeneratedInvoice(mockInvoice);
                       
-                      // Pre-populate payment data
-                      setPaymentData({
-                        amount: outstandingAmount > 0 ? outstandingAmount.toString() : '',
-                        paymentMethod: 'cash',
-                        paymentType: outstandingAmount > 0 ? 'full' : 'partial',
-                        notes: `Payment for patient: ${selectedPatient.name}`,
-                        appointmentTime: '',
-                        consultationType: 'OP'
-                      });
+      // Pre-populate payment data
+      setPaymentData({
+        amount: outstandingAmount > 0 ? outstandingAmount.toString() : '',
+        paymentMethod: 'cash',
+        notes: `Payment for patient: ${selectedPatient.name}`,
+        appointmentTime: '',
+        consultationType: 'OP'
+      });
                       
                       setShowInvoicePreviewModal(false);
                       setShowPaymentModal(true);
@@ -2885,64 +3133,67 @@ export default function ConsultationBilling() {
               {invoiceData && (
                 <div className="bg-white p-6 max-w-4xl mx-auto relative">
                   {/* Content - Watermark removed */}
-                  {/* Header - Compact for A4 */}
-                  <div className="text-center mb-3">
-                    <h1 className="text-sm font-bold text-slate-900 mb-1">
-                      {centerInfo.name}
-                    </h1>
-                    <p className="text-xs text-slate-600 leading-tight">
-                      {centerInfo.address}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      PH: {centerInfo.phone} | Fax: {centerInfo.fax}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      Website: {centerInfo.website}
-                    </p>
-                  </div>
-
-                  {/* Title */}
-                  <div className="text-center mb-3">
-                    <h2 className="text-base font-bold text-slate-900 uppercase">
-                      OUTPATIENT BILL
-                    </h2>
-                  </div>
-
-                  {/* Patient and Bill Details */}
-                  <div className="grid grid-cols-2 gap-x-6 mb-4">
+                  {/* Header */}
+                  <div className="flex justify-between items-start mb-4">
                     <div>
-                      <div className="space-y-1 text-xs">
+                      <h1 className="text-2xl font-bold text-slate-900 mb-1">
+                        {centerInfo.name}
+                      </h1>
+                      <p className="text-sm text-slate-700 mb-0.5">
+                        {centerInfo.address}
+                      </p>
+                      <p className="text-sm text-slate-700 mb-0.5">
+                        <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
+                      </p>
+                      <p className="text-sm text-slate-700">
+                        <span className="font-medium">Website:</span> {centerInfo.website}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-slate-700">
+                        <span className="font-bold">Bill No:</span> {invoiceData.invoiceNumber}
+                      </p>
+                      <p className="text-sm font-medium text-slate-700">
+                        <span className="font-bold">BILL</span> Date: {new Date(invoiceData.date).toLocaleDateString('en-GB')}, {new Date(invoiceData.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Patient and Consultant Information */}
+                  <div className="grid grid-cols-2 gap-6 mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 mb-2">Patient Information</h3>
+                      <div className="space-y-1 text-xs text-slate-700">
                         <div><span className="font-medium">Name:</span> {invoiceData.patient.name}</div>
-                        <div><span className="font-medium">Date:</span> {new Date(invoiceData.date).toLocaleDateString('en-GB')} {new Date(invoiceData.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
-                        <div><span className="font-medium">Bill No:</span> {invoiceData.invoiceNumber}</div>
+                        <div><span className="font-medium">Age:</span> {invoiceData.patient.age} | <span className="font-medium">Gender:</span> {invoiceData.patient.gender}</div>
+                        <div><span className="font-medium">Contact:</span> {invoiceData.patient.phone}</div>
                         <div><span className="font-medium">File No:</span> {invoiceData.patient.fileNo || invoiceData.patient.uhId}</div>
-                        <div><span className="font-medium">Sex:</span> {invoiceData.patient.gender}</div>
-                        <div><span className="font-medium">Age:</span> {invoiceData.patient.age}Y</div>
                       </div>
                     </div>
                     <div>
-                      <div className="space-y-1 text-xs">
-                        <div><span className="font-medium">Consultant Name:</span> {invoiceData.doctor.name}</div>
+                      <h3 className="text-sm font-bold text-slate-900 mb-2">Consultant Information</h3>
+                      <div className="space-y-1 text-xs text-slate-700">
+                        <div><span className="font-medium">Doctor:</span> {invoiceData.doctor.name}</div>
                         <div><span className="font-medium">Department:</span> {invoiceData.doctor.specializations}</div>
-                        <div><span className="font-medium">User Name / Lab ID:</span> {invoiceData.patient.uhId}</div>
-                        <div><span className="font-medium">Password:</span> {invoiceData.password}</div>
-                        <div><span className="font-medium">Ref. Doctor:</span></div>
+                        <div><span className="font-medium">User ID:</span> {invoiceData.patient.uhId}</div>
+                        <div><span className="font-medium">Ref. Doctor:</span> {selectedPatient.referenceDoctor || 'N/A'}</div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Services Table */}
-                  <div className="mb-4 no-page-break">
+                  {/* Current Services Billed Table */}
+                  <div className="mb-4">
+                    <h3 className="text-sm font-bold text-slate-900 mb-3">Current Services Billed</h3>
                     <table className="min-w-full border-collapse border border-slate-300">
                       <thead>
                         <tr className="bg-slate-100">
-                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">S.No</th>
-                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Service Name</th>
-                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">Quantity</th>
-                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Charges</th>
-                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Paid</th>
-                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Balance</th>
-                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">Status</th>
+                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">S.NO</th>
+                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">SERVICE NAME</th>
+                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">QTY</th>
+                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">CHARGES</th>
+                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">PAID</th>
+                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">BAL</th>
+                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">STATUS</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3084,13 +3335,44 @@ export default function ConsultationBilling() {
                     </table>
                   </div>
 
-                  {/* Summary */}
-                  <div className="flex justify-end mb-4">
-                    <div className="w-72">
-                      <div className="space-y-1 text-xs">
+                  {/* Summary and Amount in Words */}
+                  <div className="grid grid-cols-2 gap-6 mb-4">
+                    {/* Left Column - Amount in Words */}
+                    <div>
+                      {(() => {
+                        const totalPaid = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
+                        const totalRefunded = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0) || 0;
+                        const hasCancelledBills = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
+                        
+                        return (
+                          <div className="text-xs">
+                            {hasCancelledBills && (
+                              <div className="mb-2">
+                                <div className="font-medium text-red-600 mb-1">Bill Status: CANCELLED</div>
+                              </div>
+                            )}
+                            {totalPaid > 0 && (
+                              <div className="mb-1">
+                                <span className="font-medium">Amount Paid:</span> (Rs.) {numberToWords(totalPaid)} Only
+                              </div>
+                            )}
+                            {totalRefunded > 0 && (
+                              <div className="mb-1">
+                                <span className="font-medium">Amount Refunded:</span> (Rs.) {numberToWords(totalRefunded)} Only
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    
+                    {/* Right Column - Summary */}
+                    <div className="flex justify-end">
+                      <div className="w-72">
+                        <div className="space-y-1 text-xs">
                         <div className="flex justify-between">
                           <span>Total Amount:</span>
-                          <span>₹{invoiceData.totals.total.toFixed(2)}</span>
+                          <span>₹{invoiceData.totals.subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Discount(-):</span>
@@ -3117,12 +3399,46 @@ export default function ConsultationBilling() {
                                 <span>Amount Paid:</span>
                                 <span className="text-green-600 font-medium">₹{totalPaid.toFixed(2)}</span>
                               </div>
-                              {totalRefunded > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Amount Refunded:</span>
-                                  <span className="text-orange-600 font-medium">₹{totalRefunded.toFixed(2)}</span>
-                                </div>
-                              )}
+                              {totalRefunded > 0 && (() => {
+                                // Check if there's a penalty deducted (for cancelled bills)
+                                const hasCancelled = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
+                                const totalPaid = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
+                                const penalty = totalPaid - totalRefunded;
+                                // Get payment method from first paid bill
+                                const paymentMethod = selectedPatient.billing?.find(bill => bill.paidAmount > 0)?.paymentMethod || 'Cash';
+                                const refundMethod = selectedPatient.billing?.find(bill => bill.refundAmount > 0)?.refunds?.[0]?.method || 'Cash';
+                                
+                                return (
+                                  <>
+                                    <div className="flex justify-between">
+                                      <span>Amount Refunded:</span>
+                                      <span className="text-orange-600 font-medium">₹{totalRefunded.toFixed(2)}</span>
+                                    </div>
+                                    {hasCancelled && penalty > 0 && (
+                                      <>
+                                        <div className="flex justify-between">
+                                          <span>Penalty Deducted:</span>
+                                          <span className="text-red-600 font-medium">₹{penalty.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-xs text-slate-600 mt-1">
+                                          <span>Penalty Reason:</span>
+                                          <span>Registration Fee (₹150) held as penalty</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    <div className="flex justify-between text-xs text-slate-500 mt-1">
+                                      <span>Payment Method:</span>
+                                      <span className="capitalize">{paymentMethod}</span>
+                                    </div>
+                                    {totalRefunded > 0 && (
+                                      <div className="flex justify-between text-xs text-slate-500 mt-1">
+                                        <span>Refund Method:</span>
+                                        <span className="capitalize">{refundMethod}</span>
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                               {outstandingAmount > 0 && !hasCancelledBills && (
                                 <div className="flex justify-between">
                                   <span>Outstanding:</span>
@@ -3153,189 +3469,109 @@ export default function ConsultationBilling() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Payment Information */}
-                  <div className="mb-6">
-                    <div className="text-xs">
-                      {(() => {
-                        // Calculate total paid amount from patient billing
-                        const totalPaid = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
-                        const totalRefunded = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0) || 0;
-                        const hasCancelledBills = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
-                        const hasRefundedBills = selectedPatient.billing?.some(bill => bill.status === 'refunded');
-                        const totalAmount = invoiceData.totals.total;
-                        const outstandingAmount = totalAmount - totalPaid;
-                        
-                        if (hasCancelledBills) {
-                          return (
-                            <div className="text-red-600">
-                              <div><span className="font-medium">Bill Status:</span> CANCELLED</div>
-                              {totalPaid > 0 && (
-                                <div className="mt-1"><span className="font-medium">Amount Paid:</span> (Rs.) {numberToWords(totalPaid)} Only</div>
-                              )}
-                              {totalRefunded > 0 && (
-                                <div className="mt-1"><span className="font-medium">Amount Refunded:</span> (Rs.) {numberToWords(totalRefunded)} Only</div>
-                              )}
-                            </div>
-                          );
-                        } else if (hasRefundedBills) {
-                          return (
-                            <div className="text-orange-600">
-                              <div><span className="font-medium">Bill Status:</span> REFUNDED</div>
-                              {totalPaid > 0 && (
-                                <div className="mt-1"><span className="font-medium">Amount Paid:</span> (Rs.) {numberToWords(totalPaid)} Only</div>
-                              )}
-                              {totalRefunded > 0 && (
-                                <div className="mt-1"><span className="font-medium">Amount Refunded:</span> (Rs.) {numberToWords(totalRefunded)} Only</div>
-                              )}
-                            </div>
-                          );
-                        } else if (totalPaid > 0) {
-                          return (
-                            <div>
-                              <div><span className="font-medium">Paid Amount:</span> (Rs.) {numberToWords(totalPaid)} Only</div>
-                              {outstandingAmount > 0 && (
-                                <div className="text-orange-600 mt-1"><span className="font-medium">Outstanding Amount:</span> (Rs.) {numberToWords(outstandingAmount)} Only</div>
-                              )}
-                              {outstandingAmount === 0 && (
-                                <div className="text-green-600 mt-1"><span className="font-medium">Payment Status:</span> Fully Paid</div>
-                              )}
-                            </div>
-                          );
-                        } else {
-                          return (
-                            <div className="text-orange-600">
-                              <div><span className="font-medium">Amount Due:</span> (Rs.) {numberToWords(totalAmount)} Only</div>
-                            </div>
-                          );
-                        }
-                      })()}
-                    </div>
                   </div>
 
-
-                  {/* Payment History */}
-                  {paymentHistory.length > 0 && (
-                    <div className="mb-6">
-                      <h4 className="text-sm font-semibold text-slate-800 mb-3">Payment History</h4>
-                      <div className="space-y-2">
-                        {paymentHistory
-                          .filter(payment => payment.status === 'completed')
-                          .map((payment, index) => (
-                            <div key={index} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200">
-                              <div className="flex items-center space-x-3">
-                                <div className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium">
-                                  {index + 1}
-                                </div>
-                                <div>
-                                  <div className="text-sm font-medium text-slate-800">₹{payment.amount.toFixed(2)}</div>
-                                  <div className="text-xs text-slate-500">
-                                    {new Date(payment.createdAt).toLocaleDateString('en-GB')} at {new Date(payment.createdAt).toLocaleTimeString('en-GB')}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-xs text-slate-500">#{index + 1}</div>
-                                <div className="text-xs text-slate-400">
-                                  {payment.paymentMethod ? payment.paymentMethod.charAt(0).toUpperCase() + payment.paymentMethod.slice(1) : 'Cash'}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Payment Summary */}
+                  {/* Transaction History - Shows all payments and refunds */}
                   {(() => {
-                    // Calculate totals from payment history
-                    const totalPaidFromHistory = paymentHistory
-                      .filter(payment => payment.status === 'completed')
-                      .reduce((sum, payment) => sum + (payment.amount || 0), 0);
+                    // Get all billing records with payments/refunds
+                    const transactions = [];
                     
-                    const totalRefundedFromHistory = paymentHistory
-                      .reduce((sum, payment) => sum + (payment.refund?.refundedAmount || 0), 0);
+                    selectedPatient.billing?.forEach(bill => {
+                      // Add payment transaction if paid
+                      if (bill.paidAmount > 0) {
+                        transactions.push({
+                          type: 'payment',
+                          amount: bill.paidAmount,
+                          method: bill.paymentMethod || 'cash',
+                          date: bill.paidAt || bill.createdAt,
+                          transactionId: bill.transactionId,
+                          description: bill.description || 'Payment'
+                        });
+                      }
+                      
+                      // Add refund transactions
+                      if (bill.refunds && bill.refunds.length > 0) {
+                        bill.refunds.forEach(refund => {
+                          transactions.push({
+                            type: 'refund',
+                            amount: refund.amount || 0,
+                            method: refund.method || 'cash',
+                            date: refund.processedAt || refund.createdAt,
+                            reason: refund.reason,
+                            description: bill.description || 'Refund'
+                          });
+                        });
+                      } else if (bill.refundAmount > 0) {
+                        transactions.push({
+                          type: 'refund',
+                          amount: bill.refundAmount,
+                          method: bill.refundMethod || 'cash',
+                          date: bill.refundAt || bill.updatedAt || bill.createdAt,
+                          description: bill.description || 'Refund'
+                        });
+                      }
+                    });
                     
-                    // Fallback to billing data if no payment history
-                    const totalPaid = paymentHistory.length > 0 ? totalPaidFromHistory : 
-                      selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
+                    // Sort by date (newest first)
+                    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
                     
-                    const totalRefunded = paymentHistory.length > 0 ? totalRefundedFromHistory :
-                      selectedPatient.billing?.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0) || 0;
-                    
-                    const hasCancelledBills = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
-                    const hasRefundedBills = selectedPatient.billing?.some(bill => bill.status === 'refunded');
-                    const totalAmount = invoiceData.totals.total;
-                    const outstandingAmount = totalAmount - totalPaid;
-                    const hasPartialPayments = selectedPatient.billing?.some(bill => (bill.paidAmount || 0) > 0 && (bill.paidAmount || 0) < (bill.amount || 0));
-                    
-                    if (totalPaid > 0 || hasCancelledBills || hasRefundedBills) {
+                    if (transactions.length > 0) {
                       return (
-                        <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                          <h4 className="text-sm font-semibold text-slate-800 mb-3">Payment Summary</h4>
-                          <div className="grid grid-cols-2 gap-4 text-xs">
-                            <div>
-                              <div className="flex justify-between mb-1">
-                                <span>Total Bill Amount:</span>
-                                <span className="font-medium">₹{totalAmount.toFixed(2)}</span>
-                              </div>
-                              <div className="flex justify-between mb-1">
-                                <span>Amount Paid:</span>
-                                <span className="font-medium text-green-600">₹{totalPaid.toFixed(2)}</span>
-                              </div>
-                              {totalRefunded > 0 && (
-                                <div className="flex justify-between mb-1">
-                                  <span>Amount Refunded:</span>
-                                  <span className="font-medium text-orange-600">₹{totalRefunded.toFixed(2)}</span>
-                                </div>
-                              )}
-                              {outstandingAmount > 0 && !hasCancelledBills && (
-                                <div className="flex justify-between mb-1">
-                                  <span>Outstanding:</span>
-                                  <span className="font-medium text-orange-600">₹{outstandingAmount.toFixed(2)}</span>
-                                </div>
-                              )}
-                            </div>
-                            <div>
-                              <div className="flex justify-between mb-1">
-                                <span>Bill Status:</span>
-                                <span className={`font-medium ${
-                                  hasCancelledBills ? 'text-red-600' : 
-                                  hasRefundedBills ? 'text-orange-600' : 
-                                  outstandingAmount === 0 ? 'text-green-600' : 
-                                  hasPartialPayments ? 'text-orange-600' : 'text-red-600'
-                                }`}>
-                                  {hasCancelledBills ? 'Cancelled' : 
-                                   hasRefundedBills ? 'Refunded' : 
-                                   outstandingAmount === 0 ? 'Fully Paid' : 
-                                   hasPartialPayments ? 'Partially Paid' : 'Unpaid'}
-                                </span>
-                              </div>
-                              {hasPartialPayments && !hasCancelledBills && !hasRefundedBills && (
-                                <div className="text-orange-600 text-xs mt-1">
-                                  * Some services have partial payments
-                                </div>
-                              )}
-                              {hasCancelledBills && (
-                                <div className="text-red-600 text-xs mt-1">
-                                  * Bill has been cancelled
-                                </div>
-                              )}
-                              {hasRefundedBills && !hasCancelledBills && (
-                                <div className="text-orange-600 text-xs mt-1">
-                                  * Refund has been processed
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                        <div className="mb-6">
+                          <h4 className="text-sm font-semibold text-slate-800 mb-3">Transaction History</h4>
+                          <table className="min-w-full border-collapse border border-slate-300">
+                            <thead>
+                              <tr className="bg-slate-100">
+                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Date & Time</th>
+                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Type</th>
+                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Description</th>
+                                <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Amount</th>
+                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Method</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {transactions.map((transaction, index) => (
+                                <tr key={index} className={transaction.type === 'refund' ? 'bg-orange-50' : 'bg-white'}>
+                                  <td className="border border-slate-300 px-3 py-2 text-xs">
+                                    {new Date(transaction.date).toLocaleDateString('en-GB')} {new Date(transaction.date).toLocaleTimeString('en-GB')}
+                                  </td>
+                                  <td className="border border-slate-300 px-3 py-2 text-xs">
+                                    <span className={`px-2 py-1 rounded-full font-medium ${
+                                      transaction.type === 'payment' 
+                                        ? 'bg-green-100 text-green-700' 
+                                        : 'bg-orange-100 text-orange-700'
+                                    }`}>
+                                      {transaction.type === 'payment' ? 'Payment' : 'Refund'}
+                                    </span>
+                                  </td>
+                                  <td className="border border-slate-300 px-3 py-2 text-xs">
+                                    <div className="font-medium">{transaction.description}</div>
+                                    {transaction.reason && (
+                                      <div className="text-slate-500 text-xs mt-1">{transaction.reason}</div>
+                                    )}
+                                    {transaction.transactionId && (
+                                      <div className="text-slate-400 text-xs mt-1">ID: {transaction.transactionId}</div>
+                                    )}
+                                  </td>
+                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs font-medium">
+                                    <span className={transaction.type === 'payment' ? 'text-green-600' : 'text-orange-600'}>
+                                      {transaction.type === 'payment' ? '+' : '-'}₹{transaction.amount.toFixed(2)}
+                                    </span>
+                                  </td>
+                                  <td className="border border-slate-300 px-3 py-2 text-xs capitalize">
+                                    {transaction.method}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
                       );
                     }
                     return null;
                   })()}
 
-
-                  {/* Generation Details - Compact for A4 */}
+                  {/* Generation Details */}
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     {/* Left - Generation Info */}
                     <div className="text-xs">
@@ -3426,49 +3662,19 @@ export default function ConsultationBilling() {
                 <label className="block text-xs font-medium text-slate-700 mb-2">
                   Payment Amount (₹) *
                         </label>
-                <div className="flex gap-2">
-                        <input
-                          type="number"
-                    value={paymentData.amount}
-                    onChange={(e) => setPaymentData({...paymentData, amount: e.target.value})}
-                    required
-                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-                    placeholder="Enter payment amount"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const outstandingAmount = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.amount || 0) - (bill.paidAmount || 0), 0) || 0;
-                      setPaymentData({
-                        ...paymentData,
-                        amount: outstandingAmount.toString(),
-                        paymentType: 'full'
-                      });
-                    }}
-                    className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-xs font-medium whitespace-nowrap"
-                  >
-                    Pay Full
-                  </button>
-                      </div>
+                <input
+                  type="number"
+                  value={paymentData.amount}
+                  readOnly
+                  disabled
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
+                  placeholder="Payment amount"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  💡 This amount represents the outstanding balance and cannot be edited
+                </p>
               </div>
 
-                      <div>
-                <label className="block text-xs font-medium text-slate-700 mb-2">
-                  Payment Type *
-                        </label>
-                <select
-                  value={paymentData.paymentType || 'partial'}
-                  onChange={(e) => setPaymentData({...paymentData, paymentType: e.target.value})}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-                >
-                  <option value="partial">Partial Payment</option>
-                  <option value="full">Full Payment</option>
-                </select>
-                <div className="mt-1 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
-                  <p><strong>Full Payment:</strong> This amount will cover all remaining outstanding charges.</p>
-                  <p><strong>Partial Payment:</strong> Records partial amount for later completion.</p>
-                      </div>
-                    </div>
 
                       <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
@@ -3939,69 +4145,77 @@ export default function ConsultationBilling() {
                 </div>
               )}
 
-              {/* Refund Type */}
+              {/* Refund Type Selection */}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
                   Refund Type *
                 </label>
-                <select
-                  value={refundData.refundType}
-                  onChange={(e) => {
-                    const newType = e.target.value;
-                    setRefundData({...refundData, refundType: newType});
-                    
-                    // Auto-adjust amount based on type
-                    if (newType === 'full') {
-                      const availableForRefund = selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0);
-                      setRefundData(prev => ({...prev, refundType: newType, amount: availableForRefund.toString()}));
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-xs"
-                >
-                  <option value="partial">Partial Refund</option>
-                  <option value="full">Full Refund</option>
-                </select>
-                <div className="mt-1 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
-                  <p><strong>Partial Refund:</strong> Refund a specific amount from available funds.</p>
-                  <p><strong>Full Refund:</strong> Refund all available paid amounts.</p>
+                <div className="space-y-2">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="refundType"
+                      value="withPenalty"
+                      checked={refundData.refundType === 'withPenalty'}
+                      onChange={(e) => setRefundData({...refundData, refundType: e.target.value})}
+                      className="mr-2"
+                    />
+                    <span className="text-xs text-slate-700">
+                      With Penalty (₹{penaltyAmount} deducted) - Refund: Registration fee held as penalty
+                    </span>
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="refundType"
+                      value="full"
+                      checked={refundData.refundType === 'full'}
+                      onChange={(e) => setRefundData({...refundData, refundType: e.target.value})}
+                      className="mr-2"
+                    />
+                    <span className="text-xs text-slate-700">
+                      Full Refund (₹0 deducted) - Refund: All amounts including registration fee
+                    </span>
+                  </label>
                 </div>
               </div>
 
-              {/* Refund Amount */}
+              {/* Refund Amount Calculation */}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
-                  Refund Amount (₹) *
+                  Refund Amount (₹)
                 </label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    value={refundData.amount}
-                    onChange={(e) => setRefundData({...refundData, amount: e.target.value})}
-                    required
-                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-xs"
-                    placeholder="Enter refund amount"
-                    max={selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0)}
-                    min="0"
-                    step="0.01"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const availableForRefund = selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0);
-                      setRefundData({
-                        ...refundData,
-                        amount: availableForRefund.toString(),
-                        refundType: 'full'
-                      });
-                    }}
-                    className="px-3 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-xs font-medium whitespace-nowrap"
-                  >
-                    Refund All
-                  </button>
+                <input
+                  type="number"
+                  value={(() => {
+                    const availableAmount = selectedPatient.billing.reduce((sum, bill) => 
+                      sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0);
+                    if (refundData.refundType === 'withPenalty') {
+                      return Math.max(0, availableAmount - penaltyAmount);
+                    }
+                    return availableAmount;
+                  })()}
+                  readOnly
+                  disabled
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
+                />
+                <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
+                  {refundData.refundType === 'withPenalty' ? (
+                    <div>
+                      <p className="font-medium mb-1">Refund Calculation (With Penalty):</p>
+                      <p>• Total Paid: ₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString()}</p>
+                      <p>• Penalty: -₹{penaltyAmount}</p>
+                      <p className="font-semibold mt-1">• Final Refund: ₹{Math.max(0, selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0) - penaltyAmount).toLocaleString()}</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="font-medium mb-1">Refund Calculation (Full Refund):</p>
+                      <p>• Total Paid: ₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString()}</p>
+                      <p>• Penalty: ₹0 (No penalty)</p>
+                      <p className="font-semibold mt-1">• Final Refund: ₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString()}</p>
+                    </div>
+                  )}
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Maximum refundable: ₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString('en-IN')}
-                </p>
               </div>
 
               {/* Refund Method */}
@@ -4019,42 +4233,6 @@ export default function ConsultationBilling() {
                   <option value="upi">UPI</option>
                   <option value="netbanking">Net Banking</option>
                 </select>
-              </div>
-
-              {/* Patient Behavior Assessment */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-2">
-                  Patient Behavior Assessment *
-                </label>
-                <div className="space-y-2">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="patientBehavior"
-                      value="okay"
-                      checked={refundData.patientBehavior === 'okay'}
-                      onChange={(e) => setRefundData({...refundData, patientBehavior: e.target.value})}
-                      className="mr-2"
-                    />
-                    <span className="text-xs text-slate-700">Patient is okay - Registration fee (₹150) will be held as penalty</span>
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="patientBehavior"
-                      value="rude"
-                      checked={refundData.patientBehavior === 'rude'}
-                      onChange={(e) => setRefundData({...refundData, patientBehavior: e.target.value})}
-                      className="mr-2"
-                    />
-                    <span className="text-xs text-slate-700">Patient is rude - Full refund including registration fee</span>
-                  </label>
-                </div>
-                <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
-                  <p><strong>Penalty Policy:</strong></p>
-                  <p>• <strong>Okay Patient:</strong> Registration fee (₹150) held as penalty, only consultation/service fees refunded</p>
-                  <p>• <strong>Rude Patient:</strong> Full refund including registration fee (no penalty)</p>
-                </div>
               </div>
 
               {/* Refund Reason */}
@@ -4098,7 +4276,7 @@ export default function ConsultationBilling() {
                   type="submit"
                   className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-xs font-medium"
                 >
-                  Process {refundData.refundType === 'full' ? 'Full' : 'Partial'} Refund
+                  Process {refundData.refundType === 'withPenalty' ? 'With Penalty' : 'Full'} Refund
                 </button>
               </div>
             </form>

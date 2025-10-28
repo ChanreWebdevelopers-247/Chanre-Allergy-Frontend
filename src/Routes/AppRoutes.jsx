@@ -100,6 +100,7 @@ import CenterAdminConsultationFeeBilling from '../pages/CenterAdmin/Consultation
 import CenterAdminBillingReports from '../pages/CenterAdmin/BillingReports';
 import CenterAdminBillingTracker from '../pages/CenterAdmin/BillingTracker';
 import CenterProfile from '../pages/CenterAdmin/CenterProfile';
+import CenterSettings from '../pages/CenterAdmin/CenterSettings';
 import CenterAdminAddPatient from '../pages/CenterAdmin/patients/AddPatient';
 import CenterAdminPatientList from '../pages/CenterAdmin/patients/PatientList';
 import CenterAdminManagePatients from '../pages/CenterAdmin/patients/ManagePatients';
@@ -407,6 +408,7 @@ export default function AppRoutes() {
         {/* Center Admin Routes */}
         <Route path="centeradmin/dashboard" element={<CenterAdminDashboard />} />
         <Route path="centeradmin/center-profile" element={<CenterProfile />} />
+        <Route path="centeradmin/settings" element={<CenterSettings />} />
         <Route path='centeradmin/patients/addpatient' element={<ErrorBoundary><CenterAdminAddPatient /></ErrorBoundary>} />
         <Route path='centeradmin/patients/patientlist' element={<ErrorBoundary><CenterAdminPatientList /></ErrorBoundary>} />
         <Route path='centeradmin/patients/managepatients' element={<ErrorBoundary><CenterAdminManagePatients /></ErrorBoundary>} />
