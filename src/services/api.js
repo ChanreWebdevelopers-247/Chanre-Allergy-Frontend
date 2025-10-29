@@ -121,6 +121,117 @@ export const getFinancialReports = async (params = {}) => {
   }
 };
 
+// Doctor Calendar API functions
+export const getCenterDoctors = async () => {
+  try {
+    const response = await API.get('/doctor-calendar/doctors');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching center doctors:', error);
+    throw error;
+  }
+};
+
+export const setDoctorAvailability = async (data) => {
+  try {
+    const response = await API.post('/doctor-calendar/availability', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error setting doctor availability:', error);
+    throw error;
+  }
+};
+
+export const getDoctorAvailability = async (params = {}) => {
+  try {
+    const response = await API.get('/doctor-calendar/availability', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching doctor availability:', error);
+    throw error;
+  }
+};
+
+export const createAppointmentSlots = async (data) => {
+  try {
+    const response = await API.post('/doctor-calendar/slots/create', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating appointment slots:', error);
+    throw error;
+  }
+};
+
+export const getAppointmentSlots = async (params = {}) => {
+  try {
+    const response = await API.get('/doctor-calendar/slots', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching appointment slots:', error);
+    throw error;
+  }
+};
+
+export const getDayAppointments = async (params = {}) => {
+  try {
+    const response = await API.get('/doctor-calendar/day-appointments', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching day appointments:', error);
+    throw error;
+  }
+};
+
+export const deleteAppointmentSlots = async (data) => {
+  try {
+    const response = await API.delete('/doctor-calendar/slots', { data });
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting appointment slots:', error);
+    throw error;
+  }
+};
+
+export const markSundaysAsHolidays = async (data) => {
+  try {
+    const response = await API.post('/doctor-calendar/mark-sundays', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error marking Sundays as holidays:', error);
+    throw error;
+  }
+};
+
+export const bulkSetHolidays = async (data) => {
+  try {
+    const response = await API.post('/doctor-calendar/bulk-holidays', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error bulk setting holidays:', error);
+    throw error;
+  }
+};
+
+export const getMonthRangeAvailability = async (params = {}) => {
+  try {
+    const response = await API.get('/doctor-calendar/month-availability', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching month range availability:', error);
+    throw error;
+  }
+};
+
+export const bookSlotForPatient = async (data) => {
+  try {
+    const response = await API.post('/doctor-calendar/slots/book', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error booking slot:', error);
+    throw error;
+  }
+};
+
 export const generateFinancialReport = async (data) => {
   try {
     const response = await API.get('/accountants/reports', { params: data });

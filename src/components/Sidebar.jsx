@@ -203,6 +203,7 @@ export default function Sidebar(props) {
                 links={[
                   { to: "/dashboard/centeradmin/doctors/adddoctor", label: "Add Doctor" },
                   { to: "/dashboard/centeradmin/doctors/doctorlist", label: "Doctors List" },
+                  { to: "/dashboard/centeradmin/doctor-calendar", label: "Doctor Calendar" },
                   
                 ]}
                 currentPath={location.pathname}
@@ -367,6 +368,12 @@ export default function Sidebar(props) {
                 label="Appointment Approvals"
                 icon={<FaCalendarCheck />}
                 isActive={isActive("/dashboard/receptionist/appointment-approvals")}
+              />
+              <SidebarLink
+                to="/dashboard/receptionist/book-slot"
+                label="Book Appointment Slot"
+                icon={<FaCalendarCheck />}
+                isActive={isActive("/dashboard/receptionist/book-slot")}
               />
             </>
           )}

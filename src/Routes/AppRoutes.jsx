@@ -141,6 +141,7 @@ import CenterAdminViewGPE from '../pages/CenterAdmin/patients/FollowUp/GPE/ViewG
 // Center Admin Test Request Pages
 import CenterAdminTestRequestsList from '../pages/CenterAdmin/TestRequests/TestRequestsList';
 import CenterAdminTestRequestDetails from '../pages/CenterAdmin/TestRequests/TestRequestDetails';
+import DoctorCalendar from '../pages/CenterAdmin/DoctorCalendar';
 
 
 // Receptionist Pages - Only essential functionality
@@ -164,6 +165,7 @@ import AddReceptionistPatient from '../pages/Receptionist/AddPatient';
 import ReceptionistEditPatient from '../pages/Receptionist/EditPatient';
 import AppointmentManagement from '../pages/Receptionist/AppointmentManagement';
 import ReceptionistAppointmentApprovals from '../pages/Receptionist/AppointmentApprovals';
+import BookSlot from '../pages/Receptionist/BookSlot';
 import CenterAdminAppointmentApprovals from '../pages/CenterAdmin/AppointmentApprovals';
 
 // Doctor Pages
@@ -480,6 +482,9 @@ export default function AppRoutes() {
         {/* Center Admin Appointment Approvals */}
         <Route path="centeradmin/appointment-approvals" element={<ErrorBoundary><CenterAdminAppointmentApprovals /></ErrorBoundary>} />
 
+        {/* Center Admin Doctor Calendar */}
+        <Route path="centeradmin/doctor-calendar" element={<ErrorBoundary><DoctorCalendar /></ErrorBoundary>} />
+
         {/* Center Admin Billing Routes */}
         <Route path="centeradmin/billing" element={<ErrorBoundary><CenterAdminBilling /></ErrorBoundary>} />
         <Route path="centeradmin/consultation-fee-billing" element={<ErrorBoundary><CenterAdminConsultationFeeBilling /></ErrorBoundary>} />
@@ -524,6 +529,7 @@ export default function AppRoutes() {
         <Route path="receptionist/transactions" element={<ReceptionistLayout><TransactionView /></ReceptionistLayout>} />
         <Route path="receptionist/appointment-management" element={<ReceptionistLayout><AppointmentManagement /></ReceptionistLayout>} />
         <Route path="receptionist/appointment-approvals" element={<ReceptionistLayout><ReceptionistAppointmentApprovals /></ReceptionistLayout>} />
+        <Route path="receptionist/book-slot" element={<ReceptionistLayout><BookSlot /></ReceptionistLayout>} />
 
         {/* Doctor Routes */}
         <Route path="doctor/dashboard" element={<DoctorDashboard />} />
