@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import ReceptionistLayout from './ReceptionistLayout';
-import { fetchReceptionistBillingRequests, generateReceptionistBill, markReceptionistBillPaid } from '../../features/receptionist/receptionistThunks';
-import { Search, Filter, Plus, CheckCircle, FileText, IndianRupee, Hash, X, CreditCard, Receipt, Upload, Clock, Download, DollarSign, Building } from 'lucide-react';
+import { fetchReceptionistBillingRequests, generateReceptionistBill, markReceptionistBillPaid, updatePaidBill } from '../../features/receptionist/receptionistThunks';
+import { Search, Filter, Plus, CheckCircle, FileText, IndianRupee, Hash, X, CreditCard, Receipt, Upload, Clock, Download, DollarSign, Building, Edit, Trash2 } from 'lucide-react';
 import { API_CONFIG } from '../../config/environment';
 
 const currencySymbol = '₹';
@@ -127,8 +127,7 @@ function ReceptionistBilling() {
     transactionId: '',
     receiptUpload: '',
     paymentNotes: '',
-    paymentAmount: 0,
-    isPartialPayment: false
+    paymentAmount: 0
   });
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedForPayment, setSelectedForPayment] = useState(null);
@@ -149,6 +148,15 @@ function ReceptionistBilling() {
     notes: ''
   });
 
+  // ✅ NEW: Edit Bill state
+  const [showEditBillModal, setShowEditBillModal] = useState(false);
+  const [selectedForEdit, setSelectedForEdit] = useState(null);
+  const [editBillItems, setEditBillItems] = useState([]);
+  const [editBillTaxes, setEditBillTaxes] = useState(0);
+  const [editBillDiscounts, setEditBillDiscounts] = useState(0);
+  const [refundAmount, setRefundAmount] = useState(0);
+  const [editNotes, setEditNotes] = useState('');
+
   useEffect(() => {
     if (user && token) {
       dispatch(fetchReceptionistBillingRequests());
@@ -162,7 +170,7 @@ function ReceptionistBilling() {
       
       try {
         const centerId = typeof user.centerId === 'object' ? user.centerId._id : user.centerId;
-        const response = await API_CONFIG.get(`/centers/${centerId}/fees`);
+        const response = await API.get(`/centers/${centerId}/fees`);
         if (response.data?.discountSettings) {
           setCenterDiscountSettings(response.data.discountSettings);
         }
@@ -174,89 +182,11 @@ function ReceptionistBilling() {
     fetchCenterDiscountSettings();
   }, [user]);
 
-  // Enhanced function to get partial payment data from localStorage
-  const getPartialPaymentData = (requestId) => {
-    const paymentKey = `partial_payment_${requestId}`;
-    const payments = JSON.parse(localStorage.getItem(paymentKey) || '[]');
-    const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
-    
-    // Sort payments by timestamp (newest first)
-    const sortedPayments = payments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    
-    return { 
-      payments: sortedPayments, 
-      totalPaid,
-      paymentCount: payments.length,
-      lastPayment: payments.length > 0 ? payments[payments.length - 1] : null
-    };
-  };
-
-  // Function to store partial payment separately
-  const storePartialPayment = (requestId, paymentData) => {
-    const paymentKey = `partial_payment_${requestId}`;
-    const existingPayments = JSON.parse(localStorage.getItem(paymentKey) || '[]');
-    
-    // Create unique payment record
-    const newPayment = {
-      id: `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      amount: paymentData.amount,
-      method: paymentData.method,
-      transactionId: paymentData.transactionId,
-      timestamp: new Date().toISOString(),
-      notes: paymentData.notes,
-      receiptUpload: paymentData.receiptUpload,
-      status: 'recorded', // recorded, verified, completed
-      recordedBy: user?.name || 'Receptionist',
-      recordedAt: new Date().toISOString()
-    };
-    
-    // Add to existing payments
-    const updatedPayments = [...existingPayments, newPayment];
-    localStorage.setItem(paymentKey, JSON.stringify(updatedPayments));
-    
-    
-    return newPayment;
-  };
-
-  // Function to get all partial payments across all bills
-  const getAllPartialPayments = () => {
-    const allPayments = [];
-    const keys = Object.keys(localStorage).filter(key => key.startsWith('partial_payment_'));
-    
-    keys.forEach(key => {
-      const requestId = key.replace('partial_payment_', '');
-      const payments = JSON.parse(localStorage.getItem(key) || '[]');
-      payments.forEach(payment => {
-        allPayments.push({
-          ...payment,
-          requestId,
-          billKey: key
-        });
-      });
-    });
-    
-    return allPayments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  };
 
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return (billingRequests || [])
-      .map(r => {
-        // Enhance billing data with partial payment information
-        const partialData = getPartialPaymentData(r._id);
-        if (r.billing && partialData.totalPaid > 0) {
-          return {
-            ...r,
-            billing: {
-              ...r.billing,
-              paidAmount: r.billing.paidAmount || partialData.totalPaid,
-              partialPayments: partialData.payments
-            }
-          };
-        }
-        return r;
-      })
       .filter(r => {
         if (status === 'all') return true;
         if (status === 'payment_received') {
@@ -282,9 +212,6 @@ function ReceptionistBilling() {
         
         if (paymentStatus === 'unpaid') {
           return totalAmount > 0 && paidAmount === 0;
-        }
-        if (paymentStatus === 'partial') {
-          return totalAmount > 0 && paidAmount > 0 && paidAmount < totalAmount;
         }
         if (paymentStatus === 'full') {
           return totalAmount > 0 && paidAmount >= totalAmount;
@@ -644,19 +571,13 @@ function ReceptionistBilling() {
     const paidAmount = req.billing?.paidAmount || 0;
     const remainingAmount = totalAmount - paidAmount;
     
-    // Get partial payment history
-    const partialData = getPartialPaymentData(req._id);
-    const totalPaidFromStorage = partialData.totalPaid;
-    const actualRemainingAmount = totalAmount - Math.max(paidAmount, totalPaidFromStorage);
-    
     
     setPaymentDetails({
       paymentMethod: '',
       transactionId: '',
       receiptUpload: '',
       paymentNotes: '',
-      paymentAmount: actualRemainingAmount, // Default to actual remaining amount
-      isPartialPayment: actualRemainingAmount < totalAmount
+      paymentAmount: remainingAmount // Default to remaining amount (full payment required)
     });
     setShowPaymentModal(true);
   };
@@ -670,9 +591,198 @@ function ReceptionistBilling() {
       transactionId: '',
       receiptUpload: '',
       paymentNotes: '',
-      paymentAmount: 0,
-      isPartialPayment: false
+      paymentAmount: 0
     });
+  };
+
+  // ✅ NEW: Open edit bill modal
+  const openEditBillModal = (req) => {
+    // Only Center Admin can edit paid bills
+    const isCenterAdmin = user?.userType === 'centeradmin' || user?.role === 'Center Admin' || user?.userType === 'CenterAdmin';
+    if (!isCenterAdmin) {
+      toast.error('Only Center Admin can edit paid bills');
+      return;
+    }
+
+    if (!req.billing || !req.billing.items || !Array.isArray(req.billing.items)) {
+      toast.error('Bill data is not available or invalid');
+      return;
+    }
+
+    setSelectedForEdit(req);
+    // Initialize edit items from existing bill
+    const initialItems = req.billing.items.map(item => ({
+      name: item.name || '',
+      code: item.code || '',
+      quantity: item.quantity || 1,
+      unitPrice: item.unitPrice || 0,
+      _id: item._id // Keep item ID for reference
+    }));
+    setEditBillItems(initialItems);
+    setEditBillTaxes(req.billing.taxes || 0);
+    setEditBillDiscounts(req.billing.discounts || 0);
+    setEditNotes(req.billing.notes || '');
+    
+    // Calculate initial refund amount (will be recalculated when items change)
+    calculateRefund(req, initialItems, req.billing.taxes || 0, req.billing.discounts || 0);
+    setShowEditBillModal(true);
+  };
+
+  // ✅ NEW: Calculate refund amount with proportional discount
+  const calculateRefund = (req, items, taxes, discounts) => {
+    const originalAmount = req.billing?.amount || 0;
+    const originalSubTotal = req.billing?.items?.reduce((sum, item) => {
+      return sum + (Number(item.quantity || 1) * Number(item.unitPrice || 0));
+    }, 0) || originalAmount;
+    const originalDiscounts = req.billing?.discounts || 0;
+    const originalTaxes = req.billing?.taxes || 0;
+    
+    // Calculate new amount from remaining items
+    const newSubTotal = items.reduce((sum, item) => {
+      return sum + (Number(item.quantity || 1) * Number(item.unitPrice || 0));
+    }, 0);
+    
+    const newTaxes = Number(taxes || 0);
+    const newDiscounts = Number(discounts || 0);
+    
+    // Calculate removed items value (before discount)
+    const removedSubTotal = originalSubTotal - newSubTotal;
+    
+    // Calculate proportional discount for removed items
+    // If original sub-total was 460 and discount was 46, and we remove 360:
+    // Proportional discount = (360 / 460) * 46 = 36
+    let proportionalDiscountOnRemoved = 0;
+    if (originalSubTotal > 0 && removedSubTotal > 0 && originalDiscounts > 0) {
+      proportionalDiscountOnRemoved = (removedSubTotal / originalSubTotal) * originalDiscounts;
+    }
+    
+    // Calculate proportional tax for removed items (if applicable)
+    let proportionalTaxOnRemoved = 0;
+    if (originalSubTotal > 0 && removedSubTotal > 0 && originalTaxes > 0) {
+      proportionalTaxOnRemoved = (removedSubTotal / originalSubTotal) * originalTaxes;
+    }
+    
+    // Refund = removed items value - proportional discount on removed items
+    // This ensures the refund accounts for the discount the patient actually received
+    const refund = removedSubTotal + proportionalTaxOnRemoved - proportionalDiscountOnRemoved;
+    setRefundAmount(refund > 0 ? refund : 0);
+    
+    return refund;
+  };
+
+  // ✅ NEW: Update edit bill item
+  const updateEditBillItem = (idx, patch) => {
+    setEditBillItems(prev => {
+      const updated = prev.map((it, i) => i === idx ? { ...it, ...patch } : it);
+      // Recalculate refund when items change
+      if (selectedForEdit) {
+        calculateRefund(selectedForEdit, updated, editBillTaxes, editBillDiscounts);
+      }
+      return updated;
+    });
+  };
+
+  // ✅ NEW: Update edit bill taxes
+  const updateEditBillTaxes = (value) => {
+    setEditBillTaxes(value);
+    if (selectedForEdit) {
+      calculateRefund(selectedForEdit, editBillItems, value, editBillDiscounts);
+    }
+  };
+
+  // ✅ NEW: Update edit bill discounts
+  const updateEditBillDiscounts = (value) => {
+    setEditBillDiscounts(value);
+    if (selectedForEdit) {
+      calculateRefund(selectedForEdit, editBillItems, editBillTaxes, value);
+    }
+  };
+
+  // ✅ NEW: Remove item from edit bill
+  const removeEditBillItem = (idx) => {
+    setEditBillItems(prev => {
+      if (prev.length <= 1) {
+        toast.error('At least one item must remain in the bill');
+        return prev;
+      }
+      const updated = prev.filter((_, i) => i !== idx);
+      // Keep the original discounts for proportional calculation
+      // The refund will calculate proportional discount automatically
+      // Recalculate refund when items change (with original discounts for proportional calc)
+      if (selectedForEdit) {
+        calculateRefund(selectedForEdit, updated, editBillTaxes, editBillDiscounts);
+      }
+      return updated;
+    });
+  };
+
+  // ✅ NEW: Handle update paid bill
+  const handleUpdatePaidBill = async () => {
+    if (!selectedForEdit) return;
+
+    // Validate items
+    const validItems = editBillItems.filter(item => item.name && item.name.trim() && Number(item.unitPrice) > 0);
+    if (validItems.length === 0) {
+      toast.error('At least one item must remain in the bill');
+      return;
+    }
+
+    // Calculate new amounts
+    const newSubTotal = validItems.reduce((sum, item) => {
+      return sum + (Number(item.quantity || 1) * Number(item.unitPrice || 0));
+    }, 0);
+    const newTaxes = Number(editBillTaxes || 0);
+    const newDiscounts = Number(editBillDiscounts || 0);
+    const newAmount = newSubTotal + newTaxes - newDiscounts;
+    const originalAmount = selectedForEdit.billing?.amount || 0;
+
+    if (newAmount >= originalAmount) {
+      toast.error('New bill amount cannot be greater than or equal to original amount. Remove items to generate refund.');
+      return;
+    }
+
+    if (refundAmount <= 0) {
+      toast.error('No refund amount calculated. Please remove items to generate a refund.');
+      return;
+    }
+
+    try {
+      const cleanedItems = validItems.map(item => ({
+        name: item.name.trim(),
+        code: item.code || '',
+        quantity: Number(item.quantity || 1),
+        unitPrice: Number(item.unitPrice)
+      }));
+
+      const payload = {
+        items: cleanedItems,
+        taxes: newTaxes,
+        discounts: newDiscounts,
+        notes: editNotes,
+        refundAmount: refundAmount,
+        newAmount: newAmount,
+        originalAmount: originalAmount
+      };
+
+      await dispatch(updatePaidBill({ requestId: selectedForEdit._id, payload })).unwrap();
+      toast.success(`Bill updated successfully! Refund amount: ${currencySymbol}${refundAmount.toFixed(2)}`);
+      setShowEditBillModal(false);
+      setSelectedForEdit(null);
+      dispatch(fetchReceptionistBillingRequests());
+    } catch (e) {
+      toast.error(e || 'Failed to update bill and process refund');
+    }
+  };
+
+  // ✅ NEW: Close edit bill modal
+  const closeEditBillModal = () => {
+    setShowEditBillModal(false);
+    setSelectedForEdit(null);
+    setEditBillItems([]);
+    setEditBillTaxes(0);
+    setEditBillDiscounts(0);
+    setRefundAmount(0);
+    setEditNotes('');
   };
 
   const updateItem = (idx, patch) => {
@@ -734,7 +844,7 @@ function ReceptionistBilling() {
     }
   };
 
-  // ✅ NEW: Enhanced mark paid with partial payment support
+  // ✅ NEW: Mark paid with full payment requirement
   const handleMarkPaid = async () => {
     if (!selectedForPayment) return;
     
@@ -753,6 +863,11 @@ function ReceptionistBilling() {
     const paidAmount = selectedForPayment.billing?.paidAmount || 0;
     const remainingAmount = totalAmount - paidAmount;
     
+    if (paymentDetails.paymentAmount !== remainingAmount) {
+      toast.error(`Payment amount must equal the remaining balance of ${currencySymbol}${remainingAmount.toFixed(2)}. Full payment required.`);
+      return;
+    }
+    
     if (paymentDetails.paymentAmount > remainingAmount) {
       toast.error(`Payment amount cannot exceed remaining balance of ${currencySymbol}${remainingAmount.toFixed(2)}`);
       return;
@@ -765,7 +880,6 @@ function ReceptionistBilling() {
       formData.append('transactionId', paymentDetails.transactionId);
       formData.append('paymentNotes', paymentDetails.paymentNotes || '');
       formData.append('paymentAmount', paymentDetails.paymentAmount.toString());
-      formData.append('isPartialPayment', paymentDetails.isPartialPayment.toString());
       
       // Add current paid amount and total amount for backend calculation
       formData.append('currentPaidAmount', paidAmount.toString());
@@ -795,7 +909,6 @@ function ReceptionistBilling() {
           transactionId: paymentDetails.transactionId,
           paymentNotes: paymentDetails.paymentNotes || '',
           paymentAmount: paymentDetails.paymentAmount,
-          isPartialPayment: paymentDetails.isPartialPayment,
           currentPaidAmount: paidAmount,
           totalAmount: totalAmount
         };
@@ -817,34 +930,14 @@ function ReceptionistBilling() {
       
       const responseData = await response.json();
       
-      // Always store payment separately for better tracking
-      const paymentData = {
-        amount: paymentDetails.paymentAmount,
-        method: paymentDetails.paymentMethod,
-        transactionId: paymentDetails.transactionId,
-        notes: paymentDetails.paymentNotes,
-        receiptUpload: paymentDetails.receiptUpload
-      };
-      
-      const storedPayment = storePartialPayment(selectedForPayment._id, paymentData);
-      
-      // Check if the backend properly updated paidAmount
-      if (responseData.billing && responseData.billing.paidAmount !== undefined) {
-        // Backend returned paidAmount successfully
-      } else {
-        // Backend did not return paidAmount, using frontend calculation
-      }
-      
       const newPaidAmount = paidAmount + paymentDetails.paymentAmount;
       const isFullyPaid = newPaidAmount >= totalAmount;
-      
-      // Get updated payment history
-      const updatedPartialData = getPartialPaymentData(selectedForPayment._id);
       
       if (isFullyPaid) {
         toast.success(`✅ Payment completed! Test request #${selectedForPayment._id.slice(-6)} is now unlocked. Total paid: ${currencySymbol}${newPaidAmount.toFixed(2)}. Report access is now available.`);
       } else {
-        toast.success(`💰 Payment recorded for test request #${selectedForPayment._id.slice(-6)}: ${currencySymbol}${paymentDetails.paymentAmount.toFixed(2)}. Total paid: ${currencySymbol}${newPaidAmount.toFixed(2)}. Remaining: ${currencySymbol}${(totalAmount - newPaidAmount).toFixed(2)}`);
+        toast.error(`Payment amount must equal the total amount. Remaining: ${currencySymbol}${(totalAmount - paidAmount).toFixed(2)}`);
+        return;
       }
       
       closePaymentModal();
@@ -1076,7 +1169,7 @@ function ReceptionistBilling() {
       return (
         <ReceptionistLayout>
           <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-4 sm:p-6">
-            <div className="max-w-full mx-auto px-4">
+            <div className="max-w-7xl mx-auto">
                              {/* Professional Header */}
                <div className="mb-8">
                  <div className="flex items-center justify-between mb-4">
@@ -1120,88 +1213,88 @@ function ReceptionistBilling() {
               </div>
 
                      {/* Billing Workflow Statistics */}
-           <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mb-8">
-             <div className="bg-white rounded-xl p-6 shadow-sm border border-blue-100 hover:shadow-md transition-shadow duration-200">
+           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+              <div className="bg-white rounded-lg p-4 shadow-sm border border-blue-100 hover:shadow-md transition-shadow duration-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <div className="text-3xl font-bold text-slate-800">{workflowStats.total}</div>
-                   <div className="text-sm text-slate-600 mt-1">Total Requests</div>
+                   <div className="text-2xl font-bold text-slate-800">{workflowStats.total}</div>
+                   <div className="text-xs text-slate-600 mt-1">Total Requests</div>
                  </div>
                  <div className="bg-blue-100 rounded-lg p-2">
-                   <FileText className="h-6 w-6 text-blue-600" />
+                   <FileText className="h-5 w-5 text-blue-600" />
                  </div>
                </div>
              </div>
-             <div className="bg-white rounded-xl p-6 shadow-sm border border-yellow-100 hover:shadow-md transition-shadow duration-200">
+             <div className="bg-white rounded-lg p-4 shadow-sm border border-yellow-100 hover:shadow-md transition-shadow duration-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <div className="text-3xl font-bold text-yellow-700">{workflowStats.pending + workflowStats.billingPending}</div>
-                   <div className="text-sm text-slate-600 mt-1">Bill Pending</div>
+                   <div className="text-2xl font-bold text-yellow-700">{workflowStats.pending + workflowStats.billingPending}</div>
+                   <div className="text-xs text-slate-600 mt-1">Bill Pending</div>
                  </div>
                  <div className="bg-yellow-100 rounded-lg p-2">
-                   <Clock className="h-6 w-6 text-yellow-600" />
+                   <Clock className="h-5 w-5 text-yellow-600" />
                  </div>
                </div>
              </div>
-             <div className="bg-white rounded-xl p-6 shadow-sm border border-blue-100 hover:shadow-md transition-shadow duration-200">
+             <div className="bg-white rounded-lg p-4 shadow-sm border border-blue-100 hover:shadow-md transition-shadow duration-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <div className="text-3xl font-bold text-blue-700">{workflowStats.billingGenerated}</div>
-                   <div className="text-sm text-slate-600 mt-1">Bill Generated</div>
+                   <div className="text-2xl font-bold text-blue-700">{workflowStats.billingGenerated}</div>
+                   <div className="text-xs text-slate-600 mt-1">Bill Generated</div>
                  </div>
                  <div className="bg-blue-100 rounded-lg p-2">
-                   <Receipt className="h-6 w-6 text-blue-600" />
+                   <Receipt className="h-5 w-5 text-blue-600" />
                  </div>
                </div>
              </div>
-             <div className="bg-white rounded-xl p-6 shadow-sm border border-green-100 hover:shadow-md transition-shadow duration-200">
+             <div className="bg-white rounded-lg p-4 shadow-sm border border-green-100 hover:shadow-md transition-shadow duration-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <div className="text-3xl font-bold text-green-700">{workflowStats.billingPaid}</div>
-                   <div className="text-sm text-slate-600 mt-1">Bill Paid & Verified</div>
+                   <div className="text-2xl font-bold text-green-700">{workflowStats.billingPaid}</div>
+                   <div className="text-xs text-slate-600 mt-1">Bill Paid & Verified</div>
                  </div>
                  <div className="bg-green-100 rounded-lg p-2">
-                   <CheckCircle className="h-6 w-6 text-green-600" />
+                   <CheckCircle className="h-5 w-5 text-green-600" />
                  </div>
                </div>
              </div>
-             <div className="bg-white rounded-xl p-6 shadow-sm border border-emerald-100 hover:shadow-md transition-shadow duration-200">
+             <div className="bg-white rounded-lg p-4 shadow-sm border border-emerald-100 hover:shadow-md transition-shadow duration-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <div className="text-3xl font-bold text-emerald-700">{workflowStats.completed}</div>
-                   <div className="text-sm text-slate-600 mt-1">Completed</div>
+                   <div className="text-2xl font-bold text-emerald-700">{workflowStats.completed}</div>
+                   <div className="text-xs text-slate-600 mt-1">Completed</div>
                  </div>
                  <div className="bg-emerald-100 rounded-lg p-2">
-                   <CheckCircle className="h-6 w-6 text-emerald-600" />
+                   <CheckCircle className="h-5 w-5 text-emerald-600" />
                  </div>
                </div>
              </div>
-             <div className="bg-white rounded-xl p-6 shadow-sm border border-red-100 hover:shadow-md transition-shadow duration-200">
+             <div className="bg-white rounded-lg p-4 shadow-sm border border-red-100 hover:shadow-md transition-shadow duration-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <div className="text-3xl font-bold text-red-700">{workflowStats.cancelled}</div>
-                   <div className="text-sm text-slate-600 mt-1">Cancelled</div>
+                   <div className="text-2xl font-bold text-red-700">{workflowStats.cancelled}</div>
+                   <div className="text-xs text-slate-600 mt-1">Cancelled</div>
                  </div>
                  <div className="bg-red-100 rounded-lg p-2">
-                   <X className="h-6 w-6 text-red-600" />
+                   <X className="h-5 w-5 text-red-600" />
                  </div>
                </div>
              </div>
-             <div className="bg-white rounded-xl p-6 shadow-sm border border-pink-100 hover:shadow-md transition-shadow duration-200">
+             <div className="bg-white rounded-lg p-4 shadow-sm border border-pink-100 hover:shadow-md transition-shadow duration-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <div className="text-3xl font-bold text-pink-700">{workflowStats.refunded}</div>
-                   <div className="text-sm text-slate-600 mt-1">Refunded</div>
+                   <div className="text-2xl font-bold text-pink-700">{workflowStats.refunded}</div>
+                   <div className="text-xs text-slate-600 mt-1">Refunded</div>
                  </div>
                  <div className="bg-pink-100 rounded-lg p-2">
-                   <CreditCard className="h-6 w-6 text-pink-600" />
+                   <CreditCard className="h-5 w-5 text-pink-600" />
                  </div>
                </div>
              </div>
            </div>
 
           {/* Enhanced Search and Filter Section */}
-          <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-6 mb-8">
+          <div className="bg-white rounded-lg shadow-sm border border-blue-100 p-4 mb-6">
             <div className="flex flex-col xl:flex-row gap-4">
               <div className="flex-1 relative min-w-0">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
@@ -1238,7 +1331,6 @@ function ReceptionistBilling() {
                 >
                   <option value="all">All Payment Status</option>
                   <option value="unpaid">Unpaid</option>
-                  <option value="partial">Partially Paid</option>
                   <option value="full">Fully Paid</option>
                 </select>
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -1263,7 +1355,7 @@ function ReceptionistBilling() {
           </div>
 
           {/* Enhanced Main Table */}
-          <div className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-sm border border-blue-100 overflow-hidden">
             {loading ? (
               <div className="p-12 text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -1272,17 +1364,17 @@ function ReceptionistBilling() {
               </div>
             ) : filtered && filtered.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1200px]">
+                <table className="w-full min-w-[900px]">
                   <thead className="bg-gradient-to-r from-slate-50 to-blue-50 border-b border-slate-200">
                     <tr>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Patient</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Contact</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Address</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Doctor</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Test</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Amount</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Actions</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Patient</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Contact</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Address</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Doctor</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Test</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Status</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Amount</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1290,38 +1382,36 @@ function ReceptionistBilling() {
                       const globalIndex = (currentPage - 1) * itemsPerPage + index;
                       return (
                       <tr key={req._id} className={`hover:bg-slate-50 transition-colors duration-150 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-25'}`}>
-                        <td className="px-6 py-4 text-sm">
+                        <td className="px-3 py-2 text-xs">
                           <div className="font-medium text-slate-800">
                             #{globalIndex + 1} {ultraSafeRender(req.patientName) || ultraSafeRender(req.patientId?.name)}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm">
+                        <td className="px-3 py-2 text-xs">
                           <div className="text-slate-700">
                             {ultraSafeRender(req.patientPhone) || ultraSafeRender(req.patientId?.phone)}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm">
-                          <div className="text-slate-700 max-w-xs truncate" title={ultraSafeRender(req.patientAddress) || ultraSafeRender(req.patientId?.address)}>
+                        <td className="px-3 py-2 text-xs">
+                          <div className="text-slate-700 max-w-[150px] truncate" title={ultraSafeRender(req.patientAddress) || ultraSafeRender(req.patientId?.address)}>
                             {ultraSafeRender(req.patientAddress) || ultraSafeRender(req.patientId?.address)}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm">
-                          <div className="font-medium text-slate-800">
+                        <td className="px-3 py-2 text-xs">
+                          <div className="font-medium text-slate-800 max-w-[120px] truncate" title={ultraSafeRender(req.doctorName) || ultraSafeRender(req.doctorId?.name)}>
                             {ultraSafeRender(req.doctorName) || ultraSafeRender(req.doctorId?.name)}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm">
-                          <div className="text-slate-700">
+                        <td className="px-3 py-2 text-xs">
+                          <div className="text-slate-700 max-w-[150px] truncate" title={ultraSafeRender(req.testType)}>
                             {ultraSafeRender(req.testType)}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm">
-                          <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border-2 ${
+                        <td className="px-3 py-2 text-xs">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
                             ultraSafeRender(req.status) === 'Pending' ? 'bg-gray-50 text-gray-700 border-gray-300' :
                             ultraSafeRender(req.status) === 'Billing_Pending' ? 'bg-yellow-50 text-yellow-700 border-yellow-300' :
                             ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'payment_received' ? 'bg-orange-50 text-orange-700 border-orange-300' :
-                            ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'partially_paid' ? 'bg-purple-50 text-purple-700 border-purple-300' :
-                            ultraSafeRender(req.status) === 'Billing_Generated' && req.billing?.paidAmount && req.billing.paidAmount > 0 && req.billing.paidAmount < req.billing.amount ? 'bg-purple-50 text-purple-700 border-purple-300' :
                             ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'cancelled' ? 'bg-red-50 text-red-700 border-red-300' :
                             ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'refunded' ? 'bg-pink-50 text-pink-700 border-pink-300' :
                             ultraSafeRender(req.status) === 'Billing_Generated' ? 'bg-blue-50 text-blue-700 border-blue-300' :
@@ -1332,10 +1422,6 @@ function ReceptionistBilling() {
                           }`}>
                             {ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'payment_received' 
                               ? 'Payment Received' 
-                              : ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'partially_paid'
-                              ? 'Partially Paid'
-                              : ultraSafeRender(req.status) === 'Billing_Generated' && req.billing?.paidAmount && req.billing.paidAmount > 0 && req.billing.paidAmount < req.billing.amount
-                              ? 'Partially Paid'
                               : ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'cancelled'
                               ? 'Bill Cancelled'
                               : ultraSafeRender(req.status) === 'Billing_Generated' && ultraSafeRender(req.billing?.status) === 'refunded'
@@ -1345,15 +1431,13 @@ function ReceptionistBilling() {
                               : ultraSafeRender(req.status)?.replace(/_/g, ' ') || 'Unknown'}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm">
+                        <td className="px-3 py-2 text-xs">
                           {req.billing && typeof req.billing.amount === 'number' ? (
-                            <div className="space-y-1">
-                              <div className="font-bold text-slate-800 text-lg">
-                                Total: {currencySymbol}{req.billing.amount.toFixed(2)}
+                            <div className="space-y-0.5">
+                              <div className="font-bold text-slate-800">
+                                {currencySymbol}{req.billing.amount.toFixed(2)}
                               </div>
                               {(() => {
-                                const partialData = getPartialPaymentData(req._id);
-                                const totalPaidFromStorage = partialData.totalPaid;
                                 const backendPaidAmount = req.billing.paidAmount || 0;
                                 const totalAmount = req.billing.amount;
                                 
@@ -1367,17 +1451,17 @@ function ReceptionistBilling() {
                                 if (isFullyPaidByStatus && backendPaidAmount === 0) {
                                   actualPaidAmount = totalAmount;
                                 } else {
-                                  actualPaidAmount = Math.max(backendPaidAmount, totalPaidFromStorage);
+                                  actualPaidAmount = backendPaidAmount;
                                 }
                                 
                                 const remainingAmount = totalAmount - actualPaidAmount;
                                 const isFullyPaid = isFullyPaidByStatus || actualPaidAmount >= totalAmount;
                                 
                                 return (
-                                  <div className="text-xs space-y-1">
+                                  <div className="text-[10px]">
                                     {!isFullyPaid && remainingAmount > 0 && (
                                       <div className="text-orange-600 font-medium">
-                                        Remaining: {currencySymbol}{remainingAmount.toFixed(2)}
+                                        Rem: {currencySymbol}{remainingAmount.toFixed(2)}
                                       </div>
                                     )}
                                   </div>
@@ -1385,22 +1469,22 @@ function ReceptionistBilling() {
                               })()}
                             </div>
                           ) : (
-                            <span className="text-slate-400 text-sm">-</span>
+                            <span className="text-slate-400 text-xs">-</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-sm">
-                          <div className="flex flex-wrap gap-2">
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap gap-1.5">
                             {ultraSafeRender(req.status) === 'Pending' && (
-                              <span className="inline-flex items-center text-gray-600 text-xs bg-gray-100 px-2 py-1 rounded-md">
-                                <FileText className="h-3 w-3 mr-1" /> Awaiting Billing
+                              <span className="inline-flex items-center text-gray-600 text-[10px] bg-gray-100 px-1.5 py-0.5 rounded">
+                                Awaiting
                               </span>
                             )}
                             {ultraSafeRender(req.status) === 'Billing_Pending' && (
                               <button 
                                 onClick={() => openBillModal(req)} 
-                                className="inline-flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors duration-200 shadow-sm"
+                                className="inline-flex items-center px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-medium hover:bg-blue-700 transition-colors duration-200"
                               >
-                                <Plus className="h-3 w-3 mr-1" /> Generate Bill
+                                <Plus className="h-2.5 w-2.5 mr-0.5" /> Generate
                               </button>
                             )}
                             {ultraSafeRender(req.status) === 'Billing_Generated' && (
@@ -1409,15 +1493,14 @@ function ReceptionistBilling() {
                                 
                                 <button 
                                   onClick={() => handleViewInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-green-600 text-white rounded text-[10px] font-medium hover:bg-green-700 transition-colors duration-200"
+                                  title="View Invoice"
                                 >
-                                  <FileText className="h-3 w-3 mr-1" /> View Invoice
+                                  <FileText className="h-2.5 w-2.5 mr-0.5" /> View
                                 </button>
                                 
                                 {/* Show payment button for bills with remaining balance */}
                                 {(() => {
-                                  const partialData = getPartialPaymentData(req._id);
-                                  const totalPaidFromStorage = partialData.totalPaid;
                                   const backendPaidAmount = req.billing?.paidAmount || 0;
                                   const totalAmount = req.billing?.amount || 0;
                                   
@@ -1431,40 +1514,43 @@ function ReceptionistBilling() {
                                   if (isFullyPaidByStatus && backendPaidAmount === 0) {
                                     actualPaidAmount = totalAmount;
                                   } else {
-                                    actualPaidAmount = Math.max(backendPaidAmount, totalPaidFromStorage);
+                                    actualPaidAmount = backendPaidAmount;
                                   }
                                   
                                   const remainingAmount = totalAmount - actualPaidAmount;
                                   const hasRemainingBalance = remainingAmount > 0;
                                   
-                                  // Show payment button if there's remaining balance
+                                  // Show payment button if there's remaining balance (but only allow full payment)
                                   return hasRemainingBalance ? (
                                     <button 
                                       onClick={() => openPaymentModal(req)} 
-                                      className={`inline-flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-200 shadow-sm ${
+                                      className={`inline-flex items-center px-2 py-1 rounded text-[10px] font-medium transition-colors duration-200 ${
                                         actualPaidAmount > 0 ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'
                                       }`}
+                                      title={actualPaidAmount > 0 ? 'Add Payment' : 'Record Payment'}
                                     >
-                                      <CheckCircle className="h-3 w-3 mr-1" /> 
-                                      {actualPaidAmount > 0 ? 'Add Payment' : 'Record Payment'}
+                                      <CheckCircle className="h-2.5 w-2.5 mr-0.5" /> 
+                                      Pay
                                     </button>
                                   ) : null;
                                 })()}
                                 
                                 <button 
                                   onClick={() => handleDownloadInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-medium hover:bg-blue-700 transition-colors duration-200"
+                                  title="Download Invoice"
                                 >
-                                  <Download className="h-3 w-3 mr-1" /> Download Invoice
+                                  <Download className="h-2.5 w-2.5 mr-0.5" /> Download
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
                                 {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
-                                    className="inline-flex items-center px-3 py-2 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition-colors duration-200 shadow-sm"
+                                    className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"
+                                    title="Cancel Bill"
                                   >
-                                    <X className="h-3 w-3 mr-1" /> Cancel Bill
+                                    <X className="h-2.5 w-2.5 mr-0.5" /> Cancel
                                   </button>
                                 )}
                               </>
@@ -1474,15 +1560,25 @@ function ReceptionistBilling() {
                                 
                                 <button 
                                   onClick={() => handleViewInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-green-600 text-white rounded text-[10px] font-medium hover:bg-green-700 transition-colors duration-200"
+                                  title="View Invoice"
                                 >
-                                  <FileText className="h-3 w-3 mr-1" /> View Invoice
+                                  <FileText className="h-2.5 w-2.5 mr-0.5" /> View
                                 </button>
+                                
+                                {/* Edit Bill Button - Only for Center Admin to remove unperformed tests */}
+                                {(user?.userType === 'centeradmin' || user?.role === 'Center Admin' || user?.userType === 'CenterAdmin') && (
+                                  <button 
+                                    onClick={() => openEditBillModal(req)} 
+                                    className="inline-flex items-center px-2 py-1 bg-orange-600 text-white rounded text-[10px] font-medium hover:bg-orange-700 transition-colors duration-200"
+                                    title="Edit Bill"
+                                  >
+                                    <Edit className="h-2.5 w-2.5 mr-0.5" /> Edit
+                                  </button>
+                                )}
                                 
                                 {/* Show payment button for bills with remaining balance */}
                                 {(() => {
-                                  const partialData = getPartialPaymentData(req._id);
-                                  const totalPaidFromStorage = partialData.totalPaid;
                                   const backendPaidAmount = req.billing?.paidAmount || 0;
                                   const totalAmount = req.billing?.amount || 0;
                                   
@@ -1496,37 +1592,40 @@ function ReceptionistBilling() {
                                   if (isFullyPaidByStatus && backendPaidAmount === 0) {
                                     actualPaidAmount = totalAmount;
                                   } else {
-                                    actualPaidAmount = Math.max(backendPaidAmount, totalPaidFromStorage);
+                                    actualPaidAmount = backendPaidAmount;
                                   }
                                   
                                   const remainingAmount = totalAmount - actualPaidAmount;
                                   const hasRemainingBalance = remainingAmount > 0;
                                   
-                                  // Show payment button if there's remaining balance
+                                  // Show payment button if there's remaining balance (but only allow full payment)
                                   return hasRemainingBalance ? (
                                     <button 
                                       onClick={() => openPaymentModal(req)} 
-                                      className="inline-flex items-center px-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 transition-colors duration-200 shadow-sm"
+                                      className="inline-flex items-center px-2 py-1 bg-purple-600 text-white rounded text-[10px] font-medium hover:bg-purple-700 transition-colors duration-200"
+                                      title="Add Payment"
                                     >
-                                      <CheckCircle className="h-3 w-3 mr-1" /> Add Payment
+                                      <CheckCircle className="h-2.5 w-2.5 mr-0.5" /> Pay
                                     </button>
                                   ) : null;
                                 })()}
                                 
                                 <button 
                                   onClick={() => handleDownloadInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-medium hover:bg-blue-700 transition-colors duration-200"
+                                  title="Download Invoice"
                                 >
-                                  <Download className="h-3 w-3 mr-1" /> Download Invoice
+                                  <Download className="h-2.5 w-2.5 mr-0.5" /> Download
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
                                 {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
-                                    className="inline-flex items-center px-3 py-2 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition-colors duration-200 shadow-sm"
+                                    className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"
+                                    title="Cancel Bill"
                                   >
-                                    <X className="h-3 w-3 mr-1" /> Cancel Bill
+                                    <X className="h-2.5 w-2.5 mr-0.5" /> Cancel
                                   </button>
                                 )}
                               </>
@@ -1536,15 +1635,25 @@ function ReceptionistBilling() {
                                 
                                 <button 
                                   onClick={() => handleViewInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-green-600 text-white rounded text-[10px] font-medium hover:bg-green-700 transition-colors duration-200"
+                                  title="View Invoice"
                                 >
-                                  <FileText className="h-3 w-3 mr-1" /> View Invoice
+                                  <FileText className="h-2.5 w-2.5 mr-0.5" /> View
                                 </button>
+                                
+                                {/* Edit Bill Button - Only for Center Admin to remove unperformed tests */}
+                                {(user?.userType === 'centeradmin' || user?.role === 'Center Admin' || user?.userType === 'CenterAdmin') && (
+                                  <button 
+                                    onClick={() => openEditBillModal(req)} 
+                                    className="inline-flex items-center px-2 py-1 bg-orange-600 text-white rounded text-[10px] font-medium hover:bg-orange-700 transition-colors duration-200"
+                                    title="Edit Bill"
+                                  >
+                                    <Edit className="h-2.5 w-2.5 mr-0.5" /> Edit
+                                  </button>
+                                )}
                                 
                                 {/* Show payment button for bills with remaining balance */}
                                 {(() => {
-                                  const partialData = getPartialPaymentData(req._id);
-                                  const totalPaidFromStorage = partialData.totalPaid;
                                   const backendPaidAmount = req.billing?.paidAmount || 0;
                                   const totalAmount = req.billing?.amount || 0;
                                   
@@ -1558,37 +1667,40 @@ function ReceptionistBilling() {
                                   if (isFullyPaidByStatus && backendPaidAmount === 0) {
                                     actualPaidAmount = totalAmount;
                                   } else {
-                                    actualPaidAmount = Math.max(backendPaidAmount, totalPaidFromStorage);
+                                    actualPaidAmount = backendPaidAmount;
                                   }
                                   
                                   const remainingAmount = totalAmount - actualPaidAmount;
                                   const hasRemainingBalance = remainingAmount > 0;
                                   
-                                  // Show payment button if there's remaining balance
+                                  // Show payment button if there's remaining balance (but only allow full payment)
                                   return hasRemainingBalance ? (
                                     <button 
                                       onClick={() => openPaymentModal(req)} 
-                                      className="inline-flex items-center px-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 transition-colors duration-200 shadow-sm"
+                                      className="inline-flex items-center px-2 py-1 bg-purple-600 text-white rounded text-[10px] font-medium hover:bg-purple-700 transition-colors duration-200"
+                                      title="Add Payment"
                                     >
-                                      <CheckCircle className="h-3 w-3 mr-1" /> Add Payment
+                                      <CheckCircle className="h-2.5 w-2.5 mr-0.5" /> Pay
                                     </button>
                                   ) : null;
                                 })()}
                                 
                                 <button 
                                   onClick={() => handleDownloadInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-medium hover:bg-blue-700 transition-colors duration-200"
+                                  title="Download Invoice"
                                 >
-                                  <Download className="h-3 w-3 mr-1" /> Download Invoice
+                                  <Download className="h-2.5 w-2.5 mr-0.5" /> Download
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
                                 {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
-                                    className="inline-flex items-center px-3 py-2 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition-colors duration-200 shadow-sm"
+                                    className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"
+                                    title="Cancel Bill"
                                   >
-                                    <X className="h-3 w-3 mr-1" /> Cancel Bill
+                                    <X className="h-2.5 w-2.5 mr-0.5" /> Cancel
                                   </button>
                                 )}
                               </>
@@ -1598,15 +1710,25 @@ function ReceptionistBilling() {
                                 
                                 <button 
                                   onClick={() => handleViewInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-green-600 text-white rounded text-[10px] font-medium hover:bg-green-700 transition-colors duration-200"
+                                  title="View Invoice"
                                 >
-                                  <FileText className="h-3 w-3 mr-1" /> View Invoice
+                                  <FileText className="h-2.5 w-2.5 mr-0.5" /> View
                                 </button>
+                                
+                                {/* Edit Bill Button - Only for Center Admin to remove unperformed tests */}
+                                {(user?.userType === 'centeradmin' || user?.role === 'Center Admin' || user?.userType === 'CenterAdmin') && (
+                                  <button 
+                                    onClick={() => openEditBillModal(req)} 
+                                    className="inline-flex items-center px-2 py-1 bg-orange-600 text-white rounded text-[10px] font-medium hover:bg-orange-700 transition-colors duration-200"
+                                    title="Edit Bill"
+                                  >
+                                    <Edit className="h-2.5 w-2.5 mr-0.5" /> Edit
+                                  </button>
+                                )}
                                 
                                 {/* Show payment button for bills with remaining balance */}
                                 {(() => {
-                                  const partialData = getPartialPaymentData(req._id);
-                                  const totalPaidFromStorage = partialData.totalPaid;
                                   const backendPaidAmount = req.billing?.paidAmount || 0;
                                   const totalAmount = req.billing?.amount || 0;
                                   
@@ -1620,37 +1742,40 @@ function ReceptionistBilling() {
                                   if (isFullyPaidByStatus && backendPaidAmount === 0) {
                                     actualPaidAmount = totalAmount;
                                   } else {
-                                    actualPaidAmount = Math.max(backendPaidAmount, totalPaidFromStorage);
+                                    actualPaidAmount = backendPaidAmount;
                                   }
                                   
                                   const remainingAmount = totalAmount - actualPaidAmount;
                                   const hasRemainingBalance = remainingAmount > 0;
                                   
-                                  // Show payment button if there's remaining balance
+                                  // Show payment button if there's remaining balance (but only allow full payment)
                                   return hasRemainingBalance ? (
                                     <button 
                                       onClick={() => openPaymentModal(req)} 
-                                      className="inline-flex items-center px-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 transition-colors duration-200 shadow-sm"
+                                      className="inline-flex items-center px-2 py-1 bg-purple-600 text-white rounded text-[10px] font-medium hover:bg-purple-700 transition-colors duration-200"
+                                      title="Add Payment"
                                     >
-                                      <CheckCircle className="h-3 w-3 mr-1" /> Add Payment
+                                      <CheckCircle className="h-2.5 w-2.5 mr-0.5" /> Pay
                                     </button>
                                   ) : null;
                                 })()}
                                 
                                 <button 
                                   onClick={() => handleDownloadInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-medium hover:bg-blue-700 transition-colors duration-200"
+                                  title="Download Invoice"
                                 >
-                                  <Download className="h-3 w-3 mr-1" /> Download Invoice
+                                  <Download className="h-2.5 w-2.5 mr-0.5" /> Download
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
                                 {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
-                                    className="inline-flex items-center px-3 py-2 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition-colors duration-200 shadow-sm"
+                                    className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"
+                                    title="Cancel Bill"
                                   >
-                                    <X className="h-3 w-3 mr-1" /> Cancel Bill
+                                    <X className="h-2.5 w-2.5 mr-0.5" /> Cancel
                                   </button>
                                 )}
                               </>
@@ -1661,18 +1786,20 @@ function ReceptionistBilling() {
                               <>
                                 <button 
                                   onClick={() => handleViewInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-gray-600 text-white rounded-lg text-xs font-medium hover:bg-gray-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-gray-600 text-white rounded text-[10px] font-medium hover:bg-gray-700 transition-colors duration-200"
+                                  title="View Invoice"
                                 >
-                                  <FileText className="h-3 w-3 mr-1" /> View Invoice
+                                  <FileText className="h-2.5 w-2.5 mr-0.5" /> View
                                 </button>
                                 
                                 {/* Process Refund Button - Only show if there was payment */}
                                 {req.billing?.paidAmount > 0 && (
                                   <button 
                                     onClick={() => openRefundModal(req)} 
-                                    className="inline-flex items-center px-3 py-2 bg-pink-600 text-white rounded-lg text-xs font-medium hover:bg-pink-700 transition-colors duration-200 shadow-sm"
+                                    className="inline-flex items-center px-2 py-1 bg-pink-600 text-white rounded text-[10px] font-medium hover:bg-pink-700 transition-colors duration-200"
+                                    title="Process Refund"
                                   >
-                                    <CreditCard className="h-3 w-3 mr-1" /> Process Refund
+                                    <CreditCard className="h-2.5 w-2.5 mr-0.5" /> Refund
                                   </button>
                                 )}
                               </>
@@ -1683,13 +1810,14 @@ function ReceptionistBilling() {
                               <>
                                 <button 
                                   onClick={() => handleViewInvoice(req._id)} 
-                                  className="inline-flex items-center px-3 py-2 bg-gray-600 text-white rounded-lg text-xs font-medium hover:bg-gray-700 transition-colors duration-200 shadow-sm"
+                                  className="inline-flex items-center px-2 py-1 bg-gray-600 text-white rounded text-[10px] font-medium hover:bg-gray-700 transition-colors duration-200"
+                                  title="View Invoice"
                                 >
-                                  <FileText className="h-3 w-3 mr-1" /> View Invoice
+                                  <FileText className="h-2.5 w-2.5 mr-0.5" /> View
                                 </button>
                                 
-                                <span className="inline-flex items-center px-3 py-2 bg-pink-100 text-pink-700 rounded-lg text-xs font-medium">
-                                  <CheckCircle className="h-3 w-3 mr-1" /> Refund Processed
+                                <span className="inline-flex items-center px-2 py-1 bg-pink-100 text-pink-700 rounded text-[10px] font-medium">
+                                  <CheckCircle className="h-2.5 w-2.5 mr-0.5" /> Refunded
                                 </span>
                               </>
                             )}
@@ -2307,21 +2435,20 @@ function ReceptionistBilling() {
                         placeholder="Enter payment amount"
                         value={paymentDetails.paymentAmount}
                         onChange={(e) => {
-                          const partialData = getPartialPaymentData(selectedForPayment._id);
-                          const totalPaidFromStorage = partialData.totalPaid;
-                          const actualRemainingAmount = (selectedForPayment.billing?.amount || 0) - Math.max((selectedForPayment.billing?.paidAmount || 0), totalPaidFromStorage);
+                          const totalAmount = selectedForPayment.billing?.amount || 0;
+                          const paidAmount = selectedForPayment.billing?.paidAmount || 0;
+                          const actualRemainingAmount = totalAmount - paidAmount;
                           
                           setPaymentDetails(prev => ({ 
                             ...prev, 
-                            paymentAmount: parseFloat(e.target.value) || 0,
-                            isPartialPayment: parseFloat(e.target.value) < actualRemainingAmount
+                            paymentAmount: parseFloat(e.target.value) || 0
                           }));
                         }}
                         min="0.01"
                         max={(() => {
-                          const partialData = getPartialPaymentData(selectedForPayment._id);
-                          const totalPaidFromStorage = partialData.totalPaid;
-                          return (selectedForPayment.billing?.amount || 0) - Math.max((selectedForPayment.billing?.paidAmount || 0), totalPaidFromStorage);
+                          const totalAmount = selectedForPayment.billing?.amount || 0;
+                          const paidAmount = selectedForPayment.billing?.paidAmount || 0;
+                          return totalAmount - paidAmount;
                         })()}
                         step="0.01"
                         required
@@ -2329,14 +2456,13 @@ function ReceptionistBilling() {
                       <button
                         type="button"
                         onClick={() => {
-                          const partialData = getPartialPaymentData(selectedForPayment._id);
-                          const totalPaidFromStorage = partialData.totalPaid;
-                          const actualRemainingAmount = (selectedForPayment.billing?.amount || 0) - Math.max((selectedForPayment.billing?.paidAmount || 0), totalPaidFromStorage);
+                          const totalAmount = selectedForPayment.billing?.amount || 0;
+                          const paidAmount = selectedForPayment.billing?.paidAmount || 0;
+                          const actualRemainingAmount = totalAmount - paidAmount;
                           
                           setPaymentDetails(prev => ({ 
                             ...prev, 
-                            paymentAmount: actualRemainingAmount,
-                            isPartialPayment: false
+                            paymentAmount: actualRemainingAmount
                           }));
                         }}
                         className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-200 transition-colors"
@@ -2346,9 +2472,9 @@ function ReceptionistBilling() {
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
                       Maximum: {currencySymbol}{(() => {
-                        const partialData = getPartialPaymentData(selectedForPayment._id);
-                        const totalPaidFromStorage = partialData.totalPaid;
-                        return ((selectedForPayment.billing?.amount || 0) - Math.max((selectedForPayment.billing?.paidAmount || 0), totalPaidFromStorage)).toFixed(2);
+                        const totalAmount = selectedForPayment.billing?.amount || 0;
+                        const paidAmount = selectedForPayment.billing?.paidAmount || 0;
+                        return (totalAmount - paidAmount).toFixed(2);
                       })()}
                     </p>
                   </div>
@@ -2406,14 +2532,11 @@ function ReceptionistBilling() {
                         <h3 className="text-sm font-medium text-blue-800">Payment Workflow</h3>
                         <div className="mt-2 text-sm text-blue-700">
                           <p>1. Record payment details (you are here)</p>
-                          <p>2. Payment will be marked as "Payment Received" or "Partially Paid"</p>
+                          <p>2. Payment will be marked as "Payment Received"</p>
                           <p>3. Center admin must verify the payment</p>
                           <p>4. Once verified, test request proceeds to lab</p>
                           <p className="mt-2 font-medium text-blue-800">
-                            {paymentDetails.paymentAmount > 0 && paymentDetails.paymentAmount < ((selectedForPayment.billing?.amount || 0) - (selectedForPayment.billing?.paidAmount || 0)) 
-                              ? 'Partial Payment: Patient can pay remaining amount later'
-                              : 'Full Payment: Complete payment for this bill'
-                            }
+                            Full Payment: Complete payment for this bill
                           </p>
                           <p className="mt-2 text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
                             📝 Updating existing test request #{selectedForPayment._id.slice(-6)} - No new request will be created
@@ -2437,9 +2560,7 @@ function ReceptionistBilling() {
                     <p>• Payment will be recorded and status updated accordingly</p>
                     <p>• Center admin must verify the payment before proceeding to lab</p>
                     <p>• Test request cannot proceed to lab without center admin verification</p>
-                    {paymentDetails.paymentAmount > 0 && paymentDetails.paymentAmount < ((selectedForPayment.billing?.amount || 0) - (selectedForPayment.billing?.paidAmount || 0)) && (
-                      <p className="text-purple-600 font-medium">• Partial payment: Patient can pay remaining amount later</p>
-                    )}
+                    <p>• Full payment amount is required</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={closePaymentModal} className="px-3 py-2 text-sm rounded bg-slate-100 hover:bg-slate-200">Cancel</button>
@@ -2676,6 +2797,212 @@ function ReceptionistBilling() {
                       className="px-4 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Process Refund
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ NEW: Edit Paid Bill Modal */}
+          {showEditBillModal && selectedForEdit && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm overflow-y-auto">
+              <div className="bg-white w-full max-w-6xl max-h-[95vh] rounded-xl shadow-2xl border border-slate-200 flex flex-col my-4">
+                <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-orange-50 to-amber-50">
+                  <div>
+                    <div className="text-sm text-slate-500 font-medium">Edit Paid Bill & Process Refund</div>
+                    <div className="text-xl font-bold text-slate-800 mt-1">
+                      {ultraSafeRender(selectedForEdit.patientName) || ultraSafeRender(selectedForEdit.patientId?.name)} - {ultraSafeRender(selectedForEdit.testType)}
+                    </div>
+                    <div className="text-sm text-slate-600 mt-2">
+                      <span className="font-medium">Original Amount:</span> {currencySymbol}{selectedForEdit.billing?.amount?.toFixed(2) || '0.00'} | 
+                      <span className="font-medium ml-2">Paid:</span> {currencySymbol}{selectedForEdit.billing?.paidAmount?.toFixed(2) || '0.00'}
+                    </div>
+                  </div>
+                  <button onClick={closeEditBillModal} className="p-2 rounded-lg hover:bg-white/50 transition-colors duration-200">
+                    <X className="h-6 w-6 text-slate-600" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {/* Warning Message */}
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <div className="flex items-start">
+                      <div className="flex-shrink-0">
+                        <Clock className="h-5 w-5 text-yellow-600 mt-0.5" />
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-yellow-800">Edit Paid Bill</h3>
+                        <div className="mt-2 text-sm text-yellow-700">
+                          <p>• Remove tests that could not be performed</p>
+                          <p>• Refund amount will be automatically calculated</p>
+                          <p>• New invoice will be generated after update</p>
+                          <p className="font-semibold mt-2">• At least one item must remain in the bill</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Items Table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[800px]">
+                      <thead>
+                        <tr className="text-left text-sm font-semibold text-slate-600 border-b border-slate-200">
+                          <th className="py-3 px-4">Item/Test Name</th>
+                          <th className="py-3 px-4">Code</th>
+                          <th className="py-3 px-4">Qty</th>
+                          <th className="py-3 px-4">Unit Price</th>
+                          <th className="py-3 px-4">Total</th>
+                          <th className="py-3 px-4"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {editBillItems.map((it, idx) => {
+                          const itemTotal = (Number(it.quantity || 1) * Number(it.unitPrice || 0));
+                          return (
+                            <tr key={idx} className="text-sm hover:bg-slate-50 transition-colors duration-150">
+                              <td className="py-3 px-4">
+                                <input 
+                                  className="w-full border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                  value={it.name} 
+                                  onChange={(e) => updateEditBillItem(idx, { name: e.target.value })} 
+                                  placeholder="Test name" 
+                                  readOnly
+                                />
+                              </td>
+                              <td className="py-3 px-4">
+                                <input 
+                                  className="w-full border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                  value={it.code} 
+                                  onChange={(e) => updateEditBillItem(idx, { code: e.target.value })} 
+                                  placeholder="Code" 
+                                  readOnly
+                                />
+                              </td>
+                              <td className="py-3 px-4">
+                                <input 
+                                  type="number" 
+                                  className="w-24 border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                  value={it.quantity} 
+                                  onChange={(e) => updateEditBillItem(idx, { quantity: Number(e.target.value) })} 
+                                  min={1} 
+                                  readOnly
+                                />
+                              </td>
+                              <td className="py-3 px-4">
+                                <input 
+                                  type="number" 
+                                  className="w-32 border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                  value={it.unitPrice} 
+                                  onChange={(e) => updateEditBillItem(idx, { unitPrice: Number(e.target.value) })} 
+                                  min={0} 
+                                  step="0.01" 
+                                  readOnly
+                                />
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-slate-800">{currencySymbol}{itemTotal.toFixed(2)}</td>
+                              <td className="py-3 px-4">
+                                <button 
+                                  onClick={() => removeEditBillItem(idx)} 
+                                  className="text-red-600 text-sm hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded transition-colors duration-200 flex items-center gap-1"
+                                  disabled={editBillItems.length <= 1}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  {editBillItems.length <= 1 ? 'Cannot Remove' : 'Remove'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Summary Section */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Taxes</label>
+                      <input 
+                        type="number" 
+                        className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200 bg-white" 
+                        value={editBillTaxes} 
+                        onChange={(e) => updateEditBillTaxes(Number(e.target.value))} 
+                        min={0} 
+                        step="0.01" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Discounts</label>
+                      <input 
+                        type="number" 
+                        className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200 bg-white" 
+                        value={editBillDiscounts} 
+                        onChange={(e) => updateEditBillDiscounts(Number(e.target.value))} 
+                        min={0} 
+                        step="0.01" 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">New Bill Amount</label>
+                        <div className="text-lg font-bold text-slate-800 bg-white border border-slate-300 px-3 py-2 rounded-lg">
+                          {currencySymbol}{(() => {
+                            const newSubTotal = editBillItems.reduce((sum, item) => {
+                              return sum + (Number(item.quantity || 1) * Number(item.unitPrice || 0));
+                            }, 0);
+                            const newTotal = newSubTotal + Number(editBillTaxes || 0) - Number(editBillDiscounts || 0);
+                            return newTotal.toFixed(2);
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Refund Amount Display */}
+                  {refundAmount > 0 && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <CreditCard className="h-5 w-5 text-green-600 mr-3" />
+                          <div>
+                            <h3 className="text-sm font-medium text-green-800">Refund Amount</h3>
+                            <p className="text-xs text-green-700 mt-1">Amount to be refunded to patient</p>
+                          </div>
+                        </div>
+                        <div className="text-2xl font-bold text-green-600">
+                          {currencySymbol}{refundAmount.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Notes */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Notes (Optional)</label>
+                    <textarea 
+                      className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200 resize-none" 
+                      value={editNotes} 
+                      onChange={(e) => setEditNotes(e.target.value)} 
+                      rows={3}
+                      placeholder="Add notes about the bill edit (e.g., reason for removing tests)..."
+                    />
+                  </div>
+                </div>
+                <div className="p-6 border-t flex items-center justify-between bg-slate-50">
+                  <div className="text-sm text-slate-500">
+                    <p>• Items will be removed from the bill</p>
+                    <p>• Refund will be processed automatically</p>
+                    <p>• New invoice will be generated</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button onClick={closeEditBillModal} className="px-4 py-2 text-sm rounded bg-slate-200 hover:bg-slate-300">
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={handleUpdatePaidBill}
+                      disabled={refundAmount <= 0 || editBillItems.length === 0}
+                      className="px-4 py-2 text-sm rounded bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Update Bill & Process Refund
                     </button>
                   </div>
                 </div>

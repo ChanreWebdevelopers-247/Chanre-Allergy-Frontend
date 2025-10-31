@@ -960,19 +960,6 @@ export default function ReassignPatient() {
                                       const isPartiallyRefunded = latestBill.status === 'partially_refunded';
                                       const isCancelled = latestBill.status === 'cancelled';
                                       
-                                      // Debug logging
-                                      console.log('🔍 Patient List Debug for', patient.name, ':', {
-                                        totalAmount,
-                                        remainingPaidAmount,
-                                        refundedAmountFromRefunds,
-                                        calculatedRefundedAmount,
-                                        refundedAmount,
-                                        isRefunded,
-                                        isPartiallyRefunded,
-                                        isCancelled,
-                                        billStatus: latestBill.status
-                                      });
-                                      
                                       // For cancelled/refunded bills, show the actual current state
                                       let paidAmount = remainingPaidAmount;
                                       let balance = totalAmount - remainingPaidAmount;
@@ -990,12 +977,6 @@ export default function ReassignPatient() {
                                         paidAmount = 0;
                                         balance = totalAmount;
                                       }
-                                      
-                                      console.log('💰 Calculated amounts:', {
-                                        paidAmount,
-                                        balance,
-                                        availableForRefund: paidAmount
-                                      });
                                       
                                       const availableForRefund = paidAmount;
                                       
@@ -1074,15 +1055,6 @@ export default function ReassignPatient() {
                                     
                                     const hasPayment = latestBill && (latestBill.customData?.totals?.paid || latestBill.paidAmount || 0) > 0;
                                     
-                                    console.log(`🔍 Button logic for ${patient.name}:`, {
-                                      isReassigned,
-                                      hasReassignmentBilling,
-                                      isCancelled,
-                                      isRefunded,
-                                      hasPayment,
-                                      billStatus: latestBill?.status
-                                    });
-
                                     // Step 1: Show appropriate reassign button based on working hours violation
                                     const isWorkingHoursViolation = patient.workingHoursViolation && patient.requiresReassignment;
                                     const buttons = [];
@@ -1121,10 +1093,7 @@ export default function ReassignPatient() {
                                       buttons.push(
                                     <button
                                           key="create-bill"
-                                          onClick={() => {
-                                            console.log('📝 Create Bill clicked for:', patient.name);
-                                            handleCreateInvoice(patient);
-                                          }}
+                                          onClick={() => handleCreateInvoice(patient)}
                                       className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-md hover:bg-green-200 transition-colors flex items-center justify-center gap-1 border border-green-200"
                                     >
                                       <Calculator className="h-3 w-3" /> Create Bill
@@ -1143,7 +1112,6 @@ export default function ReassignPatient() {
                                     <button
                                           key="view-bill"
                                       onClick={() => {
-                                            console.log('👁️ View Bill clicked for:', patient.name);
                                         setSelectedPatient(patient);
                                         setShowInvoicePreviewModal(true);
                                       }}
@@ -1440,37 +1408,15 @@ export default function ReassignPatient() {
         const latestBill = selectedPatient.reassignedBilling?.[selectedPatient.reassignedBilling.length - 1];
         if (!latestBill) return null;
         
-        // COMPREHENSIVE DEBUGGING OF BACKEND DATA
-        console.log('🔍 COMPLETE BILL OBJECT:', latestBill);
-        console.log('🔍 Bill Keys:', Object.keys(latestBill));
-        console.log('🔍 Amount Field:', latestBill.amount);
-        console.log('🔍 PaidAmount Field:', latestBill.paidAmount);
-        console.log('🔍 RefundAmount Field:', latestBill.refundAmount);
-        console.log('🔍 Status Field:', latestBill.status);
-        console.log('🔍 CustomData Field:', latestBill.customData);
-        console.log('🔍 Refunds Array:', latestBill.refunds);
-        
-        // Extract data from backend - let's try different approaches
+        // Extract data from backend
         const totalAmount = latestBill.amount || 0;
         const refundedAmount = latestBill.refundAmount || 0;
         const remainingPaidAmount = latestBill.paidAmount || 0;
         
-        // Try alternative data sources
+        // Get custom data if available
         const customTotalAmount = latestBill.customData?.totals?.total || 0;
         const customPaidAmount = latestBill.customData?.totals?.paid || 0;
         const customRefundedAmount = latestBill.refunds?.reduce((sum, refund) => sum + (refund.amount || 0), 0) || 0;
-        
-        console.log('🔍 PRIMARY DATA:', {
-          totalAmount,
-          refundedAmount,
-          remainingPaidAmount
-        });
-        
-        console.log('🔍 CUSTOM DATA:', {
-          customTotalAmount,
-          customPaidAmount,
-          customRefundedAmount
-        });
         
         // Determine which data source to use
         const finalTotalAmount = customTotalAmount || totalAmount;
@@ -1483,15 +1429,6 @@ export default function ReassignPatient() {
         // - refundAmount: Amount that was refunded (600)
         // - originalPaidAmount: Original payment before refund (1050)
         const originalPaidAmount = finalTotalAmount; // For reassign patients, original payment = total amount
-        
-        // Calculate refunded amount: Original payment - Remaining amount
-        const calculatedRefundedAmount = originalPaidAmount - finalRemainingPaidAmount;
-        console.log('🔍 REFUND CALCULATION:', {
-          originalPaidAmount,
-          finalRemainingPaidAmount,
-          calculatedRefundedAmount,
-          'finalRefundedAmount (from backend)': finalRefundedAmount
-        });
         
         const isCancelled = latestBill.status === 'cancelled';
         
@@ -1511,23 +1448,10 @@ export default function ReassignPatient() {
           }
         }
         
-        // For invoice display - always show the correct amounts
-        const displayPaidAmount = originalPaidAmount;     // Always show original payment
-        const displayRefundedAmount = calculatedRefundedAmount;     // Use calculated refunded amount
-        const displayBalance = finalRemainingPaidAmount;       // Always show remaining balance (penalty)
-        
-        console.log('🔍 FINAL CALCULATIONS:', {
-          finalTotalAmount,
-          finalRefundedAmount,
-          finalRemainingPaidAmount,
-          originalPaidAmount,
-          displayPaidAmount,
-          displayRefundedAmount,
-          displayBalance,
-          calculatedRefundedAmount,
-          'latestBill.refundAmount': latestBill.refundAmount,
-          'latestBill.refunds': latestBill.refunds
-        });
+        // For invoice display - show the correct amounts
+        const displayPaidAmount = finalRemainingPaidAmount;     // Show actual paid amount
+        const displayRefundedAmount = finalRefundedAmount;      // Show refunded amount
+        const displayBalance = finalTotalAmount - finalRemainingPaidAmount; // Show balance due
         
         const isFullyPaid = displayBalance <= 0;
         
@@ -1746,125 +1670,168 @@ export default function ReassignPatient() {
               {/* Invoice Content - Inline Implementation */}
               <div className="overflow-y-auto max-h-[calc(95vh-80px)] p-6">
                 <div className="bg-white p-6 max-w-4xl mx-auto relative">
-                  {/* Header - Compact for A4 */}
-                  <div className="text-center mb-3">
-                    <h1 className="text-sm font-bold text-slate-900 mb-1">
-                      {centerInfo.name}
-                    </h1>
-                    <p className="text-xs text-slate-600 leading-tight">
-                      {centerInfo.address}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      PH: {centerInfo.phone} | Fax: {centerInfo.fax || '080-42516600'}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      Website: {centerInfo.website || 'www.chanreallergy.com'}
-                    </p>
+                  {/* Header */}
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h1 className="text-2xl font-bold text-slate-900 mb-1">
+                        {centerInfo.name}
+                      </h1>
+                      <p className="text-sm text-slate-700 mb-0.5">
+                        {centerInfo.address}
+                      </p>
+                      <p className="text-sm text-slate-700 mb-0.5">
+                        <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
+                      </p>
+                      <p className="text-sm text-slate-700">
+                        <span className="font-medium">Website:</span> {centerInfo.website}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-slate-700">
+                        <span className="font-bold">Bill No:</span> {latestBill.invoiceNumber}
+                      </p>
+                      <p className="text-sm font-medium text-slate-700">
+                        <span className="font-bold">BILL</span> Date: {new Date(latestBill.createdAt).toLocaleDateString('en-GB')}, {new Date(latestBill.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </p>
+                    </div>
                   </div>
 
-                  {/* Title */}
-                  <div className="text-center mb-3">
-                    <h2 className="text-base font-bold text-slate-900 uppercase">
-                      IN PATIENT BILL
-              </h2>
-                  </div>
-              
-                  {/* Patient and Bill Details */}
-                  <div className="grid grid-cols-2 gap-x-6 mb-4">
-                  <div>
-                      <div className="space-y-1 text-xs">
+                  {/* Patient and Consultant Information */}
+                  <div className="grid grid-cols-2 gap-6 mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 mb-2">Patient Information</h3>
+                      <div className="space-y-1 text-xs text-slate-700">
                         <div><span className="font-medium">Name:</span> {selectedPatient.name}</div>
-                        <div><span className="font-medium">Date:</span> {new Date(latestBill.createdAt).toLocaleDateString('en-GB')} {new Date(latestBill.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
-                        <div><span className="font-medium">Bill No:</span> {latestBill.invoiceNumber}</div>
-                        <div><span className="font-medium">File No:</span> {selectedPatient.uhId}</div>
-                        <div><span className="font-medium">Sex:</span> {selectedPatient.gender || 'Not specified'}</div>
-                        <div><span className="font-medium">Age:</span> {selectedPatient.age ? `${selectedPatient.age}Y` : 'Not specified'}</div>
-                  </div>
+                        <div><span className="font-medium">Age:</span> {selectedPatient.age} | <span className="font-medium">Gender:</span> {selectedPatient.gender || 'Not specified'}</div>
+                        <div><span className="font-medium">Contact:</span> {selectedPatient.phone || 'N/A'}</div>
+                        <div><span className="font-medium">File No:</span> {selectedPatient.uhId || 'N/A'}</div>
+                      </div>
                     </div>
                     <div>
-                      <div className="space-y-1 text-xs">
-                        <div><span className="font-medium">Consultant Name:</span> {selectedPatient.currentDoctor?.name || selectedPatient.assignedDoctor?.name || 'Not Assigned'}</div>
+                      <h3 className="text-sm font-bold text-slate-900 mb-2">Consultant Information</h3>
+                      <div className="space-y-1 text-xs text-slate-700">
+                        <div><span className="font-medium">Doctor:</span> {selectedPatient.currentDoctor?.name || selectedPatient.assignedDoctor?.name || 'Not Assigned'}</div>
                         <div><span className="font-medium">Department:</span> {selectedPatient.currentDoctor?.specializations || selectedPatient.assignedDoctor?.specializations || 'General Medicine'}</div>
-                        <div><span className="font-medium">User Name / Lab ID:</span> {selectedPatient.uhId}</div>
-                        <div><span className="font-medium">Password:</span> {selectedPatient.uhId}m</div>
-                        <div><span className="font-medium">Ref. Doctor:</span></div>
+                        <div><span className="font-medium">User ID:</span> {selectedPatient.uhId || 'N/A'}</div>
+                        <div><span className="font-medium">Ref. Doctor:</span> N/A</div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-                  {/* Services Table */}
-                  <div className="mb-4 no-page-break">
-                    {/* Debug: Services Table Values */}
-                    {console.log('🔍 Services Table Values:', {
-                      totalAmount,
-                      displayPaidAmount,
-                      displayBalance,
-                      displayRefundedAmount
-                    })}
+                  {/* Current Services Billed Table */}
+                  <div className="mb-4">
+                    <h3 className="text-sm font-bold text-slate-900 mb-3">Current Services Billed</h3>
                     <table className="min-w-full border-collapse border border-slate-300">
                       <thead>
                         <tr className="bg-slate-100">
-                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">S.No</th>
-                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Service Name</th>
-                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">Quantity</th>
-                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Charges</th>
-                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Paid</th>
-                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Balance</th>
-                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">Status</th>
-                      </tr>
-                    </thead>
-                      <tbody>
-                        <tr>
-                          <td className="border border-slate-300 px-3 py-2 text-xs">1</td>
-                          <td className="border border-slate-300 px-3 py-2 text-xs">{latestBill.consultationType} Consultation Fee</td>
-                          <td className="border border-slate-300 px-3 py-2 text-center text-xs">1</td>
-                          <td className="border border-slate-300 px-3 py-2 text-right text-xs">{finalTotalAmount.toFixed(2)}</td>
-                          <td className="border border-slate-300 px-3 py-2 text-right text-xs">{displayPaidAmount.toFixed(2)}</td>
-                          <td className="border border-slate-300 px-3 py-2 text-right text-xs">{displayBalance.toFixed(2)}</td>
-                          <td className="border border-slate-300 px-3 py-2 text-center text-xs">
-                            <span className={`font-medium ${
-                              isCancelled ? 'text-red-600' : 
-                              isRefunded ? 'text-purple-600' : 
-                              isPartiallyRefunded ? 'text-yellow-600' :
-                              isFullyPaid ? 'text-green-600' : 
-                              displayBalance > 0 ? 'text-orange-600' : 'text-red-600'
-                            }`}>
-                              {isCancelled ? 'Cancelled' : 
-                               isRefunded ? 'Fully Refunded' : 
-                               isPartiallyRefunded ? 'Partially Refunded' :
-                              isFullyPaid ? 'Paid' : 
-                              displayBalance > 0 ? 'Pending' : 'Unpaid'}
-                            </span>
-                        </td>
-                      </tr>
-                        {latestBill.customData?.serviceCharges?.map((service, index) => {
-                          const serviceAmount = parseFloat(service.amount);
-                          const servicePaid = displayPaidAmount > 0 ? Math.min(serviceAmount, displayPaidAmount) : 0;
-                          const serviceBalance = serviceAmount - servicePaid;
-                          const serviceStatus = serviceBalance <= 0 ? 'Paid' : 'Pending';
-                          
-                          return (
-                        <tr key={index}>
-                              <td className="border border-slate-300 px-3 py-2 text-xs">{index + 2}</td>
-                              <td className="border border-slate-300 px-3 py-2 text-xs">{service.name}</td>
-                              <td className="border border-slate-300 px-3 py-2 text-center text-xs">1</td>
-                              <td className="border border-slate-300 px-3 py-2 text-right text-xs">{serviceAmount.toFixed(2)}</td>
-                              <td className="border border-slate-300 px-3 py-2 text-right text-xs">{servicePaid.toFixed(2)}</td>
-                              <td className="border border-slate-300 px-3 py-2 text-right text-xs">{serviceBalance.toFixed(2)}</td>
-                              <td className="border border-slate-300 px-3 py-2 text-center text-xs">
-                                <span className={`font-medium ${
-                                  isCancelled ? 'text-red-600' : 
-                                  isRefunded ? 'text-purple-600' : 
-                                  serviceStatus === 'Paid' ? 'text-green-600' : 'text-orange-600'
-                                }`}>
-                                  {isCancelled ? 'Cancelled' : 
-                                   isRefunded ? 'Refunded' : 
-                                   serviceStatus}
-                                </span>
-                          </td>
+                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">S.NO</th>
+                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">SERVICE NAME</th>
+                          <th className="border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700 uppercase">QTY</th>
+                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">CHARGES</th>
+                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">PAID</th>
+                          <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">BAL</th>
+                          <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">STATUS</th>
                         </tr>
-                          );
-                        })}
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          let serialNumber = 1;
+                          const rows = [];
+                          
+                          // Add consultation fee if exists
+                          let consultationFee = latestBill.customData?.consultationFee || 0;
+                          
+                          // Fallback for old invoices without customData or with consultationFee = 0
+                          if (consultationFee === 0 && latestBill.customData?.serviceCharges && latestBill.customData.serviceCharges.length > 0) {
+                            // If service charges exist but consultation fee is 0, calculate it from total
+                            const serviceTotal = latestBill.customData.serviceCharges.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+                            consultationFee = finalTotalAmount - serviceTotal;
+                          } else if (consultationFee === 0 && (!latestBill.customData || !latestBill.customData.serviceCharges || latestBill.customData.serviceCharges.length === 0)) {
+                            // If no customData or no service charges, use the total as consultation fee
+                            consultationFee = finalTotalAmount;
+                          }
+                          
+                          if (consultationFee > 0) {
+                            const consultationPaid = displayPaidAmount > 0 ? Math.min(consultationFee, displayPaidAmount) : 0;
+                            const consultationBalance = consultationFee - consultationPaid;
+                            let consultationStatus, consultationStatusColor;
+                            
+                            if (isCancelled) {
+                              consultationStatus = 'Cancelled';
+                              consultationStatusColor = 'text-red-600';
+                            } else if (isRefunded) {
+                              consultationStatus = 'Refunded';
+                              consultationStatusColor = 'text-purple-600';
+                            } else if (isPartiallyRefunded) {
+                              consultationStatus = 'Partially Refunded';
+                              consultationStatusColor = 'text-yellow-600';
+                            } else {
+                              consultationStatus = consultationPaid >= consultationFee ? 'Paid' : consultationPaid > 0 ? 'Partial' : 'Unpaid';
+                              consultationStatusColor = consultationStatus === 'Paid' ? 'text-green-600' : consultationStatus === 'Partial' ? 'text-orange-600' : 'text-red-600';
+                            }
+                            
+                            rows.push(
+                              <tr key="consult">
+                                <td className="border border-slate-300 px-3 py-2 text-xs">{serialNumber++}</td>
+                                <td className="border border-slate-300 px-3 py-2 text-xs">
+                                  {latestBill.consultationType || 'OP'} Consultation Fee
+                                </td>
+                                <td className="border border-slate-300 px-3 py-2 text-center text-xs">1</td>
+                                <td className="border border-slate-300 px-3 py-2 text-right text-xs">{consultationFee.toFixed(2)}</td>
+                                <td className="border border-slate-300 px-3 py-2 text-right text-xs">{consultationPaid.toFixed(2)}</td>
+                                <td className="border border-slate-300 px-3 py-2 text-right text-xs">{consultationBalance.toFixed(2)}</td>
+                                <td className="border border-slate-300 px-3 py-2 text-center text-xs">
+                                  <span className={`font-medium ${consultationStatusColor}`}>
+                                    {consultationStatus}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          }
+                          
+                          // Add service charges
+                          if (latestBill.customData?.serviceCharges && latestBill.customData.serviceCharges.length > 0) {
+                            latestBill.customData.serviceCharges.forEach((service, index) => {
+                              const serviceAmount = parseFloat(service.amount);
+                              const consultationTotal = consultationFee;
+                              const servicePaid = displayPaidAmount > consultationTotal ? Math.min(serviceAmount, displayPaidAmount - consultationTotal) : 0;
+                              const serviceBalance = serviceAmount - servicePaid;
+                              let serviceStatus, serviceStatusColor;
+                              
+                              if (isCancelled) {
+                                serviceStatus = 'Cancelled';
+                                serviceStatusColor = 'text-red-600';
+                              } else if (isRefunded) {
+                                serviceStatus = 'Refunded';
+                                serviceStatusColor = 'text-purple-600';
+                              } else if (isPartiallyRefunded) {
+                                serviceStatus = 'Partially Refunded';
+                                serviceStatusColor = 'text-yellow-600';
+                              } else {
+                                serviceStatus = servicePaid >= serviceAmount ? 'Paid' : servicePaid > 0 ? 'Partial' : 'Unpaid';
+                                serviceStatusColor = serviceStatus === 'Paid' ? 'text-green-600' : serviceStatus === 'Partial' ? 'text-orange-600' : 'text-red-600';
+                              }
+                              
+                              rows.push(
+                                <tr key={`service-${index}`}>
+                                  <td className="border border-slate-300 px-3 py-2 text-xs">{serialNumber++}</td>
+                                  <td className="border border-slate-300 px-3 py-2 text-xs">{service.name}</td>
+                                  <td className="border border-slate-300 px-3 py-2 text-center text-xs">1</td>
+                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs">{serviceAmount.toFixed(2)}</td>
+                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs">{servicePaid.toFixed(2)}</td>
+                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs">{serviceBalance.toFixed(2)}</td>
+                                  <td className="border border-slate-300 px-3 py-2 text-center text-xs">
+                                    <span className={`font-medium ${serviceStatusColor}`}>
+                                      {serviceStatus}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                          }
+                          
+                          return rows;
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -1877,14 +1844,18 @@ export default function ReassignPatient() {
                           <span>Total Amount:</span>
                           <span>₹{finalTotalAmount.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span>Discount(-):</span>
-                          <span>₹0.00</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Tax Amount:</span>
-                          <span>₹0.00</span>
-                        </div>
+                        {latestBill.customData?.totals?.discountAmount > 0 && (
+                          <div className="flex justify-between">
+                            <span>Discount(-):</span>
+                            <span>₹{(latestBill.customData.totals.discountAmount || 0).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {latestBill.customData?.totals?.taxAmount > 0 && (
+                          <div className="flex justify-between">
+                            <span>Tax Amount:</span>
+                            <span>₹{(latestBill.customData.totals.taxAmount || 0).toFixed(2)}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between border-t border-slate-300 pt-1">
                           <span>Grand Total:</span>
                           <span>₹{finalTotalAmount.toFixed(2)}</span>

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchCenterAdmin, createCenterAdmin, updateCenterAdmin } from '../../../features/superadmin/superadminThunks';
 import { resetSuperadminState } from '../../../features/superadmin/superadminSlice';
+import { getCenterById } from '../../../features/center/centerThunks';
 import { User, GraduationCap, Badge, Building2, Hash, Phone, Mail, Save, ArrowLeft, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'react-toastify';
 
@@ -12,6 +13,7 @@ export default function EditCenterAdmin() {
   const dispatch = useDispatch();
 
   const { centerAdmin, loading, error, isNewAdmin, addSuccess, updateSuccess } = useSelector((state) => state.superadmin);
+  const { currentCenter: center } = useSelector((state) => state.center || { currentCenter: null });
 
   const [admin, setAdmin] = useState({
     name: '',
@@ -30,30 +32,67 @@ export default function EditCenterAdmin() {
   useEffect(() => {
     if (id) {
       dispatch(fetchCenterAdmin(id));
+      // Always try to fetch center data with id initially
+      // This will work if id is a centerId (new admin case)
+      dispatch(getCenterById(id));
     }
     return () => {
       dispatch(resetSuperadminState());
     };
   }, [dispatch, id]);
 
+  // Fetch center data when we confirm it's a new admin (fallback)
+  useEffect(() => {
+    if (id && isNewAdmin === true && !center) {
+      // For new admin, id is the centerId - ensure center data is fetched
+      dispatch(getCenterById(id));
+    }
+  }, [dispatch, id, isNewAdmin, center]);
+
+  // When centerAdmin is loaded and it's an existing admin, fetch center data using centerId
+  useEffect(() => {
+    if (centerAdmin && isNewAdmin === false && centerAdmin.centerId && !center) {
+      // For existing admin, get centerId from centerAdmin and fetch center data
+      dispatch(getCenterById(centerAdmin.centerId));
+    }
+  }, [dispatch, centerAdmin, isNewAdmin, center]);
+
   useEffect(() => {
     if (centerAdmin) {
-      const adminData = { 
-        ...centerAdmin, 
-        password: '',
-        qualification: centerAdmin.qualification || '',
-        designation: centerAdmin.designation || '',
-        kmcNumber: centerAdmin.kmcNumber || '',
-        hospitalName: centerAdmin.hospitalName || '',
-        centerCode: centerAdmin.centerCode || '',
-        username: centerAdmin.username || '',
-        phone: centerAdmin.phone || '',
-        email: centerAdmin.email || '',
-        name: centerAdmin.name || ''
-      };
-      setAdmin(adminData);
+      setAdmin(prev => {
+        const adminData = { 
+          ...centerAdmin, 
+          password: '',
+          qualification: centerAdmin.qualification || '',
+          designation: centerAdmin.designation || '',
+          kmcNumber: centerAdmin.kmcNumber || '',
+          username: centerAdmin.username || '',
+          phone: centerAdmin.phone || '',
+          email: centerAdmin.email || '',
+          name: centerAdmin.name || '',
+          // Always preserve hospitalName and centerCode from center data (not from centerAdmin)
+          // If center data hasn't loaded yet, these will be empty until center loads
+          hospitalName: prev.hospitalName || '',
+          centerCode: prev.centerCode || ''
+        };
+        return adminData;
+      });
     }
   }, [centerAdmin]);
+
+  // Auto-fill hospitalName and centerCode from center data - this ALWAYS overrides stored values
+  useEffect(() => {
+    if (center) {
+      const centerName = center.name || center.centername || '';
+      const centerCode = center.code || '';
+      console.log('🔄 Auto-filling from center:', { centerName, centerCode, center }); // Debug log
+      setAdmin(prev => ({
+        ...prev,
+        hospitalName: centerName, // Use name field from center (backend model field)
+        centerCode: centerCode // Always use center code from center data
+      }));
+    }
+  }, [center]);
 
   useEffect(() => {
     if (addSuccess) {
@@ -214,49 +253,54 @@ export default function EditCenterAdmin() {
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2 flex items-center gap-2">
                   <Badge className="h-4 w-4 text-blue-500" />
-                  KMC Number *
+                  KMC Number
                 </label>
                 <input
                   type="text"
                   name="kmcNumber"
                   value={admin.kmcNumber}
                   onChange={handleAdminChange}
-                  required
                   className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors text-xs"
-                  placeholder="Enter KMC number"
+                  placeholder="Enter KMC number (optional)"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2 flex items-center gap-2">
                   <Building2 className="h-4 w-4 text-blue-500" />
-                  Hospital Name *
+                  Hospital Name * <span className="text-blue-600 text-xs font-normal">(Auto-filled from Center)</span>
                 </label>
                 <input
                   type="text"
                   name="hospitalName"
                   value={admin.hospitalName}
-                  onChange={handleAdminChange}
+                  readOnly
                   required
-                  className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors text-xs"
-                  placeholder="Enter hospital name"
+                  className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
+                  placeholder="Auto-filled from center name"
                 />
+                <p className="mt-1 text-xs text-slate-500 italic">
+                  Automatically synchronized with the center name
+                </p>
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2 flex items-center gap-2">
                   <Hash className="h-4 w-4 text-blue-500" />
-                  Center Code *
+                  Center Code * <span className="text-blue-600 text-xs font-normal">(Auto-filled from Center)</span>
                 </label>
                 <input
                   type="text"
                   name="centerCode"
                   value={admin.centerCode}
-                  onChange={handleAdminChange}
+                  readOnly
                   required
-                  className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors text-xs"
-                  placeholder="Enter center code"
+                  className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
+                  placeholder="Auto-filled from center code"
                 />
+                <p className="mt-1 text-xs text-slate-500 italic">
+                  Automatically synchronized with the center code
+                </p>
               </div>
 
               <div>

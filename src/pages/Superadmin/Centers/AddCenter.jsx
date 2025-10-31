@@ -130,10 +130,16 @@ export default function AddCenterWithAdmin() {
     }
   }, [error]);
 
-  // Sync admin centerCode with center code
+  // Sync admin centerCode and hospitalName with center information
   useEffect(() => {
-    setAdmin(prev => ({ ...prev, centerCode: center.code }));
-  }, [center.code]);
+    const centerName = center.name || center.centername || '';
+    console.log('🔄 Syncing admin with center:', { centerName, centerCode: center.code, center }); // Debug log
+    setAdmin(prev => ({ 
+      ...prev, 
+      centerCode: center.code,
+      hospitalName: centerName // Use name field from center (backend model field)
+    }));
+  }, [center.code, center.name, center.centername]);
 
   return (
     <div className="min-h-screen  p-3 sm:p-4 md:p-6">
@@ -294,26 +300,48 @@ export default function AddCenterWithAdmin() {
                   errors={adminErrors.designation}
                   touched={adminTouched.designation}
                 />
-                <Input 
-                  label="KMC Number" 
-                  name="kmcNumber" 
-                  value={admin.kmcNumber} 
-                  onChange={handleAdminChange} 
-                  onBlur={handleAdminBlur}
-                  icon={<Badge className="h-4 w-4 text-blue-500" />}
-                  errors={adminErrors.kmcNumber}
-                  touched={adminTouched.kmcNumber}
-                />
-                <Input 
-                  label="Hospital Name" 
-                  name="hospitalName" 
-                  value={admin.hospitalName} 
-                  onChange={handleAdminChange} 
-                  onBlur={handleAdminBlur}
-                  icon={<Building2 className="h-4 w-4 text-blue-500" />}
-                  errors={adminErrors.hospitalName}
-                  touched={adminTouched.hospitalName}
-                />
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-2 flex items-center gap-2">
+                    <Badge className="h-4 w-4 text-blue-500" />
+                    KMC Number
+                  </label>
+                  <input
+                    name="kmcNumber"
+                    type="text"
+                    value={admin.kmcNumber}
+                    onChange={handleAdminChange}
+                    onBlur={handleAdminBlur}
+                    className={`w-full px-3 sm:px-4 py-2 sm:py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors text-xs ${
+                      adminTouched.kmcNumber && adminErrors.kmcNumber 
+                        ? 'border-red-300 bg-red-50' 
+                        : 'border-slate-200'
+                    }`}
+                    placeholder="Enter KMC number (optional)"
+                  />
+                  {adminTouched.kmcNumber && adminErrors.kmcNumber && (
+                    <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {adminErrors.kmcNumber}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-2 flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-blue-500" />
+                    Hospital Name * <span className="text-blue-600 text-xs font-normal">(Auto-filled from Center Name)</span>
+                  </label>
+                  <input
+                    name="hospitalName"
+                    type="text"
+                    value={admin.hospitalName}
+                    readOnly
+                    className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
+                    placeholder="Auto-filled from center name"
+                  />
+                  <p className="mt-1 text-xs text-slate-500 italic">
+                    Automatically synchronized with the center name above
+                  </p>
+                </div>
                 <Input 
                   label="Phone" 
                   name="phone" 

@@ -23,7 +23,9 @@ import {
   Edit,
   Save,
   X,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  CreditCard
 } from 'lucide-react';
 
 const CenterAdminBilling = () => {
@@ -51,6 +53,15 @@ const CenterAdminBilling = () => {
     paymentStatus: 'partial',
     notes: ''
   });
+  
+  // Edit paid bill modal state
+  const [showEditBillModal, setShowEditBillModal] = useState(false);
+  const [selectedForEdit, setSelectedForEdit] = useState(null);
+  const [editBillItems, setEditBillItems] = useState([]);
+  const [editBillTaxes, setEditBillTaxes] = useState(0);
+  const [editBillDiscounts, setEditBillDiscounts] = useState(0);
+  const [refundAmount, setRefundAmount] = useState(0);
+  const [editNotes, setEditNotes] = useState('');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -876,6 +887,189 @@ const CenterAdminBilling = () => {
     }
   };
 
+  // ✅ NEW: Open edit bill modal
+  const openEditBillModal = (item) => {
+    if (!item.billing || !item.billing.items || !Array.isArray(item.billing.items)) {
+      toast.error('Bill data is not available or invalid');
+      return;
+    }
+
+    setSelectedForEdit(item);
+    // Initialize edit items from existing bill
+    const initialItems = item.billing.items.map(billItem => ({
+      name: billItem.name || '',
+      code: billItem.code || '',
+      quantity: billItem.quantity || 1,
+      unitPrice: billItem.unitPrice || 0,
+      _id: billItem._id // Keep item ID for reference
+    }));
+    setEditBillItems(initialItems);
+    setEditBillTaxes(item.billing.taxes || 0);
+    setEditBillDiscounts(item.billing.discounts || 0);
+    setEditNotes(item.billing.notes || '');
+    
+    // Calculate initial refund amount
+    calculateRefund(item, initialItems, item.billing.taxes || 0, item.billing.discounts || 0);
+    setShowEditBillModal(true);
+  };
+
+  // ✅ NEW: Calculate refund amount with proportional discount
+  const calculateRefund = (item, items, taxes, discounts) => {
+    const originalAmount = item.billing?.amount || 0;
+    const originalSubTotal = item.billing?.items?.reduce((sum, billItem) => {
+      return sum + (Number(billItem.quantity || 1) * Number(billItem.unitPrice || 0));
+    }, 0) || originalAmount;
+    const originalDiscounts = item.billing?.discounts || 0;
+    const originalTaxes = item.billing?.taxes || 0;
+    
+    // Calculate new amount from remaining items
+    const newSubTotal = items.reduce((sum, billItem) => {
+      return sum + (Number(billItem.quantity || 1) * Number(billItem.unitPrice || 0));
+    }, 0);
+    
+    const newTaxes = Number(taxes || 0);
+    const newDiscounts = Number(discounts || 0);
+    
+    // Calculate removed items value (before discount)
+    const removedSubTotal = originalSubTotal - newSubTotal;
+    
+    // Calculate proportional discount for removed items
+    // If original sub-total was 460 and discount was 46, and we remove 360:
+    // Proportional discount = (360 / 460) * 46 = 36
+    let proportionalDiscountOnRemoved = 0;
+    if (originalSubTotal > 0 && removedSubTotal > 0 && originalDiscounts > 0) {
+      proportionalDiscountOnRemoved = (removedSubTotal / originalSubTotal) * originalDiscounts;
+    }
+    
+    // Calculate proportional tax for removed items (if applicable)
+    let proportionalTaxOnRemoved = 0;
+    if (originalSubTotal > 0 && removedSubTotal > 0 && originalTaxes > 0) {
+      proportionalTaxOnRemoved = (removedSubTotal / originalSubTotal) * originalTaxes;
+    }
+    
+    // Refund = removed items value - proportional discount on removed items
+    // This ensures the refund accounts for the discount the patient actually received
+    const refund = removedSubTotal + proportionalTaxOnRemoved - proportionalDiscountOnRemoved;
+    setRefundAmount(refund > 0 ? refund : 0);
+    
+    return refund;
+  };
+
+  // ✅ NEW: Update edit bill item
+  const updateEditBillItem = (idx, patch) => {
+    setEditBillItems(prev => {
+      const updated = prev.map((it, i) => i === idx ? { ...it, ...patch } : it);
+      // Recalculate refund when items change
+      if (selectedForEdit) {
+        calculateRefund(selectedForEdit, updated, editBillTaxes, editBillDiscounts);
+      }
+      return updated;
+    });
+  };
+
+  // ✅ NEW: Update edit bill taxes
+  const updateEditBillTaxes = (value) => {
+    setEditBillTaxes(value);
+    if (selectedForEdit) {
+      calculateRefund(selectedForEdit, editBillItems, value, editBillDiscounts);
+    }
+  };
+
+  // ✅ NEW: Update edit bill discounts
+  const updateEditBillDiscounts = (value) => {
+    setEditBillDiscounts(value);
+    if (selectedForEdit) {
+      calculateRefund(selectedForEdit, editBillItems, editBillTaxes, value);
+    }
+  };
+
+  // ✅ NEW: Remove item from edit bill
+  const removeEditBillItem = (idx) => {
+    setEditBillItems(prev => {
+      if (prev.length <= 1) {
+        toast.error('At least one item must remain in the bill');
+        return prev;
+      }
+      const updated = prev.filter((_, i) => i !== idx);
+      // Keep the original discounts for proportional calculation
+      // The refund will calculate proportional discount automatically
+      // Recalculate refund when items change (with original discounts for proportional calc)
+      if (selectedForEdit) {
+        calculateRefund(selectedForEdit, updated, editBillTaxes, editBillDiscounts);
+      }
+      return updated;
+    });
+  };
+
+  // ✅ NEW: Handle update paid bill
+  const handleUpdatePaidBill = async () => {
+    if (!selectedForEdit) return;
+
+    // Validate items
+    const validItems = editBillItems.filter(item => item.name && item.name.trim() && Number(item.unitPrice) > 0);
+    if (validItems.length === 0) {
+      toast.error('At least one item must remain in the bill');
+      return;
+    }
+
+    // Calculate new amounts
+    const newSubTotal = validItems.reduce((sum, item) => {
+      return sum + (Number(item.quantity || 1) * Number(item.unitPrice || 0));
+    }, 0);
+    const newTaxes = Number(editBillTaxes || 0);
+    const newDiscounts = Number(editBillDiscounts || 0);
+    const newAmount = newSubTotal + newTaxes - newDiscounts;
+    const originalAmount = selectedForEdit.billing?.amount || 0;
+
+    if (newAmount >= originalAmount) {
+      toast.error('New bill amount cannot be greater than or equal to original amount. Remove items to generate refund.');
+      return;
+    }
+
+    if (refundAmount <= 0) {
+      toast.error('No refund amount calculated. Please remove items to generate a refund.');
+      return;
+    }
+
+    try {
+      const cleanedItems = validItems.map(item => ({
+        name: item.name.trim(),
+        code: item.code || '',
+        quantity: Number(item.quantity || 1),
+        unitPrice: Number(item.unitPrice)
+      }));
+
+      const payload = {
+        items: cleanedItems,
+        taxes: newTaxes,
+        discounts: newDiscounts,
+        notes: editNotes,
+        refundAmount: refundAmount,
+        newAmount: newAmount,
+        originalAmount: originalAmount
+      };
+
+      await API.put(`/billing/test-requests/${selectedForEdit._id}/update-paid-bill`, payload);
+      toast.success(`Bill updated successfully! Refund amount: ₹${refundAmount.toFixed(2)}`);
+      setShowEditBillModal(false);
+      setSelectedForEdit(null);
+      await fetchBillingData();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to update bill and process refund');
+    }
+  };
+
+  // ✅ NEW: Close edit bill modal
+  const closeEditBillModal = () => {
+    setShowEditBillModal(false);
+    setSelectedForEdit(null);
+    setEditBillItems([]);
+    setEditBillTaxes(0);
+    setEditBillDiscounts(0);
+    setRefundAmount(0);
+    setEditNotes('');
+  };
+
   // Calculate totals with payment amount logic
   const calculateTotals = () => {
     // Filter to only include items that have billing information
@@ -1617,16 +1811,20 @@ const CenterAdminBilling = () => {
                                 </button>
                               )}
                               
-                              {/* Edit Payment Button - Only show for bills that have been generated */}
-                              {item.billing && item.billing.amount > 0 && (
-                                <button
-                                  onClick={() => openEditModal(item)}
-                                  className="p-2 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded-lg transition-colors duration-200"
-                                  title="Edit Payment Status"
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </button>
-                              )}
+                              {/* Edit Bill Button - Show for paid bills to remove unperformed tests */}
+                              {(() => {
+                                const isPaid = item.billing?.status === 'paid' || item.billing?.status === 'verified';
+                                const isPaidByAmount = item.billing?.paidAmount >= item.billing?.amount;
+                                return (isPaid || isPaidByAmount) && item.billing && item.billing.items && Array.isArray(item.billing.items) && item.billing.items.length > 0 ? (
+                                  <button
+                                    onClick={() => openEditBillModal(item)}
+                                    className="p-2 text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-lg transition-colors duration-200"
+                                    title="Edit Paid Bill & Process Refund"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                ) : null;
+                              })()}
                               
                             </div>
                           </td>
@@ -1942,6 +2140,212 @@ const CenterAdminBilling = () => {
                   >
                     <Save className="h-4 w-4" />
                     Update Payment
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ NEW: Edit Paid Bill Modal */}
+        {showEditBillModal && selectedForEdit && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm overflow-y-auto">
+            <div className="bg-white w-full max-w-6xl max-h-[95vh] rounded-xl shadow-2xl border border-slate-200 flex flex-col my-4">
+              <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-orange-50 to-amber-50">
+                <div>
+                  <div className="text-sm text-slate-500 font-medium">Edit Paid Bill & Process Refund</div>
+                  <div className="text-xl font-bold text-slate-800 mt-1">
+                    {selectedForEdit.patientName || 'Unknown Patient'} - {selectedForEdit.testType || 'Unknown Test'}
+                  </div>
+                  <div className="text-sm text-slate-600 mt-2">
+                    <span className="font-medium">Original Amount:</span> ₹{selectedForEdit.billing?.amount?.toFixed(2) || '0.00'} | 
+                    <span className="font-medium ml-2">Paid:</span> ₹{selectedForEdit.billing?.paidAmount?.toFixed(2) || '0.00'}
+                  </div>
+                </div>
+                <button onClick={closeEditBillModal} className="p-2 rounded-lg hover:bg-white/50 transition-colors duration-200">
+                  <X className="h-6 w-6 text-slate-600" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Warning Message */}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0">
+                      <Clock className="h-5 w-5 text-yellow-600 mt-0.5" />
+                    </div>
+                    <div className="ml-3">
+                      <h3 className="text-sm font-medium text-yellow-800">Edit Paid Bill</h3>
+                      <div className="mt-2 text-sm text-yellow-700">
+                        <p>• Remove tests that could not be performed</p>
+                        <p>• Refund amount will be automatically calculated</p>
+                        <p>• New invoice will be generated after update</p>
+                        <p className="font-semibold mt-2">• At least one item must remain in the bill</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[800px]">
+                    <thead>
+                      <tr className="text-left text-sm font-semibold text-slate-600 border-b border-slate-200">
+                        <th className="py-3 px-4">Item/Test Name</th>
+                        <th className="py-3 px-4">Code</th>
+                        <th className="py-3 px-4">Qty</th>
+                        <th className="py-3 px-4">Unit Price</th>
+                        <th className="py-3 px-4">Total</th>
+                        <th className="py-3 px-4"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {editBillItems.map((it, idx) => {
+                        const itemTotal = (Number(it.quantity || 1) * Number(it.unitPrice || 0));
+                        return (
+                          <tr key={idx} className="text-sm hover:bg-slate-50 transition-colors duration-150">
+                            <td className="py-3 px-4">
+                              <input 
+                                className="w-full border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                value={it.name} 
+                                onChange={(e) => updateEditBillItem(idx, { name: e.target.value })} 
+                                placeholder="Test name" 
+                                readOnly
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <input 
+                                className="w-full border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                value={it.code} 
+                                onChange={(e) => updateEditBillItem(idx, { code: e.target.value })} 
+                                placeholder="Code" 
+                                readOnly
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <input 
+                                type="number" 
+                                className="w-24 border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                value={it.quantity} 
+                                onChange={(e) => updateEditBillItem(idx, { quantity: Number(e.target.value) })} 
+                                min={1} 
+                                readOnly
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <input 
+                                type="number" 
+                                className="w-32 border border-slate-300 px-3 py-2 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed" 
+                                value={it.unitPrice} 
+                                onChange={(e) => updateEditBillItem(idx, { unitPrice: Number(e.target.value) })} 
+                                min={0} 
+                                step="0.01" 
+                                readOnly
+                              />
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-slate-800">₹{itemTotal.toFixed(2)}</td>
+                            <td className="py-3 px-4">
+                              <button 
+                                onClick={() => removeEditBillItem(idx)} 
+                                className="text-red-600 text-sm hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded transition-colors duration-200 flex items-center gap-1"
+                                disabled={editBillItems.length <= 1}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                {editBillItems.length <= 1 ? 'Cannot Remove' : 'Remove'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary Section */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Taxes</label>
+                    <input 
+                      type="number" 
+                      className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200 bg-white" 
+                      value={editBillTaxes} 
+                      onChange={(e) => updateEditBillTaxes(Number(e.target.value))} 
+                      min={0} 
+                      step="0.01" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Discounts</label>
+                    <input 
+                      type="number" 
+                      className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200 bg-white" 
+                      value={editBillDiscounts} 
+                      onChange={(e) => updateEditBillDiscounts(Number(e.target.value))} 
+                      min={0} 
+                      step="0.01" 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">New Bill Amount</label>
+                      <div className="text-lg font-bold text-slate-800 bg-white border border-slate-300 px-3 py-2 rounded-lg">
+                        ₹{(() => {
+                          const newSubTotal = editBillItems.reduce((sum, item) => {
+                            return sum + (Number(item.quantity || 1) * Number(item.unitPrice || 0));
+                          }, 0);
+                          const newTotal = newSubTotal + Number(editBillTaxes || 0) - Number(editBillDiscounts || 0);
+                          return newTotal.toFixed(2);
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Refund Amount Display */}
+                {refundAmount > 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        <CreditCard className="h-5 w-5 text-green-600 mr-3" />
+                        <div>
+                          <h3 className="text-sm font-medium text-green-800">Refund Amount</h3>
+                          <p className="text-xs text-green-700 mt-1">Amount to be refunded to patient</p>
+                        </div>
+                      </div>
+                      <div className="text-2xl font-bold text-green-600">
+                        ₹{refundAmount.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Notes (Optional)</label>
+                  <textarea 
+                    className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200 resize-none" 
+                    value={editNotes} 
+                    onChange={(e) => setEditNotes(e.target.value)} 
+                    rows={3}
+                    placeholder="Add notes about the bill edit (e.g., reason for removing tests)..."
+                  />
+                </div>
+              </div>
+              <div className="p-6 border-t flex items-center justify-between bg-slate-50">
+                <div className="text-sm text-slate-500">
+                  <p>• Items will be removed from the bill</p>
+                  <p>• Refund will be processed automatically</p>
+                  <p>• New invoice will be generated</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={closeEditBillModal} className="px-4 py-2 text-sm rounded bg-slate-200 hover:bg-slate-300">
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleUpdatePaidBill}
+                    disabled={refundAmount <= 0 || editBillItems.length === 0}
+                    className="px-4 py-2 text-sm rounded bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Update Bill & Process Refund
                   </button>
                 </div>
               </div>

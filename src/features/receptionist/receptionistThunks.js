@@ -91,6 +91,19 @@ export const verifyReceptionistPayment = createAsyncThunk(
   }
 );
 
+// Billing: update paid bill and process refund
+export const updatePaidBill = createAsyncThunk(
+  'receptionist/updatePaidBill',
+  async ({ requestId, payload }, { rejectWithValue }) => {
+    try {
+      const res = await API.put(`/billing/test-requests/${requestId}/update-paid-bill`, payload);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to update bill and process refund');
+    }
+  }
+);
+
 // Fetch patients for receptionist
 export const fetchReceptionistPatients = createAsyncThunk(
   'receptionist/fetchPatients',
