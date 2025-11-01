@@ -80,8 +80,110 @@ export default function ConsultationBilling() {
   };
 
   // Enhanced function to get appointment display data
+  // Priority: 1) Confirmed online booking 2) Scheduled appointments 3) Manual/payment appointmentTime
   const getAppointmentDisplayData = (patient) => {
-    // If patient has appointmentTime, use that (manual appointment)
+    // Debug logging for Ajay
+    if (patient.name === 'Ajay' || patient.uhId === '2345003') {
+      console.log('🔍 getAppointmentDisplayData for Ajay:', {
+        appointmentId: patient.appointmentId,
+        appointmentIdType: typeof patient.appointmentId,
+        fromAppointment: patient.fromAppointment,
+        appointments: patient.appointments,
+        appointmentTime: patient.appointmentTime,
+        allPatientKeys: Object.keys(patient)
+      });
+    }
+    
+    // Priority 1: If patient has populated appointmentId (online booking), use confirmed date
+    if (patient.appointmentId) {
+      let appointmentObj = patient.appointmentId;
+      
+      // If appointmentId is just an ID string, we can't use it directly
+      // But if it's an object with appointment data, use it
+      if (typeof appointmentObj === 'object' && appointmentObj !== null) {
+        // Prefer confirmed date/time, fall back to preferred if not confirmed
+        const confirmedDate = appointmentObj.confirmedDate;
+        const confirmedTime = appointmentObj.confirmedTime;
+        const preferredDate = appointmentObj.preferredDate;
+        const preferredTime = appointmentObj.preferredTime;
+        
+        // Use confirmed date if available, otherwise preferred date
+        const appointmentDate = confirmedDate || preferredDate;
+        const appointmentTime = confirmedTime || preferredTime;
+        
+        if (appointmentDate) {
+          if (patient.name === 'Ajay' || patient.uhId === '2345003') {
+            console.log('✅ Found appointment in appointmentId object:', {
+              confirmedDate,
+              preferredDate,
+              appointmentDate,
+              confirmedTime,
+              preferredTime,
+              appointmentTime
+            });
+          }
+          
+          return {
+            type: 'online',
+            date: appointmentDate,
+            time: appointmentTime,
+            status: appointmentObj.status,
+            code: appointmentObj.confirmationCode,
+            reason: appointmentObj.reasonForVisit,
+            symptoms: appointmentObj.symptoms,
+            fromAppointment: true
+          };
+        }
+      }
+    }
+    
+    // Also check if patient.fromAppointment is true and try to fetch appointment data
+    if (patient.fromAppointment && !patient.appointmentId) {
+      // This might need to be fetched separately, but for now skip
+      if (patient.name === 'Ajay' || patient.uhId === '2345003') {
+        console.log('⚠️ Patient has fromAppointment=true but appointmentId is not populated');
+      }
+    }
+    
+    // Priority 2: Check appointments array for scheduled appointments (from payment processing)
+    if (patient.appointments && patient.appointments.length > 0) {
+      // Find the earliest scheduled appointment
+      const scheduledAppointments = patient.appointments
+        .map(apt => {
+          const dateField = apt.scheduledAt || apt.appointmentTime || apt.confirmedDate || apt.preferredDate || apt.date;
+          if (!dateField) return null;
+          
+          try {
+            const aptDate = new Date(dateField);
+            if (!isNaN(aptDate.getTime())) {
+              return {
+                ...apt,
+                _appointmentDate: aptDate
+              };
+            }
+          } catch (e) {
+            // Invalid date
+          }
+          return null;
+        })
+        .filter(apt => apt !== null && apt._appointmentDate);
+      
+      if (scheduledAppointments.length > 0) {
+        // Sort by date (earliest first)
+        scheduledAppointments.sort((a, b) => a._appointmentDate.getTime() - b._appointmentDate.getTime());
+        const earliestAppointment = scheduledAppointments[0];
+        
+        return {
+          type: 'manual',
+          date: earliestAppointment._appointmentDate,
+          status: earliestAppointment.status || patient.appointmentStatus || 'scheduled',
+          notes: earliestAppointment.notes,
+          fromAppointment: patient.fromAppointment || false
+        };
+      }
+    }
+    
+    // Priority 3: If patient has appointmentTime (manual appointment or payment scheduled)
     if (patient.appointmentTime) {
       return {
         type: 'manual',
@@ -89,20 +191,6 @@ export default function ConsultationBilling() {
         status: patient.appointmentStatus,
         notes: patient.appointmentNotes,
         fromAppointment: patient.fromAppointment
-      };
-    }
-    
-    // If patient has populated appointmentId, use that
-    if (patient.appointmentId && typeof patient.appointmentId === 'object') {
-      return {
-        type: patient.appointmentId.appointmentType,
-        date: patient.appointmentId.confirmedDate || patient.appointmentId.preferredDate,
-        time: patient.appointmentId.confirmedTime || patient.appointmentId.preferredTime,
-        status: patient.appointmentId.status,
-        code: patient.appointmentId.confirmationCode,
-        reason: patient.appointmentId.reasonForVisit,
-        symptoms: patient.appointmentId.symptoms,
-        fromAppointment: true
       };
     }
     
@@ -300,6 +388,18 @@ export default function ConsultationBilling() {
     fetchCenterInfo(); // Fetch center information when component mounts
     fetchCenterFees(); // Fetch center fees when component mounts
   }, [dispatch]);
+
+  // Set default appointment date when payment modal opens
+  useEffect(() => {
+    if (showPaymentModal && !paymentData.appointmentTime) {
+      // Set default appointment date to tomorrow at 9 AM
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      const defaultDate = tomorrow.toISOString().slice(0, 16);
+      setPaymentData(prev => ({...prev, appointmentTime: defaultDate}));
+    }
+  }, [showPaymentModal]);
 
   // Removed auto-selection logic for reassigned patients
 
@@ -648,30 +748,74 @@ export default function ConsultationBilling() {
             // Auto-fill appointment time if available
             let appointmentDateTime = null;
             
+            // Helper function to parse time string (handles both 24h and 12h formats)
+            const parseTime = (timeStr) => {
+              if (!timeStr) return null;
+              
+              // Handle 12-hour format (e.g., "04:30 PM")
+              if (timeStr.includes('PM') || timeStr.includes('AM')) {
+                const [time, period] = timeStr.trim().split(' ');
+                const [hours, minutes] = time.split(':');
+                let hour24 = parseInt(hours);
+                if (period === 'PM' && hour24 !== 12) hour24 += 12;
+                if (period === 'AM' && hour24 === 12) hour24 = 0;
+                return { hours: hour24, minutes: parseInt(minutes) || 0 };
+              }
+              
+              // Handle 24-hour format (e.g., "16:30")
+              const [hours, minutes] = timeStr.split(':');
+              return { hours: parseInt(hours) || 0, minutes: parseInt(minutes) || 0 };
+            };
+            
+            // Helper function to format datetime for datetime-local input (YYYY-MM-DDTHH:mm)
+            const formatDateTimeLocal = (date, time) => {
+              if (!date || !time) return null;
+              
+              const dateObj = new Date(date);
+              const timeObj = parseTime(time);
+              
+              if (!timeObj) return null;
+              
+              // Create date in local timezone (don't convert to UTC)
+              const localDate = new Date(dateObj);
+              localDate.setHours(timeObj.hours, timeObj.minutes, 0, 0);
+              
+              // Format as YYYY-MM-DDTHH:mm for datetime-local input (local time, not UTC)
+              const year = localDate.getFullYear();
+              const month = String(localDate.getMonth() + 1).padStart(2, '0');
+              const day = String(localDate.getDate()).padStart(2, '0');
+              const hours = String(localDate.getHours()).padStart(2, '0');
+              const minutes = String(localDate.getMinutes()).padStart(2, '0');
+              
+              return `${year}-${month}-${day}T${hours}:${minutes}`;
+            };
+            
             if (appointment.confirmedDate && appointment.confirmedTime) {
               console.log('Using confirmed date/time:', appointment.confirmedDate, appointment.confirmedTime);
-              appointmentDateTime = new Date(appointment.confirmedDate);
-              const [hours, minutes] = appointment.confirmedTime.split(':');
-              appointmentDateTime.setHours(parseInt(hours), parseInt(minutes));
+              const formattedDateTime = formatDateTimeLocal(appointment.confirmedDate, appointment.confirmedTime);
+              if (formattedDateTime) {
+                appointmentDateTime = formattedDateTime;
+              }
             } else if (appointment.preferredDate && appointment.preferredTime) {
               console.log('Using preferred date/time:', appointment.preferredDate, appointment.preferredTime);
-              appointmentDateTime = new Date(appointment.preferredDate);
-              const [hours, minutes] = appointment.preferredTime.split(':');
-              appointmentDateTime.setHours(parseInt(hours), parseInt(minutes));
+              const formattedDateTime = formatDateTimeLocal(appointment.preferredDate, appointment.preferredTime);
+              if (formattedDateTime) {
+                appointmentDateTime = formattedDateTime;
+              }
             }
             
             if (appointmentDateTime) {
-              const formattedDateTime = appointmentDateTime.toISOString().slice(0, 16);
-              console.log('Setting appointment time to:', formattedDateTime);
+              console.log('Setting appointment time to:', appointmentDateTime);
               
               setPaymentData(prev => ({
                 ...prev,
-                appointmentTime: formattedDateTime
+                appointmentTime: appointmentDateTime
               }));
             }
             
             // Show success message
-            toast.success(`Found linked appointment: ${appointment.appointmentType} on ${appointmentDateTime ? appointmentDateTime.toLocaleDateString() : 'TBD'}`);
+            const displayDate = appointmentDateTime ? new Date(appointmentDateTime.replace('T', ' ')).toLocaleDateString() : 'TBD';
+            toast.success(`Found linked appointment: ${appointment.appointmentType} on ${displayDate}`);
             return; // Exit early since we found the appointment
           }
         } catch (appointmentError) {
@@ -802,30 +946,74 @@ export default function ConsultationBilling() {
         // Auto-fill appointment time if available
         let appointmentDateTime = null;
         
+        // Helper function to parse time string (handles both 24h and 12h formats)
+        const parseTime = (timeStr) => {
+          if (!timeStr) return null;
+          
+          // Handle 12-hour format (e.g., "04:30 PM")
+          if (timeStr.includes('PM') || timeStr.includes('AM')) {
+            const [time, period] = timeStr.trim().split(' ');
+            const [hours, minutes] = time.split(':');
+            let hour24 = parseInt(hours);
+            if (period === 'PM' && hour24 !== 12) hour24 += 12;
+            if (period === 'AM' && hour24 === 12) hour24 = 0;
+            return { hours: hour24, minutes: parseInt(minutes) || 0 };
+          }
+          
+          // Handle 24-hour format (e.g., "16:30")
+          const [hours, minutes] = timeStr.split(':');
+          return { hours: parseInt(hours) || 0, minutes: parseInt(minutes) || 0 };
+        };
+        
+        // Helper function to format datetime for datetime-local input (YYYY-MM-DDTHH:mm)
+        const formatDateTimeLocal = (date, time) => {
+          if (!date || !time) return null;
+          
+          const dateObj = new Date(date);
+          const timeObj = parseTime(time);
+          
+          if (!timeObj) return null;
+          
+          // Create date in local timezone (don't convert to UTC)
+          const localDate = new Date(dateObj);
+          localDate.setHours(timeObj.hours, timeObj.minutes, 0, 0);
+          
+          // Format as YYYY-MM-DDTHH:mm for datetime-local input (local time, not UTC)
+          const year = localDate.getFullYear();
+          const month = String(localDate.getMonth() + 1).padStart(2, '0');
+          const day = String(localDate.getDate()).padStart(2, '0');
+          const hours = String(localDate.getHours()).padStart(2, '0');
+          const minutes = String(localDate.getMinutes()).padStart(2, '0');
+          
+          return `${year}-${month}-${day}T${hours}:${minutes}`;
+        };
+        
         if (appointment.confirmedDate && appointment.confirmedTime) {
           console.log('Using confirmed date/time:', appointment.confirmedDate, appointment.confirmedTime);
-          appointmentDateTime = new Date(appointment.confirmedDate);
-          const [hours, minutes] = appointment.confirmedTime.split(':');
-          appointmentDateTime.setHours(parseInt(hours), parseInt(minutes));
+          const formattedDateTime = formatDateTimeLocal(appointment.confirmedDate, appointment.confirmedTime);
+          if (formattedDateTime) {
+            appointmentDateTime = formattedDateTime;
+          }
         } else if (appointment.preferredDate && appointment.preferredTime) {
           console.log('Using preferred date/time:', appointment.preferredDate, appointment.preferredTime);
-          appointmentDateTime = new Date(appointment.preferredDate);
-          const [hours, minutes] = appointment.preferredTime.split(':');
-          appointmentDateTime.setHours(parseInt(hours), parseInt(minutes));
+          const formattedDateTime = formatDateTimeLocal(appointment.preferredDate, appointment.preferredTime);
+          if (formattedDateTime) {
+            appointmentDateTime = formattedDateTime;
+          }
         }
         
         if (appointmentDateTime) {
-          const formattedDateTime = appointmentDateTime.toISOString().slice(0, 16);
-          console.log('Setting appointment time to:', formattedDateTime);
+          console.log('Setting appointment time to:', appointmentDateTime);
           
           setPaymentData(prev => ({
             ...prev,
-            appointmentTime: formattedDateTime
+            appointmentTime: appointmentDateTime
           }));
         }
         
         // Show success message
-        toast.success(`Found appointment: ${appointment.appointmentType} on ${appointmentDateTime ? appointmentDateTime.toLocaleDateString() : 'TBD'}`);
+        const displayDate = appointmentDateTime ? new Date(appointmentDateTime.replace('T', ' ')).toLocaleDateString() : 'TBD';
+        toast.success(`Found appointment: ${appointment.appointmentType} on ${displayDate}`);
         
       } else {
         console.log('No appointment found for patient after all search attempts');
@@ -857,6 +1045,21 @@ export default function ConsultationBilling() {
 
     if (!paymentData.amount || parseFloat(paymentData.amount) <= 0) {
       toast.error('Please enter a valid payment amount');
+      return;
+    }
+
+    // Validate appointment time is set
+    if (!paymentData.appointmentTime) {
+      toast.error('Please schedule an appointment date and time');
+      return;
+    }
+    
+    // Validate appointment time is in the future (can be same day if time is in future)
+    const appointmentDate = new Date(paymentData.appointmentTime);
+    const now = new Date();
+    
+    if (appointmentDate <= now) {
+      toast.error('Appointment must be scheduled for a future date and time.');
       return;
     }
 
@@ -3694,7 +3897,7 @@ export default function ConsultationBilling() {
 
                       <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
-                  Appointment Time
+                  Schedule Appointment <span className="text-red-500">*</span>
                     </label>
                     
                     {/* Appointment Details Display */}
@@ -3826,12 +4029,17 @@ export default function ConsultationBilling() {
                   type="datetime-local"
                   value={paymentData.appointmentTime}
                   onChange={(e) => setPaymentData({...paymentData, appointmentTime: e.target.value})}
+                  required
+                  min={(() => {
+                    const now = new Date();
+                    // Allow appointments from current time onwards (same-day appointments allowed)
+                    return now.toISOString().slice(0, 16);
+                  })()}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
                   placeholder="Select appointment date and time"
-                  min={new Date().toISOString().slice(0, 16)}
                     />
                     <p className="text-xs text-slate-500 mt-1">
-                      📅 This will schedule the patient's appointment after payment
+                      Doctor will only see this patient on the scheduled appointment date. Appointments can be scheduled for today or any future date.
                       {paymentData.appointmentTime && (
                         <span className="block mt-1 text-green-600 font-medium">
                           ✅ Scheduled for: {new Date(paymentData.appointmentTime).toLocaleString()}

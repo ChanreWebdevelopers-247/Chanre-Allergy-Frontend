@@ -43,14 +43,81 @@ const AppointmentManagement = () => {
   const handleStatusUpdate = async (appointmentId, newStatus, notes = '') => {
     try {
       setUpdateLoading(true);
+      
+      // Optimistically update the appointment in the list
+      setAppointments(prevAppointments => 
+        prevAppointments.map(apt => {
+          if (apt._id === appointmentId) {
+            const updatedApt = {
+              ...apt,
+              status: newStatus
+            };
+            
+            // If confirming, set confirmedDate and confirmedTime
+            if (newStatus === 'confirmed') {
+              updatedApt.confirmedDate = apt.confirmedDate || apt.preferredDate;
+              updatedApt.confirmedTime = apt.confirmedTime || apt.preferredTime;
+              updatedApt.confirmedAt = new Date().toISOString();
+            }
+            
+            return updatedApt;
+          }
+          return apt;
+        })
+      );
+      
+      // Update the selected appointment in the modal too
+      if (selectedAppointment && selectedAppointment._id === appointmentId) {
+        const updatedSelected = {
+          ...selectedAppointment,
+          status: newStatus
+        };
+        
+        if (newStatus === 'confirmed') {
+          updatedSelected.confirmedDate = selectedAppointment.confirmedDate || selectedAppointment.preferredDate;
+          updatedSelected.confirmedTime = selectedAppointment.confirmedTime || selectedAppointment.preferredTime;
+          updatedSelected.confirmedAt = new Date().toISOString();
+        }
+        
+        setSelectedAppointment(updatedSelected);
+      }
+      
+      // Call the API to persist the change
       const response = await updateAppointmentStatus(appointmentId, newStatus, notes);
-      if (response.success) {
+      
+      if (response.success && response.data) {
+        // Update with the actual data from server
+        const updatedAppointment = response.data;
+        
+        setAppointments(prevAppointments => 
+          prevAppointments.map(apt => 
+            apt._id === appointmentId ? updatedAppointment : apt
+          )
+        );
+        
+        // Update selected appointment if modal is open
+        if (selectedAppointment && selectedAppointment._id === appointmentId) {
+          setSelectedAppointment(updatedAppointment);
+        }
+        
         toast.success('Appointment status updated successfully');
-        setShowModal(false);
-        setSelectedAppointment(null);
+        
+        // Wait a moment before closing modal to show the success
+        setTimeout(() => {
+          setShowModal(false);
+          setSelectedAppointment(null);
+          
+          // Refetch appointments to ensure we have the latest data from server
+          fetchAppointments();
+        }, 500);
+      } else {
+        // If API call failed, revert the optimistic update
         fetchAppointments();
+        toast.error(response.message || 'Failed to update appointment status');
       }
     } catch (error) {
+      // If API call failed, revert the optimistic update
+      fetchAppointments();
       toast.error('Failed to update appointment status');
       console.error('Error updating appointment status:', error);
     } finally {
@@ -209,10 +276,17 @@ const AppointmentManagement = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {formatDate(appointment.preferredDate)}
+                        {appointment.confirmedDate 
+                          ? formatDate(appointment.confirmedDate)
+                          : formatDate(appointment.preferredDate)}
                       </div>
                       <div className="text-sm text-gray-500">
-                        {formatTime(appointment.preferredTime)}
+                        {appointment.confirmedTime 
+                          ? formatTime(appointment.confirmedTime)
+                          : formatTime(appointment.preferredTime)}
+                        {appointment.confirmedDate && (
+                          <span className="ml-1 text-green-600 text-xs">(Confirmed)</span>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -257,8 +331,14 @@ const AppointmentManagement = () => {
                   <p><strong>Patient:</strong> {selectedAppointment.patientName}</p>
                   <p><strong>Phone:</strong> {selectedAppointment.patientPhone}</p>
                   <p><strong>Email:</strong> {selectedAppointment.patientEmail}</p>
-                  <p><strong>Date:</strong> {formatDate(selectedAppointment.preferredDate)}</p>
-                  <p><strong>Time:</strong> {formatTime(selectedAppointment.preferredTime)}</p>
+                  <p><strong>Preferred Date:</strong> {formatDate(selectedAppointment.preferredDate)}</p>
+                  <p><strong>Preferred Time:</strong> {formatTime(selectedAppointment.preferredTime)}</p>
+                  {selectedAppointment.confirmedDate && (
+                    <>
+                      <p><strong>Confirmed Date:</strong> {formatDate(selectedAppointment.confirmedDate)}</p>
+                      <p><strong>Confirmed Time:</strong> {formatTime(selectedAppointment.confirmedTime || selectedAppointment.preferredTime)}</p>
+                    </>
+                  )}
                   <p><strong>Reason:</strong> {selectedAppointment.reasonForVisit}</p>
                   {selectedAppointment.symptoms && (
                     <p><strong>Symptoms:</strong> {selectedAppointment.symptoms}</p>

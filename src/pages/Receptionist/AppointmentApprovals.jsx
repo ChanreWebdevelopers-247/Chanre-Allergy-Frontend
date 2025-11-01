@@ -133,8 +133,26 @@ const AppointmentApprovals = () => {
   };
 
   const handleApprove = async (appointmentId, appointment) => {
-    // Open edit modal with preferred date/time for user to confirm or edit
-    openEditModal(appointment);
+    // Directly approve the appointment using preferred date/time
+    try {
+      setUpdateLoading(true);
+      const response = await updateAppointmentDetails(appointment._id, {
+        confirmedDate: new Date(appointment.preferredDate).toISOString(),
+        confirmedTime: appointment.preferredTime,
+        notes: appointment.notes || '',
+        status: 'confirmed'
+      });
+      
+      if (response.success) {
+        toast.success('Appointment approved successfully!');
+        fetchAppointments();
+      }
+    } catch (error) {
+      toast.error('Failed to approve appointment');
+      console.error('Error approving appointment:', error);
+    } finally {
+      setUpdateLoading(false);
+    }
   };
 
   const handleDirectApprove = async () => {

@@ -53,7 +53,28 @@ export default function PatientList() {
 
   // Filter patients based on search term (show all assigned patients)
   useEffect(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0); // Set to start of today for date comparison
+    
     const filtered = (assignedPatients || []).filter(patient => {
+      // Check if patient has a scheduled appointment
+      const scheduledAppointment = patient.appointments?.length > 0 
+        ? patient.appointments
+            .filter(apt => apt.status === 'scheduled' && (apt.type === 'reassignment_consultation' || !apt.type))
+            .sort((a, b) => new Date(b.scheduledAt || b.createdAt) - new Date(a.scheduledAt || a.createdAt))[0]
+        : null;
+      
+      // If patient has a scheduled appointment, only show if appointment date has arrived
+      if (scheduledAppointment && scheduledAppointment.scheduledAt) {
+        const appointmentDate = new Date(scheduledAppointment.scheduledAt);
+        appointmentDate.setHours(0, 0, 0, 0);
+        
+        // Only show if appointment date is today or in the past
+        if (appointmentDate > now) {
+          return false; // Hide patient if appointment is in the future
+        }
+      }
+      
       // Apply search filter only
       const matchesSearch = !searchTerm || 
         patient?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -87,16 +108,46 @@ export default function PatientList() {
       
       const isReassignedPatient = hasBillingForDifferentDoctor || hasMultipleConsultationFees || wasPreviouslyReassigned;
       
+      // Get scheduled appointment time for sorting
+      const scheduledAppointment = patient.appointments?.length > 0 
+        ? patient.appointments
+            .filter(apt => apt.status === 'scheduled' && (apt.type === 'reassignment_consultation' || !apt.type))
+            .sort((a, b) => new Date(b.scheduledAt || b.createdAt) - new Date(a.scheduledAt || a.createdAt))[0]
+        : null;
+      const appointmentTime = scheduledAppointment?.scheduledAt ? new Date(scheduledAppointment.scheduledAt) : null;
+      
       return {
         ...patient,
-        isReassignedPatient: isReassignedPatient
+        isReassignedPatient: isReassignedPatient,
+        appointmentTime: appointmentTime // Store appointment time for sorting
       };
     });
 
-    setFilteredPatients(processedPatients);
+    // Sort patients by appointment time (earliest first)
+    // Patients with appointments come first, sorted by time
+    // Patients without appointments come after, sorted by name or assigned date
+    const sortedPatients = processedPatients.sort((a, b) => {
+      // If both have appointment times, sort by time (earliest first)
+      if (a.appointmentTime && b.appointmentTime) {
+        return a.appointmentTime.getTime() - b.appointmentTime.getTime();
+      }
+      
+      // If only one has appointment time, it comes first
+      if (a.appointmentTime && !b.appointmentTime) {
+        return -1;
+      }
+      if (!a.appointmentTime && b.appointmentTime) {
+        return 1;
+      }
+      
+      // If neither has appointment time, sort by name
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    setFilteredPatients(sortedPatients);
     
     // Show sub-search if we have results and a search term
-    setShowSubSearch(processedPatients.length > 0 && searchTerm.trim() !== '');
+    setShowSubSearch(sortedPatients.length > 0 && searchTerm.trim() !== '');
   }, [searchTerm, assignedPatients]);
 
   // Apply sub-search filter on the already filtered patients
