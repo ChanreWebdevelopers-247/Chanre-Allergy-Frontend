@@ -228,11 +228,23 @@ export default function ConsultationBilling() {
   // Fetch center information
   const fetchCenterInfo = async () => {
     const centerId = getCenterId();
-    if (centerId) {
-      try {
-        const response = await API.get(`/centers/${centerId}`);
-        const center = response.data;
-        
+    console.log('🔄 Fetching center info for centerId:', centerId);
+    
+    if (!centerId) {
+      console.warn('⚠️ No center ID found, using default values');
+      return;
+    }
+    
+    try {
+      const response = await API.get(`/centers/${centerId}`);
+      console.log('📋 Center API response:', response);
+      
+      // Handle different response structures
+      const center = response.data?.data || response.data || response;
+      
+      console.log('🏥 Parsed center data:', center);
+      
+      if (center) {
         setCenterInfo({
           name: center.name || 'Chanre Hospital',
           address: center.address || 'Rajajinagar, Bengaluru',
@@ -243,10 +255,14 @@ export default function ConsultationBilling() {
           missCallNumber: center.missCallNumber || '080-42516666',
           mobileNumber: center.mobileNumber || '9686197153'
         });
-      } catch (error) {
-        console.error('Error fetching center info:', error);
-        // Keep default values if API fails
+        console.log('✅ Center info updated successfully');
+      } else {
+        console.warn('⚠️ Center data not found in response, using default values');
       }
+    } catch (error) {
+      console.error('❌ Error fetching center info:', error);
+      console.error('Error details:', error.response?.data || error.message);
+      // Keep default values if API fails
     }
   };
 
@@ -385,9 +401,23 @@ export default function ConsultationBilling() {
 
   useEffect(() => {
     dispatch(fetchReceptionistPatients());
-    fetchCenterInfo(); // Fetch center information when component mounts
-    fetchCenterFees(); // Fetch center fees when component mounts
   }, [dispatch]);
+
+  // Fetch center info and fees when user is available
+  useEffect(() => {
+    if (user) {
+      fetchCenterInfo(); // Fetch center information when user is available
+      fetchCenterFees(); // Fetch center fees when user is available
+    }
+  }, [user]);
+
+  // Refresh center info when invoice modal opens (to ensure we have latest data)
+  useEffect(() => {
+    if (showInvoicePreviewModal && invoiceData && user) {
+      console.log('🔄 Invoice modal opened, refreshing center info...');
+      fetchCenterInfo(); // Refresh center info when viewing invoice
+    }
+  }, [showInvoicePreviewModal, invoiceData, user]);
 
   // Set default appointment date when payment modal opens
   useEffect(() => {
@@ -471,8 +501,15 @@ export default function ConsultationBilling() {
       return { status: 'No Invoice', color: 'text-red-600 bg-red-100', icon: <FileText className="h-4 w-4" /> };
     }
 
-    // Check if any bills are cancelled
-    const hasCancelledBills = patient.billing.some(bill => bill.status === 'cancelled');
+    // Filter out superconsultation billing - only use consultation billing
+    const consultationBilling = filterConsultationBilling(patient.billing);
+    
+    if (consultationBilling.length === 0) {
+      return { status: 'No Invoice', color: 'text-red-600 bg-red-100', icon: <FileText className="h-4 w-4" /> };
+    }
+
+    // Check if any bills are cancelled (only consultation bills)
+    const hasCancelledBills = consultationBilling.some(bill => bill.status === 'cancelled');
     if (hasCancelledBills) {
       return { status: 'Bill Cancelled', color: 'text-red-600 bg-red-100', icon: <Ban className="h-4 w-4" /> };
     }
@@ -481,8 +518,8 @@ export default function ConsultationBilling() {
     let hasRefundedBills = false;
     let hasPartiallyRefundedBills = false;
     
-    // Check each bill for refunds
-    for (const bill of patient.billing) {
+    // Check each bill for refunds (only consultation bills)
+    for (const bill of consultationBilling) {
       if (bill.refunds && bill.refunds.length > 0) {
         const totalAmount = bill.amount || 0;
         const refundedAmount = bill.refunds.reduce((sum, refund) => sum + (refund.amount || 0), 0);
@@ -510,12 +547,12 @@ export default function ConsultationBilling() {
       return { status: 'Partially Refunded', color: 'text-yellow-600 bg-yellow-100', icon: <RotateCcw className="h-4 w-4" /> };
     }
 
-    // Check payment statuses
-    const consultationFee = patient.billing.find(bill => 
-      bill.type === 'consultation' || bill.description?.toLowerCase().includes('consultation')
+    // Check payment statuses (only from consultation billing)
+    const consultationFee = consultationBilling.find(bill => 
+      bill.type === 'consultation' && !bill.consultationType?.startsWith('superconsultant_')
     );
-    const registrationFee = patient.billing.find(bill => bill.type === 'registration');
-    const serviceCharges = patient.billing.filter(bill => bill.type === 'service');
+    const registrationFee = consultationBilling.find(bill => bill.type === 'registration');
+    const serviceCharges = consultationBilling.filter(bill => bill.type === 'service');
 
     const getPaymentStatus = (bill) => {
       if (!bill) return { paidAmount: 0, status: 'unpaid', totalAmount: 0 };
@@ -1064,8 +1101,10 @@ export default function ConsultationBilling() {
     }
 
     try {
-      // Get invoice number from generatedInvoice or from patient's billing
-      const invoiceNumber = generatedInvoice?.invoiceNumber || selectedPatient.billing?.[0]?.invoiceNumber || `INV-${selectedPatient._id.toString().slice(-6)}`;
+      // Filter out superconsultation billing - only use consultation billing
+      const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+      // Get invoice number from generatedInvoice or from patient's consultation billing
+      const invoiceNumber = generatedInvoice?.invoiceNumber || consultationBilling[0]?.invoiceNumber || `INV-${selectedPatient._id.toString().slice(-6)}`;
       
       const paymentPayload = {
         patientId: selectedPatient._id,
@@ -1134,9 +1173,11 @@ export default function ConsultationBilling() {
     }
 
     try {
-      const latestBill = selectedPatient.billing?.[selectedPatient.billing.length - 1];
+      // Filter out superconsultation billing - only use consultation billing
+      const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+      const latestBill = consultationBilling.length > 0 ? consultationBilling[consultationBilling.length - 1] : null;
       if (!latestBill) {
-        toast.error('No bill found for this patient');
+        toast.error('No consultation bill found for this patient');
         return;
       }
 
@@ -1231,8 +1272,10 @@ export default function ConsultationBilling() {
       return;
     }
 
-    // Calculate refund amount based on type
-    const availableAmount = selectedPatient.billing.reduce((sum, bill) => 
+    // Filter out superconsultation billing - only use consultation billing
+    const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+    // Calculate refund amount based on type (only from consultation billing)
+    const availableAmount = consultationBilling.reduce((sum, bill) => 
       sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0);
     
     let calculatedRefundAmount = 0;
@@ -1533,9 +1576,46 @@ export default function ConsultationBilling() {
     }
   };
 
+  // Helper function to filter out superconsultation billing entries
+  const filterConsultationBilling = (billing) => {
+    if (!billing || billing.length === 0) return [];
+    
+    // Step 1: Find all invoice numbers that belong to superconsultation bills
+    const superconsultationInvoiceNumbers = new Set();
+    billing.forEach(bill => {
+      if (bill.consultationType?.startsWith('superconsultant_') && bill.invoiceNumber) {
+        superconsultationInvoiceNumbers.add(bill.invoiceNumber);
+      }
+    });
+    
+    // Step 2: Filter out any billing entries that:
+    // - Have consultationType starting with 'superconsultant_', OR
+    // - Belong to a superconsultation invoice (same invoiceNumber)
+    return billing.filter(bill => {
+      // Exclude superconsultation entries directly
+      if (bill.consultationType?.startsWith('superconsultant_')) {
+        return false;
+      }
+      
+      // Exclude any bill (including service charges) that belongs to a superconsultation invoice
+      if (bill.invoiceNumber && superconsultationInvoiceNumbers.has(bill.invoiceNumber)) {
+        return false;
+      }
+      
+      return true;
+    });
+  };
+
   // Function to prepare invoice data for InvoiceDisplay component
   const prepareInvoiceData = (patient) => {
     if (!patient || !patient.billing || patient.billing.length === 0) {
+      return null;
+    }
+
+    // Filter out superconsultation billing entries - only show consultation billing
+    const consultationBilling = filterConsultationBilling(patient.billing);
+    
+    if (consultationBilling.length === 0) {
       return null;
     }
 
@@ -1546,12 +1626,12 @@ export default function ConsultationBilling() {
     console.log('Doctor specializations isArray:', Array.isArray(patient.assignedDoctor?.specializations));
     console.log('Doctor specialization (singular):', patient.assignedDoctor?.specialization);
 
-    // Calculate totals
-    const totalAmount = patient.billing.reduce((sum, bill) => sum + (bill.amount || 0), 0);
-    const totalPaid = patient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+    // Calculate totals using filtered billing
+    const totalAmount = consultationBilling.reduce((sum, bill) => sum + (bill.amount || 0), 0);
+    const totalPaid = consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
     
     // Get discount information from billing records
-    const firstBill = patient.billing[0];
+    const firstBill = consultationBilling[0];
     const discountType = firstBill?.discountType || 'percentage';
     const discountPercentage = firstBill?.discountPercentage || 0;
     const discountAmount = firstBill?.discountAmount || 0;
@@ -1565,8 +1645,8 @@ export default function ConsultationBilling() {
       calculatedDiscount = discountAmount;
     }
     
-    // Prepare service charges
-    const serviceCharges = patient.billing
+    // Prepare service charges - only from consultation billing
+    const serviceCharges = consultationBilling
       .filter(bill => bill.type === 'service')
       .map(bill => ({
         name: bill.description || 'Service Charge',
@@ -1574,10 +1654,10 @@ export default function ConsultationBilling() {
         description: bill.description || 'Medical service provided'
       }));
 
-    // Get registration and consultation fees
-    const registrationFee = patient.billing.find(bill => bill.type === 'registration')?.amount || 0;
-    const consultationFee = patient.billing.find(bill => 
-      bill.type === 'consultation' || bill.description?.toLowerCase().includes('consultation')
+    // Get registration and consultation fees - only from consultation billing
+    const registrationFee = consultationBilling.find(bill => bill.type === 'registration')?.amount || 0;
+    const consultationFee = consultationBilling.find(bill => 
+      bill.type === 'consultation' && !bill.consultationType?.startsWith('superconsultant_')
     )?.amount || 0;
 
     return {
@@ -1634,7 +1714,7 @@ export default function ConsultationBilling() {
       discountPercentage,
       discountAmount,
       discountReason,
-      invoiceNumber: patient.billing[0]?.invoiceNumber || `INV-${patient._id.slice(-6)}`,
+      invoiceNumber: consultationBilling[0]?.invoiceNumber || `INV-${patient._id.slice(-6)}`,
       date: new Date(),
       generatedBy: user?.name || 'Receptionist',
       password: patient.uhId ? `${patient.uhId}${patient.gender?.charAt(0) || 'P'}` : 'N/A'
@@ -2233,9 +2313,11 @@ export default function ConsultationBilling() {
                     <tbody className="bg-white divide-y divide-slate-200">
                       {currentPatients.map((patient) => {
                         const statusInfo = getPatientStatus(patient);
-                        const hasBilling = patient.billing && patient.billing.length > 0;
-                        const totalAmount = hasBilling ? patient.billing.reduce((sum, bill) => sum + (bill.amount || 0), 0) : 0;
-                        const totalPaid = hasBilling ? patient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) : 0;
+                        // Filter out superconsultation billing - only use consultation billing
+                        const consultationBilling = filterConsultationBilling(patient.billing || []);
+                        const hasBilling = consultationBilling.length > 0;
+                        const totalAmount = hasBilling ? consultationBilling.reduce((sum, bill) => sum + (bill.amount || 0), 0) : 0;
+                        const totalPaid = hasBilling ? consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) : 0;
                         
                         return (
                           <tr key={patient._id} className="hover:bg-slate-50">
@@ -2374,8 +2456,8 @@ export default function ConsultationBilling() {
                                       Paid: ₹{totalPaid.toLocaleString()}
                                     </div>
                                     {(() => {
-                                      // Calculate total refunded amount from all bills
-                                      const totalRefunded = patient.billing.reduce((sum, bill) => {
+                                      // Calculate total refunded amount from consultation bills only
+                                      const totalRefunded = consultationBilling.reduce((sum, bill) => {
                                         if (bill.refunds && bill.refunds.length > 0) {
                                           return sum + bill.refunds.reduce((refundSum, refund) => refundSum + (refund.amount || 0), 0);
                                         }
@@ -2396,9 +2478,9 @@ export default function ConsultationBilling() {
                                         Due: ₹{(totalAmount - totalPaid).toLocaleString()}
                                 </div>
                                       )}
-                                    {patient.billing[0]?.invoiceNumber && (
+                                    {consultationBilling[0]?.invoiceNumber && (
                                       <div className="text-slate-400 text-xs">
-                                        INV: {patient.billing[0].invoiceNumber}
+                                        INV: {consultationBilling[0].invoiceNumber}
                                         </div>
                                       )}
                                     </>
@@ -3095,14 +3177,16 @@ export default function ConsultationBilling() {
                   {/* Action Buttons */}
                   <button
                     onClick={() => {
-                      // Calculate outstanding amount
-                      const totalAmount = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.amount || 0), 0) || 0;
-                      const totalPaid = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
+                      // Filter out superconsultation billing - only use consultation billing
+                      const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                      // Calculate outstanding amount (only from consultation billing)
+                      const totalAmount = consultationBilling.reduce((sum, bill) => sum + (bill.amount || 0), 0);
+                      const totalPaid = consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
                       const outstandingAmount = totalAmount - totalPaid;
                       
                       // Create a mock invoice object for payment processing
                       const mockInvoice = {
-                        invoiceNumber: selectedPatient.billing?.[0]?.invoiceNumber || `INV-${selectedPatient._id.toString().slice(-6)}`,
+                        invoiceNumber: consultationBilling[0]?.invoiceNumber || `INV-${selectedPatient._id.toString().slice(-6)}`,
                         patientId: selectedPatient._id,
                         total: totalAmount,
                         paid: totalPaid,
@@ -3404,9 +3488,12 @@ export default function ConsultationBilling() {
                           let serialNumber = 1;
                           const rows = [];
                           
+                          // Filter out superconsultation billing - only use consultation billing
+                          const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                          
                           // Add registration fee if exists
                           if (invoiceData.registrationFee > 0) {
-                            const regBill = selectedPatient.billing?.find(bill => bill.type === 'registration');
+                            const regBill = consultationBilling.find(bill => bill.type === 'registration');
                             const regPaid = regBill?.paidAmount || 0;
                             const regRefunded = regBill?.refundAmount || 0;
                             const regBalance = invoiceData.registrationFee - regPaid;
@@ -3445,8 +3532,8 @@ export default function ConsultationBilling() {
                           
                           // Add consultation fee if exists
                           if (invoiceData.consultationFee > 0) {
-                            const consultBill = selectedPatient.billing?.find(bill => 
-                              bill.type === 'consultation' || bill.description?.toLowerCase().includes('consultation')
+                            const consultBill = consultationBilling.find(bill => 
+                              bill.type === 'consultation' && !bill.consultationType?.startsWith('superconsultant_')
                             );
                             const consultPaid = consultBill?.paidAmount || 0;
                             const consultRefunded = consultBill?.refundAmount || 0;
@@ -3472,7 +3559,7 @@ export default function ConsultationBilling() {
                                 <td className="border border-slate-300 px-3 py-2 text-xs">{serialNumber++}</td>
                                 <td className="border border-slate-300 px-3 py-2 text-xs">
                                   {(() => {
-                                    const consultBill = selectedPatient.billing?.find(b => b.type === 'consultation');
+                                    const consultBill = consultationBilling.find(b => b.type === 'consultation' && !b.consultationType?.startsWith('superconsultant_'));
                                     if (consultBill?.consultationType === 'followup') return 'Followup Consultation (Free)';
                                     if (consultBill?.consultationType === 'IP') return 'IP Consultation Fee';
                                     return 'OP Consultation Fee';
@@ -3491,9 +3578,9 @@ export default function ConsultationBilling() {
                             );
                           }
                           
-                          // Add service charges
+                          // Add service charges - only from consultation billing
                           invoiceData.serviceCharges.forEach((service, index) => {
-                            const serviceBill = selectedPatient.billing?.find(bill => 
+                            const serviceBill = consultationBilling.find(bill => 
                               bill.type === 'service' && bill.description === service.name
                             );
                             const servicePaid = serviceBill?.paidAmount || 0;
@@ -3543,9 +3630,11 @@ export default function ConsultationBilling() {
                     {/* Left Column - Amount in Words */}
                     <div>
                       {(() => {
-                        const totalPaid = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
-                        const totalRefunded = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0) || 0;
-                        const hasCancelledBills = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
+                        // Filter out superconsultation billing - only use consultation billing
+                        const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                        const totalPaid = consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+                        const totalRefunded = consultationBilling.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0);
+                        const hasCancelledBills = consultationBilling.some(bill => bill.status === 'cancelled');
                         
                         return (
                           <div className="text-xs">
@@ -3590,10 +3679,12 @@ export default function ConsultationBilling() {
                           <span>₹{invoiceData.totals.total.toFixed(2)}</span>
                         </div>
                         {(() => {
-                          const totalPaid = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
-                          const totalRefunded = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0) || 0;
-                          const hasCancelledBills = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
-                          const hasRefundedBills = selectedPatient.billing?.some(bill => bill.status === 'refunded');
+                          // Filter out superconsultation billing - only use consultation billing
+                          const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                          const totalPaid = consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+                          const totalRefunded = consultationBilling.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0);
+                          const hasCancelledBills = consultationBilling.some(bill => bill.status === 'cancelled');
+                          const hasRefundedBills = consultationBilling.some(bill => bill.status === 'refunded');
                           const outstandingAmount = invoiceData.totals.total - totalPaid;
                           
                           return (
@@ -3604,12 +3695,12 @@ export default function ConsultationBilling() {
                               </div>
                               {totalRefunded > 0 && (() => {
                                 // Check if there's a penalty deducted (for cancelled bills)
-                                const hasCancelled = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
-                                const totalPaid = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) || 0;
+                                const hasCancelled = consultationBilling.some(bill => bill.status === 'cancelled');
+                                const totalPaid = consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
                                 const penalty = totalPaid - totalRefunded;
                                 // Get payment method from first paid bill
-                                const paymentMethod = selectedPatient.billing?.find(bill => bill.paidAmount > 0)?.paymentMethod || 'Cash';
-                                const refundMethod = selectedPatient.billing?.find(bill => bill.refundAmount > 0)?.refunds?.[0]?.method || 'Cash';
+                                const paymentMethod = consultationBilling.find(bill => bill.paidAmount > 0)?.paymentMethod || 'Cash';
+                                const refundMethod = consultationBilling.find(bill => bill.refundAmount > 0)?.refunds?.[0]?.method || 'Cash';
                                 
                                 return (
                                   <>
@@ -3676,10 +3767,13 @@ export default function ConsultationBilling() {
 
                   {/* Transaction History - Shows all payments and refunds */}
                   {(() => {
+                    // Filter out superconsultation billing - only use consultation billing
+                    const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                    
                     // Get all billing records with payments/refunds
                     const transactions = [];
                     
-                    selectedPatient.billing?.forEach(bill => {
+                    consultationBilling.forEach(bill => {
                       // Add payment transaction if paid
                       if (bill.paidAmount > 0) {
                         transactions.push({
@@ -3841,25 +3935,31 @@ export default function ConsultationBilling() {
             <div className="flex-1 overflow-y-auto p-6">
               <form onSubmit={handlePaymentSubmit} className="space-y-4">
               {/* Outstanding Amount Display */}
-              {selectedPatient.billing && selectedPatient.billing.length > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                  <h4 className="text-sm font-semibold text-blue-800 mb-2">Payment Summary</h4>
-                  <div className="space-y-1 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-blue-700">Total Amount:</span>
-                      <span className="font-semibold">₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.amount || 0), 0).toLocaleString('en-IN')}</span>
-                  </div>
-                    <div className="flex justify-between">
-                      <span className="text-blue-700">Amount Paid:</span>
-                      <span className="font-semibold text-green-600">₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0).toLocaleString('en-IN')}</span>
-                  </div>
-                    <div className="flex justify-between border-t border-blue-300 pt-1">
-                      <span className="text-blue-700 font-semibold">Amount Due:</span>
-                      <span className="font-bold text-orange-600">₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.amount || 0) - (bill.paidAmount || 0), 0).toLocaleString('en-IN')}</span>
-                </div>
-              </div>
+              {(() => {
+                // Filter out superconsultation billing - only use consultation billing
+                const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                if (consultationBilling.length === 0) return null;
+                
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                    <h4 className="text-sm font-semibold text-blue-800 mb-2">Payment Summary</h4>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-blue-700">Total Amount:</span>
+                        <span className="font-semibold">₹{consultationBilling.reduce((sum, bill) => sum + (bill.amount || 0), 0).toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-blue-700">Amount Paid:</span>
+                        <span className="font-semibold text-green-600">₹{consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0).toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-blue-300 pt-1">
+                        <span className="text-blue-700 font-semibold">Amount Due:</span>
+                        <span className="font-bold text-orange-600">₹{consultationBilling.reduce((sum, bill) => sum + (bill.amount || 0) - (bill.paidAmount || 0), 0).toLocaleString('en-IN')}</span>
+                      </div>
                     </div>
-                  )}
+                  </div>
+                );
+              })()}
 
                       <div>
                 <label className="block text-xs font-medium text-slate-700 mb-2">
@@ -4236,7 +4336,9 @@ export default function ConsultationBilling() {
 
               {/* Refund Summary */}
               {selectedPatient && (() => {
-                const latestBill = selectedPatient.billing?.[selectedPatient.billing.length - 1];
+                // Filter out superconsultation billing - only use consultation billing
+                const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                const latestBill = consultationBilling.length > 0 ? consultationBilling[consultationBilling.length - 1] : null;
                 if (!latestBill) return null;
                 
                 const totalAmount = latestBill.customData?.totals?.total || latestBill.amount || 0;
@@ -4333,25 +4435,31 @@ export default function ConsultationBilling() {
             
             <form onSubmit={handleRefundSubmit} className="space-y-4">
               {/* Payment Summary */}
-              {selectedPatient.billing && selectedPatient.billing.length > 0 && (
-                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
-                  <h4 className="text-sm font-semibold text-orange-800 mb-2">Refund Summary</h4>
-                  <div className="space-y-1 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-orange-700">Total Paid:</span>
-                      <span className="font-semibold">₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0).toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-orange-700">Already Refunded:</span>
-                      <span className="font-semibold text-red-600">₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0).toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="flex justify-between border-t border-orange-300 pt-1">
-                      <span className="text-orange-700 font-semibold">Available for Refund:</span>
-                      <span className="font-bold text-green-600">₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString('en-IN')}</span>
+              {(() => {
+                // Filter out superconsultation billing - only use consultation billing
+                const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                if (consultationBilling.length === 0) return null;
+                
+                return (
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                    <h4 className="text-sm font-semibold text-orange-800 mb-2">Refund Summary</h4>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-orange-700">Total Paid:</span>
+                        <span className="font-semibold">₹{consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0).toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-orange-700">Already Refunded:</span>
+                        <span className="font-semibold text-red-600">₹{consultationBilling.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0).toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-orange-300 pt-1">
+                        <span className="text-orange-700 font-semibold">Available for Refund:</span>
+                        <span className="font-bold text-green-600">₹{consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString('en-IN')}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Refund Type Selection */}
               <div>
@@ -4396,7 +4504,9 @@ export default function ConsultationBilling() {
                 <input
                   type="number"
                   value={(() => {
-                    const availableAmount = selectedPatient.billing.reduce((sum, bill) => 
+                    // Filter out superconsultation billing - only use consultation billing
+                    const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                    const availableAmount = consultationBilling.reduce((sum, bill) => 
                       sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0);
                     if (refundData.refundType === 'withPenalty') {
                       return Math.max(0, availableAmount - penaltyAmount);
@@ -4408,21 +4518,27 @@ export default function ConsultationBilling() {
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed text-xs"
                 />
                 <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
-                  {refundData.refundType === 'withPenalty' ? (
-                    <div>
-                      <p className="font-medium mb-1">Refund Calculation (With Penalty):</p>
-                      <p>• Total Paid: ₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString()}</p>
-                      <p>• Penalty: -₹{penaltyAmount}</p>
-                      <p className="font-semibold mt-1">• Final Refund: ₹{Math.max(0, selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0) - penaltyAmount).toLocaleString()}</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="font-medium mb-1">Refund Calculation (Full Refund):</p>
-                      <p>• Total Paid: ₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString()}</p>
-                      <p>• Penalty: ₹0 (No penalty)</p>
-                      <p className="font-semibold mt-1">• Final Refund: ₹{selectedPatient.billing.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0).toLocaleString()}</p>
-                    </div>
-                  )}
+                  {(() => {
+                    // Filter out superconsultation billing - only use consultation billing
+                    const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
+                    const availableAmount = consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0) - (bill.refundAmount || 0), 0);
+                    
+                    return refundData.refundType === 'withPenalty' ? (
+                      <div>
+                        <p className="font-medium mb-1">Refund Calculation (With Penalty):</p>
+                        <p>• Total Paid: ₹{availableAmount.toLocaleString()}</p>
+                        <p>• Penalty: -₹{penaltyAmount}</p>
+                        <p className="font-semibold mt-1">• Final Refund: ₹{Math.max(0, availableAmount - penaltyAmount).toLocaleString()}</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="font-medium mb-1">Refund Calculation (Full Refund):</p>
+                        <p>• Total Paid: ₹{availableAmount.toLocaleString()}</p>
+                        <p>• Penalty: ₹0 (No penalty)</p>
+                        <p className="font-semibold mt-1">• Final Refund: ₹{availableAmount.toLocaleString()}</p>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

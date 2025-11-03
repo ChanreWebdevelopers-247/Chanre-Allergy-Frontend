@@ -22,6 +22,9 @@ import {
   FaCalculator,
   FaCalendarCheck,
   FaCog,
+  FaCalendarAlt,
+  FaFileMedical,
+  FaStethoscope,
 } from 'react-icons/fa';
 
 export default function Sidebar(props) {
@@ -166,10 +169,16 @@ export default function Sidebar(props) {
                 isActive={isActive("/dashboard/superadmin/doctor/dashboard")}
               />
               <SidebarLink
-                to="/dashboard/superadmin/doctor/patients"
-                label="Patient Details"
+                to="/dashboard/superadmin/doctor/my-patients"
+                label="My Patients"
                 icon={<FaUsers />}
-                isActive={isActive("/dashboard/superadmin/doctor/patients")}
+                isActive={isActive("/dashboard/superadmin/doctor/my-patients") || isActive("/dashboard/superadmin/doctor/patients")}
+              />
+              <SidebarLink
+                to="/dashboard/superadmin/doctor/appointments"
+                label="Appointments"
+                icon={<FaCalendarAlt />}
+                isActive={isActive("/dashboard/superadmin/doctor/appointments")}
               />
               <SidebarLink
                 to="/dashboard/superadmin/doctor/lab-reports"
@@ -463,10 +472,17 @@ export default function Sidebar(props) {
   );
 }
 
-function SidebarLink({ to, label, icon, isActive }) {
+function SidebarLink({ to, label, icon, isActive, onClick }) {
+  const handleClick = (e) => {
+    if (onClick) {
+      onClick(e);
+    }
+  };
+
   return (
     <Link
       to={to}
+      onClick={handleClick}
       className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all border-l-4 font-medium shadow-none
         ${isActive
           ? 'bg-blue-100 border-blue-500 text-blue-700'

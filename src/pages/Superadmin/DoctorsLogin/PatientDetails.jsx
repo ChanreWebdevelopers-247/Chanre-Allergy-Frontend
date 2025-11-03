@@ -17,7 +17,8 @@ import {
   Stethoscope,
   MessageSquare,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 import { 
   fetchSuperAdminDoctorAssignedPatients,
@@ -270,6 +271,9 @@ const PatientDetails = () => {
                         Contact
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Appointment
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Center
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -301,6 +305,34 @@ const PatientDetails = () => {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-xs text-gray-900">{patient.phone}</div>
                           <div className="text-xs text-gray-500">{patient.email || 'N/A'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {patient.appointmentTime ? (
+                            <div className="text-xs">
+                              <div className="text-gray-900 font-medium">
+                                {new Date(patient.appointmentTime).toLocaleDateString('en-GB')}
+                              </div>
+                              <div className="text-blue-600 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {new Date(patient.appointmentTime).toLocaleTimeString('en-GB', {
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </div>
+                              {(() => {
+                                const today = new Date();
+                                today.setHours(0, 0, 0, 0);
+                                const appointmentDate = new Date(patient.appointmentTime);
+                                appointmentDate.setHours(0, 0, 0, 0);
+                                if (appointmentDate.getTime() === today.getTime()) {
+                                  return <span className="text-blue-600 text-xs font-semibold">Today</span>;
+                                }
+                                return null;
+                              })()}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">Not scheduled</span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-xs text-gray-900">{patient.centerId?.name || 'N/A'}</div>

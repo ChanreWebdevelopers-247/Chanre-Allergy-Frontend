@@ -8,9 +8,13 @@ import {
   Calendar, 
   Activity,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Eye,
+  Download
 } from 'lucide-react';
 import { fetchSuperAdminDoctorPatientHistory, fetchSuperAdminDoctorPatientLabReports } from '../../../features/superadmin/superAdminDoctorSlice';
+import { downloadPDFReport, viewPDFReport } from '../../../utils/pdfHandler';
+import { toast } from 'react-toastify';
 
 const PatientHistory = () => {
   const dispatch = useDispatch();
@@ -59,12 +63,34 @@ const PatientHistory = () => {
     navigate('/dashboard/superadmin/doctor/patients');
   };
 
-  const handleViewReport = (report) => {
-    if (report.pdfFile) {
-      // Open PDF in new tab
-      window.open(`/uploads/${report.pdfFile}`, '_blank');
-    } else {
-      alert('No PDF report available for this test request.');
+  const handleViewReport = async (report) => {
+    if (!report._id) {
+      toast.error('Report ID not found. Cannot view PDF.');
+      return;
+    }
+
+    try {
+      await viewPDFReport(report._id);
+    } catch (error) {
+      console.error('Error viewing PDF report:', error);
+      toast.error(error.message || 'Failed to view PDF report. Please try again.');
+    }
+  };
+
+  const handleDownloadReport = async (report) => {
+    if (!report._id) {
+      toast.error('Report ID not found. Cannot download PDF.');
+      return;
+    }
+
+    const fileName = `Lab_Report_${report.testType || 'Test'}_${new Date(report.createdAt).toLocaleDateString()}.pdf`;
+    
+    try {
+      await downloadPDFReport(report._id, fileName);
+      toast.success('PDF report downloaded successfully');
+    } catch (error) {
+      console.error('Error downloading PDF report:', error);
+      toast.error(error.message || 'Failed to download PDF report. Please try again.');
     }
   };
 
@@ -308,37 +334,44 @@ const PatientHistory = () => {
                             </div>
                             <div className="flex items-center space-x-2">
                               <span className="text-xs text-gray-500">{new Date(report.createdAt).toLocaleDateString()}</span>
-                              {report.hasPdf ? (
-                                <div className="flex items-center space-x-2">
-                                  <button
-                                    onClick={() => handleViewReport(report)}
-                                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors flex items-center"
-                                    title="View Report"
-                                  >
-                                    <FileText className="w-3 h-3 mr-1" />
-                                    View
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      const link = document.createElement('a');
-                                      link.href = `/uploads/${report.pdfFile}`;
-                                      link.download = `Lab_Report_${report.testType || 'Test'}_${new Date(report.createdAt).toLocaleDateString()}.pdf`;
-                                      link.click();
-                                    }}
-                                    className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors flex items-center"
-                                    title="Download Report"
-                                  >
-                                    <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                    </svg>
-                                    Download
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">
-                                  No PDF Available
-                                </span>
-                              )}
+                              {(() => {
+                                // Check if report is available (has valid status and _id)
+                                const isAvailable = report._id && (
+                                  report.status === 'Report_Generated' || 
+                                  report.status === 'Report_Sent' || 
+                                  report.status === 'Completed' ||
+                                  report.status === 'feedback_sent'
+                                );
+
+                                if (isAvailable) {
+                                  return (
+                                    <div className="flex items-center space-x-2">
+                                      <button
+                                        onClick={() => handleViewReport(report)}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                                        title="View PDF Report"
+                                      >
+                                        <Eye className="w-3 h-3" />
+                                        View PDF
+                                      </button>
+                                      <button
+                                        onClick={() => handleDownloadReport(report)}
+                                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                                        title="Download PDF Report"
+                                      >
+                                        <Download className="w-3 h-3" />
+                                        Download
+                                      </button>
+                                    </div>
+                                  );
+                                } else {
+                                  return (
+                                    <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">
+                                      {report.status === 'Cancelled' ? 'Cancelled' : 'Report Not Ready'}
+                                    </span>
+                                  );
+                                }
+                              })()}
                             </div>
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">

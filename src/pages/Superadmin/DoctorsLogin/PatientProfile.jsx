@@ -304,10 +304,33 @@ const PatientProfile = () => {
                       {patient.address}
                     </span>
                   )}
+                  {patient?.appointmentTime && (
+                    <span className="flex items-center gap-1 text-blue-600 font-semibold">
+                      <Calendar className="h-4 w-4" />
+                      Appointment: {new Date(patient.appointmentTime).toLocaleDateString('en-GB')} at {new Date(patient.appointmentTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-col items-end space-y-2">
+              {patient?.appointmentTime && (() => {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const appointmentDate = new Date(patient.appointmentTime);
+                appointmentDate.setHours(0, 0, 0, 0);
+                const isToday = appointmentDate.getTime() === today.getTime();
+                
+                return (
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                    isToday 
+                      ? 'bg-blue-100 text-blue-800 border border-blue-300' 
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {isToday ? '📅 Scheduled for Today' : `📅 ${new Date(patient.appointmentTime).toLocaleDateString('en-GB')}`}
+                  </span>
+                );
+              })()}
               <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-medium">
                 Read Only
               </span>
@@ -395,6 +418,164 @@ const PatientProfile = () => {
                       </p>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Appointment & Billing Information */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Appointment Card */}
+              <div className="bg-white rounded-xl shadow-sm border border-blue-100">
+                <div className="p-6 border-b border-blue-100">
+                  <h2 className="text-sm font-semibold text-slate-800 flex items-center">
+                    <Calendar className="h-5 w-5 mr-2 text-blue-500" />
+                    Appointment Information
+                  </h2>
+                  <p className="text-slate-600 mt-1 text-xs">
+                    Consultation schedule and appointment details
+                  </p>
+                </div>
+                <div className="p-6">
+                  {patient?.appointmentTime ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">Appointment Date</label>
+                        <p className="text-slate-800 font-medium text-xs">
+                          {new Date(patient.appointmentTime).toLocaleDateString('en-GB', {
+                            weekday: 'long',
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric'
+                          })}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">Appointment Time</label>
+                        <p className="text-slate-800 font-medium text-xs">
+                          {new Date(patient.appointmentTime).toLocaleTimeString('en-GB', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true
+                          })}
+                        </p>
+                      </div>
+                      {(() => {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const appointmentDate = new Date(patient.appointmentTime);
+                        appointmentDate.setHours(0, 0, 0, 0);
+                        const isToday = appointmentDate.getTime() === today.getTime();
+                        const isPast = appointmentDate.getTime() < today.getTime();
+                        
+                        return (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
+                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
+                              isToday 
+                                ? 'bg-blue-100 text-blue-800' 
+                                : isPast
+                                ? 'bg-gray-100 text-gray-800'
+                                : 'bg-green-100 text-green-800'
+                            }`}>
+                              {isToday ? 'Scheduled for Today' : isPast ? 'Past Appointment' : 'Upcoming'}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Calendar className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-gray-500 text-xs">No appointment scheduled</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Billing Information Card */}
+              <div className="bg-white rounded-xl shadow-sm border border-green-100">
+                <div className="p-6 border-b border-green-100">
+                  <h2 className="text-sm font-semibold text-slate-800 flex items-center">
+                    <FileText className="h-5 w-5 mr-2 text-green-500" />
+                    Billing Information
+                  </h2>
+                  <p className="text-slate-600 mt-1 text-xs">
+                    Superconsultant consultation billing status
+                  </p>
+                </div>
+                <div className="p-6">
+                  {patient?.billing && patient.billing.length > 0 ? (() => {
+                    const superconsultantBill = patient.billing.find(bill => 
+                      bill.type === 'consultation' && 
+                      bill.consultationType?.startsWith('superconsultant_')
+                    );
+                    
+                    if (!superconsultantBill) {
+                      return (
+                        <div className="text-center py-8">
+                          <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                          <p className="text-gray-500 text-xs">No superconsultant billing found</p>
+                        </div>
+                      );
+                    }
+                    
+                    const totalAmount = superconsultantBill.amount || 0;
+                    const paidAmount = superconsultantBill.paidAmount || 0;
+                    const outstanding = totalAmount - paidAmount;
+                    const isPaid = paidAmount >= totalAmount && totalAmount > 0;
+                    
+                    // Format consultation type
+                    const consultationType = superconsultantBill.consultationType
+                      ?.replace('superconsultant_', '')
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, l => l.toUpperCase()) || 'Superconsultant Consultation';
+                    
+                    return (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Consultation Type</label>
+                          <p className="text-slate-800 font-medium text-xs">{consultationType}</p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Total Amount</label>
+                          <p className="text-slate-800 font-medium text-xs">₹{totalAmount.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Amount Paid</label>
+                          <p className="text-green-600 font-medium text-xs">₹{paidAmount.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Outstanding</label>
+                          <p className={`font-medium text-xs ${outstanding > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                            ₹{outstanding.toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Payment Status</label>
+                          <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
+                            isPaid 
+                              ? 'bg-green-100 text-green-800' 
+                              : paidAmount > 0
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {isPaid ? 'Fully Paid' : paidAmount > 0 ? 'Partially Paid' : 'Pending Payment'}
+                          </span>
+                        </div>
+                        {superconsultantBill.invoiceNumber && (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-500 mb-1">Invoice Number</label>
+                            <p className="text-slate-800 font-mono text-xs">{superconsultantBill.invoiceNumber}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })() : (
+                    <div className="text-center py-8">
+                      <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-gray-500 text-xs">No billing information available</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

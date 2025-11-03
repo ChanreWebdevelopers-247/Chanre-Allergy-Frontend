@@ -70,6 +70,7 @@ import PatientLabReports from '../pages/Superadmin/DoctorsLogin/PatientLabReport
 import SuperadminDoctorReviewLabReports from '../pages/Superadmin/DoctorsLogin/ReviewLabReports';
 import SuperadminDoctorPatientHistory from '../pages/Superadmin/DoctorsLogin/PatientHistory';
 import SuperadminDoctorPatientProfile from '../pages/Superadmin/DoctorsLogin/PatientProfile';
+import SuperadminDoctorAppointments from '../pages/Superadmin/DoctorsLogin/Appointments';
 
 // Superadmin Consultant Followups View Pages
 import SuperadminDoctorViewAllergicRhinitis from '../pages/Superadmin/DoctorsLogin/Followups/ViewAllergicRhinitis';
@@ -286,11 +287,10 @@ export default function AppRoutes() {
         
         {/* Superadmin Consultant Working Routes */}
         <Route path="superadmin/doctor/dashboard" element={<SuperadminDoctorDashboard />} />
-        <Route path="superadmin/doctor/patients" element={<PatientDetails />} />
+        <Route path="superadmin/doctor/patients" element={<SuperadminDoctorMyPatients />} />
         <Route path="superadmin/doctor/my-patients" element={<SuperadminDoctorMyPatients />} />
+        <Route path="superadmin/doctor/appointments" element={<SuperadminDoctorAppointments />} />
         <Route path="superadmin/doctor/lab-reports" element={<SuperadminDoctorReviewLabReports />} />
-        <Route path="superadmin/doctor/test-requests" element={<TestRequestReview />} />
-        <Route path="superadmin/doctor/test-requests/:id" element={<TestRequestReviewDetails />} />
         <Route path="superadmin/doctor/patient/:patientId" element={<PatientDetails />} />
         <Route path="superadmin/doctor/patient/:patientId/profile" element={<SuperadminDoctorPatientProfile />} />
         <Route path="superadmin/doctor/patient/:patientId/lab-reports" element={<PatientLabReports />} />

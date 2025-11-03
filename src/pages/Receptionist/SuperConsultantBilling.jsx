@@ -22,10 +22,13 @@ import {
   FlaskConical,
   CheckCircle2,
   AlertCircle,
-  FileCheck
+  FileCheck,
+  Ban,
+  RotateCcw
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import API from '../../services/api';
+import { store } from '../../redux/store';
 
 export default function SuperConsultantBilling() {
   const dispatch = useDispatch();
@@ -63,6 +66,16 @@ export default function SuperConsultantBilling() {
   const [invoiceData, setInvoiceData] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [loadingPaymentHistory, setLoadingPaymentHistory] = useState(false);
+
+  // Cancel and Refund state
+  const [showCancelBillModal, setShowCancelBillModal] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [refundData, setRefundData] = useState({
+    reason: '',
+    refundMethod: 'cash',
+    refundType: 'withPenalty' // 'withPenalty' or 'full'
+  });
 
   // Function to fetch payment history for a patient
   const fetchPaymentHistory = async (patientId) => {
@@ -252,10 +265,25 @@ export default function SuperConsultantBilling() {
       return { status: 'No Invoice', color: 'text-red-600 bg-red-100', icon: <FileText className="h-4 w-4" /> };
     }
 
-    const consultationBill = patient.billing.find(bill => 
+    // CRITICAL: Only check superconsultant bills, NOT regular consultation bills
+    const superconsultantBills = patient.billing.filter(bill => 
       bill.type === 'consultation' && 
       bill.consultationType?.startsWith('superconsultant_')
     );
+
+    if (superconsultantBills.length === 0) {
+      return { status: 'No Superconsultant Invoice', color: 'text-red-600 bg-red-100', icon: <FileText className="h-4 w-4" /> };
+    }
+
+    // Check if any SUPERCONSULTANT bills are cancelled (not regular consultation bills)
+    const hasCancelledSuperconsultantBills = superconsultantBills.some(bill => bill.status === 'cancelled');
+    if (hasCancelledSuperconsultantBills) {
+      return { status: 'Bill Cancelled', color: 'text-red-600 bg-red-100', icon: <Ban className="h-4 w-4" /> };
+    }
+
+    // Get the main superconsultant bill (prefer non-cancelled, otherwise most recent)
+    const consultationBill = superconsultantBills.find(bill => bill.status !== 'cancelled') || 
+                             superconsultantBills.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
 
     if (!consultationBill) {
       return { status: 'No Superconsultant Invoice', color: 'text-red-600 bg-red-100', icon: <FileText className="h-4 w-4" /> };
@@ -264,8 +292,32 @@ export default function SuperConsultantBilling() {
     const totalAmount = consultationBill.amount || 0;
     const paidAmount = consultationBill.paidAmount || 0;
 
-    if (consultationBill.status === 'cancelled') {
-      return { status: 'Cancelled', color: 'text-red-600 bg-red-100', icon: <X className="h-4 w-4" /> };
+    // Check for refunds - only in SUPERCONSULTANT bills
+    let hasRefundedBills = false;
+    let hasPartiallyRefundedBills = false;
+
+    superconsultantBills.forEach(bill => {
+      if (bill.refunds && bill.refunds.length > 0) {
+        const refundedAmount = bill.refunds.reduce((sum, refund) => sum + (refund.amount || 0), 0);
+        if (refundedAmount >= bill.amount) {
+          hasRefundedBills = true;
+        } else if (refundedAmount > 0) {
+          hasPartiallyRefundedBills = true;
+        }
+      }
+      if (bill.status === 'refunded') {
+        hasRefundedBills = true;
+      } else if (bill.status === 'partially_refunded') {
+        hasPartiallyRefundedBills = true;
+      }
+    });
+
+    if (hasRefundedBills && !hasPartiallyRefundedBills) {
+      return { status: 'Refunded', color: 'text-orange-600 bg-orange-100', icon: <RotateCcw className="h-4 w-4" /> };
+    }
+
+    if (hasPartiallyRefundedBills) {
+      return { status: 'Partially Refunded', color: 'text-yellow-600 bg-yellow-100', icon: <RotateCcw className="h-4 w-4" /> };
     }
 
     if (paidAmount >= totalAmount && totalAmount > 0) {
@@ -277,6 +329,67 @@ export default function SuperConsultantBilling() {
     }
 
     return { status: 'Pending Payment', color: 'text-orange-600 bg-orange-100', icon: <Clock className="h-4 w-4" /> };
+  };
+
+  // Get superconsultant appointment display data
+  // For superconsultant billing, we specifically look for appointmentTime set during payment processing
+  const getSuperconsultantAppointmentData = (patient) => {
+    // Check if patient has superconsultant billing
+    const superconsultantBill = patient.billing?.find(bill => 
+      bill.type === 'consultation' && 
+      bill.consultationType?.startsWith('superconsultant_')
+    );
+
+    if (!superconsultantBill) {
+      return null;
+    }
+
+    // Priority: Use appointmentTime from patient (set during superconsultant payment processing)
+    if (patient.appointmentTime) {
+      return {
+        date: patient.appointmentTime,
+        status: patient.appointmentStatus || 'scheduled',
+        notes: patient.appointmentNotes
+      };
+    }
+
+    // Check appointments array for superconsultant appointments
+    if (patient.appointments && patient.appointments.length > 0) {
+      // Find appointments related to superconsultant consultation
+      const superconsultantAppointments = patient.appointments
+        .map(apt => {
+          const dateField = apt.scheduledAt || apt.appointmentTime || apt.date;
+          if (!dateField) return null;
+          
+          try {
+            const aptDate = new Date(dateField);
+            if (!isNaN(aptDate.getTime())) {
+              return {
+                ...apt,
+                _appointmentDate: aptDate
+              };
+            }
+          } catch (e) {
+            // Invalid date
+          }
+          return null;
+        })
+        .filter(apt => apt !== null && apt._appointmentDate);
+      
+      if (superconsultantAppointments.length > 0) {
+        // Sort by date (earliest first)
+        superconsultantAppointments.sort((a, b) => a._appointmentDate.getTime() - b._appointmentDate.getTime());
+        const earliestAppointment = superconsultantAppointments[0];
+        
+        return {
+          date: earliestAppointment._appointmentDate,
+          status: earliestAppointment.status || patient.appointmentStatus || 'scheduled',
+          notes: earliestAppointment.notes
+        };
+      }
+    }
+
+    return null;
   };
 
   // Get lab status for a patient based on their test requests
@@ -374,16 +487,32 @@ export default function SuperConsultantBilling() {
   // Prepare invoice data for viewing
   const prepareInvoiceData = (patient) => {
     if (!patient || !patient.billing || patient.billing.length === 0) {
+      console.error('No billing data found for patient:', patient?._id);
       return null;
     }
 
-    // Find superconsultant billing
-    const superconsultantBill = patient.billing.find(bill => 
+    // Find all superconsultant billing entries and get the most recent one (not cancelled if possible)
+    const superconsultantBills = patient.billing.filter(bill => 
       bill.type === 'consultation' && 
       bill.consultationType?.startsWith('superconsultant_')
     );
 
+    if (superconsultantBills.length === 0) {
+      console.error('No superconsultant billing found for patient:', patient?._id);
+      return null;
+    }
+
+    // Try to find a non-cancelled bill first, otherwise use the latest one
+    let superconsultantBill = superconsultantBills.find(bill => bill.status !== 'cancelled');
     if (!superconsultantBill) {
+      // If all are cancelled, use the most recent one
+      superconsultantBill = superconsultantBills.sort((a, b) => 
+        new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+      )[0];
+    }
+
+    if (!superconsultantBill) {
+      console.error('Could not find valid superconsultant bill for patient:', patient?._id);
       return null;
     }
 
@@ -596,9 +725,16 @@ export default function SuperConsultantBilling() {
     }
 
     setSelectedPatient(patient);
-    const totalAmount = consultationBill.amount || 0;
-    const paidAmount = consultationBill.paidAmount || 0;
-    const outstanding = totalAmount - paidAmount;
+    
+    // Calculate total outstanding amount (consultation + all service charges for this invoice)
+    const invoiceNumber = consultationBill.invoiceNumber;
+    const relatedBills = patient.billing?.filter(bill => 
+      bill.invoiceNumber === invoiceNumber
+    ) || [];
+    
+    const totalAmount = relatedBills.reduce((sum, bill) => sum + (bill.amount || 0), 0);
+    const totalPaid = relatedBills.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+    const fullOutstanding = totalAmount - totalPaid;
 
     // Set default appointment to tomorrow at 9 AM
     const tomorrow = new Date();
@@ -607,7 +743,7 @@ export default function SuperConsultantBilling() {
     const defaultDate = tomorrow.toISOString().slice(0, 16);
 
     setPaymentData({
-      amount: outstanding > 0 ? outstanding.toString() : totalAmount.toString(),
+      amount: fullOutstanding.toString(), // Always set to full outstanding amount
       paymentMethod: 'cash',
       consultationType: consultationBill.consultationType || 'superconsultant_normal',
       appointmentTime: defaultDate,
@@ -662,6 +798,154 @@ export default function SuperConsultantBilling() {
     } catch (error) {
       console.error('Error processing payment:', error);
       toast.error(error.response?.data?.message || 'Failed to process payment');
+    }
+  };
+
+  // Cancel bill handler
+  const handleCancelBill = (patient) => {
+    setSelectedPatient(patient);
+    setCancelReason('');
+    setShowCancelBillModal(true);
+  };
+
+  const handleCancelBillSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!selectedPatient || !cancelReason.trim()) {
+      toast.error('Please provide a cancellation reason');
+      return;
+    }
+
+    try {
+      const superconsultantBill = selectedPatient.billing?.find(bill => 
+        bill.type === 'consultation' && 
+        bill.consultationType?.startsWith('superconsultant_')
+      );
+
+      if (!superconsultantBill) {
+        toast.error('No superconsultant bill found');
+        return;
+      }
+
+      // Calculate total amounts
+      const invoiceNumber = superconsultantBill.invoiceNumber;
+      const relatedBills = selectedPatient.billing?.filter(bill => 
+        bill.invoiceNumber === invoiceNumber
+      ) || [];
+      
+      const totalAmount = relatedBills.reduce((sum, bill) => sum + (bill.amount || 0), 0);
+      const totalPaid = relatedBills.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+
+      const cancelPayload = {
+        patientId: selectedPatient._id,
+        reason: cancelReason.trim(),
+        initiateRefund: totalPaid > 0,
+        invoiceNumber: invoiceNumber, // Send invoice number to cancel only this invoice
+        billingType: 'superconsultant' // Specify this is superconsultant billing (not regular consultation)
+      };
+
+      const response = await API.post('/billing/cancel-bill', cancelPayload);
+      
+      if (response.data.success) {
+        toast.success('Bill cancelled successfully!');
+        setShowCancelBillModal(false);
+        setCancelReason('');
+        await dispatch(fetchReceptionistPatients());
+      } else {
+        toast.error(response.data.message || 'Failed to cancel bill');
+      }
+    } catch (error) {
+      console.error('Error cancelling bill:', error);
+      toast.error(error.response?.data?.message || 'Failed to cancel bill');
+    }
+  };
+
+  // Refund handler
+  const handleProcessRefund = (patient) => {
+    setSelectedPatient(patient);
+    
+    // Get total paid amount for refund
+    const superconsultantBill = patient.billing?.find(bill => 
+      bill.type === 'consultation' && 
+      bill.consultationType?.startsWith('superconsultant_')
+    );
+
+    if (!superconsultantBill) {
+      toast.error('No superconsultant bill found');
+      return;
+    }
+
+    const invoiceNumber = superconsultantBill.invoiceNumber;
+    const relatedBills = patient.billing?.filter(bill => 
+      bill.invoiceNumber === invoiceNumber
+    ) || [];
+    
+    const totalPaid = relatedBills.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+    const totalRefunded = relatedBills.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0);
+    
+    const availableForRefund = totalPaid - totalRefunded;
+    
+    setRefundData({
+      reason: '',
+      refundMethod: 'cash',
+      refundType: 'withPenalty'
+    });
+    
+    setShowRefundModal(true);
+  };
+
+  const handleRefundSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!selectedPatient || !refundData.reason.trim()) {
+      toast.error('Please provide a refund reason');
+      return;
+    }
+
+    try {
+      const superconsultantBill = selectedPatient.billing?.find(bill => 
+        bill.type === 'consultation' && 
+        bill.consultationType?.startsWith('superconsultant_')
+      );
+
+      if (!superconsultantBill) {
+        toast.error('No superconsultant bill found');
+        return;
+      }
+
+      const invoiceNumber = superconsultantBill.invoiceNumber;
+      const relatedBills = selectedPatient.billing?.filter(bill => 
+        bill.invoiceNumber === invoiceNumber
+      ) || [];
+      
+      const totalPaid = relatedBills.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+      const totalRefunded = relatedBills.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0);
+      const availableAmount = totalPaid - totalRefunded;
+
+      const refundPayload = {
+        patientId: selectedPatient._id,
+        amount: availableAmount,
+        refundMethod: refundData.refundMethod,
+        reason: refundData.reason.trim()
+      };
+
+      const response = await API.post('/billing/process-refund', refundPayload);
+      
+      if (response.data.success) {
+        toast.success('Refund processed successfully!');
+        setShowRefundModal(false);
+        setRefundData({
+          reason: '',
+          refundMethod: 'cash',
+          refundType: 'withPenalty'
+        });
+        await dispatch(fetchReceptionistPatients());
+      } else {
+        toast.error('Failed to process refund');
+      }
+    } catch (error) {
+      console.error('Error processing refund:', error);
+      toast.error(error.response?.data?.message || 'Failed to process refund');
     }
   };
 
@@ -796,6 +1080,7 @@ export default function SuperConsultantBilling() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Patient</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Contact</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">UH ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Appointment</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Lab Status</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
@@ -811,6 +1096,11 @@ export default function SuperConsultantBilling() {
                       const totalAmount = consultationBill?.amount || 0;
                       const paidAmount = consultationBill?.paidAmount || 0;
                       const hasBilling = consultationBill !== undefined;
+                      const appointmentData = getSuperconsultantAppointmentData(patient);
+                      const isAppointmentViewed = appointmentData?.status === 'viewed';
+                      const isAppointmentCompleted = appointmentData?.status === 'viewed' || appointmentData?.status === 'completed';
+                      const isBillCancelled = statusInfo.status === 'Bill Cancelled';
+                      const canReassign = isBillCancelled || isAppointmentCompleted;
                         
                         return (
                           <tr key={patient._id} className="hover:bg-slate-50">
@@ -833,6 +1123,52 @@ export default function SuperConsultantBilling() {
                             </td>
                             <td className="px-4 py-4 whitespace-nowrap text-xs text-slate-900">
                               {patient.uhId || 'No UH ID'}
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap">
+                              <div className="text-xs text-slate-600 space-y-1">
+                                {(() => {
+                                  const appointmentData = getSuperconsultantAppointmentData(patient);
+                                  
+                                  if (!appointmentData) {
+                                    return (
+                                      <div className="space-y-1">
+                                        <span className="text-slate-400">No appointment</span>
+                                      </div>
+                                    );
+                                  }
+                                  
+                                  return (
+                                    <>
+                                      <div className="font-medium text-slate-900">
+                                        {new Date(appointmentData.date).toLocaleDateString('en-GB')}
+                                      </div>
+                                      <div className="text-slate-500">
+                                        {new Date(appointmentData.date).toLocaleTimeString('en-GB', { 
+                                          hour: '2-digit', 
+                                          minute: '2-digit',
+                                          hour12: true 
+                                        })}
+                                      </div>
+                                      <div className={`text-xs px-2 py-1 rounded-full inline-block ${
+                                        appointmentData.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                                        appointmentData.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
+                                        appointmentData.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                                        appointmentData.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                                        appointmentData.status === 'viewed' ? 'bg-green-100 text-green-700' :
+                                        appointmentData.status === 'missed' ? 'bg-red-100 text-red-700' :
+                                        'bg-gray-100 text-gray-700'
+                                      }`}>
+                                        {appointmentData.status || 'scheduled'}
+                                      </div>
+                                      {appointmentData.notes && (
+                                        <div className="text-slate-400 text-xs mt-1 max-w-32 truncate" title={appointmentData.notes}>
+                                          📝 {appointmentData.notes}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
                             </td>
                             <td className="px-4 py-4 whitespace-nowrap">
                               <span className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 w-fit ${statusInfo.color}`}>
@@ -902,15 +1238,38 @@ export default function SuperConsultantBilling() {
                               {/* View Invoice - for patients with superconsultant billing */}
                                 {hasBilling && (
                                 <button
-                                    onClick={() => {
-                                    const invoice = prepareInvoiceData(patient);
-                                    if (invoice) {
-                                      setInvoiceData(invoice);
-                                        setShowInvoicePreviewModal(true);
-                                        // Fetch payment history for this patient
-                                        fetchPaymentHistory(patient._id);
-                                      } else {
-                                        toast.error('Unable to generate invoice data');
+                                    onClick={async () => {
+                                      try {
+                                        // Refresh patient data first to get latest billing information
+                                        await dispatch(fetchReceptionistPatients());
+                                        
+                                        // Wait a bit for Redux state to update
+                                        setTimeout(async () => {
+                                          try {
+                                            // Get fresh patient data from current Redux state
+                                            const currentState = store.getState();
+                                            const freshPatients = currentState.receptionist.patients || [];
+                                            const freshPatient = freshPatients.find(p => p._id === patient._id) || patient;
+                                            
+                                            const invoice = prepareInvoiceData(freshPatient);
+                                            if (invoice) {
+                                              setInvoiceData(invoice);
+                                              setSelectedPatient(freshPatient);
+                                              setShowInvoicePreviewModal(true);
+                                              // Fetch payment history for this patient
+                                              await fetchPaymentHistory(freshPatient._id);
+                                            } else {
+                                              console.error('Failed to prepare invoice data for patient:', freshPatient._id, freshPatient);
+                                              toast.error('Unable to generate invoice data. Please ensure the patient has superconsultant billing.');
+                                            }
+                                          } catch (error) {
+                                            console.error('Error preparing invoice:', error);
+                                            toast.error('Failed to prepare invoice. Please try again.');
+                                          }
+                                        }, 300);
+                                      } catch (error) {
+                                        console.error('Error opening invoice:', error);
+                                        toast.error('Failed to open invoice. Please try again.');
                                       }
                                     }}
                                     className="text-purple-600 hover:text-purple-700 p-1 rounded transition-colors"
@@ -918,6 +1277,42 @@ export default function SuperConsultantBilling() {
                                   >
                                     <FileCheck className="h-4 w-4" />
                                 </button>
+                                )}
+
+                                {/* Cancel Bill - for any patient with billing, but not if appointment is viewed */}
+                                {hasBilling && statusInfo.status !== 'Bill Cancelled' && statusInfo.status !== 'Refunded' && !isAppointmentViewed && (
+                                  <button
+                                    onClick={() => handleCancelBill(patient)}
+                                    className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1"
+                                    title="Cancel Bill"
+                                  >
+                                    <Ban className="h-3 w-3" />
+                                    Cancel
+                                  </button>
+                                )}
+
+                                {/* Process Refund - for cancelled bills with payments or partially refunded bills */}
+                                {(statusInfo.status === 'Bill Cancelled' && totalAmount > 0 && paidAmount > 0) || statusInfo.status === 'Partially Refunded' ? (
+                                  <button
+                                    onClick={() => handleProcessRefund(patient)}
+                                    className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1"
+                                    title="Process Refund"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                    Refund
+                                  </button>
+                                ) : null}
+
+                                {/* Reassign - Create new consultation when bill is cancelled or appointment is completed */}
+                                {canReassign && (
+                                  <button
+                                    onClick={() => handleCreateInvoice(patient)}
+                                    className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1"
+                                    title={isBillCancelled ? "Create New Consultation (Bill Cancelled)" : "Create New Consultation (Appointment Completed)"}
+                                  >
+                                    <RefreshCw className="h-3 w-3" />
+                                    Reassign
+                                  </button>
                                 )}
                               </div>
                             </td>
@@ -1408,16 +1803,41 @@ export default function SuperConsultantBilling() {
                     {/* Left Column - Amount in Words */}
                     <div>
                       {(() => {
-                        const totalRefunded = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0) || 0;
-                        const hasCancelledBills = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
+                        // CRITICAL: Only calculate refunds from THIS invoice (not all bills)
+                        const invoiceNumber = invoiceData.invoiceNumber;
+                        const invoiceBills = selectedPatient.billing?.filter(bill => 
+                          bill.invoiceNumber === invoiceNumber
+                        ) || [];
+                        
+                        const totalRefunded = invoiceBills.reduce((sum, bill) => {
+                          // Sum refundAmount and also check refunds array
+                          let refundTotal = bill.refundAmount || 0;
+                          if (bill.refunds && Array.isArray(bill.refunds)) {
+                            refundTotal += bill.refunds.reduce((sum, refund) => sum + (refund.amount || 0), 0);
+                          }
+                          return sum + refundTotal;
+                        }, 0);
+                        
+                        const hasCancelledBills = invoiceBills.some(bill => bill.status === 'cancelled');
                         
                         return (
                           <div className="text-xs">
-                            {hasCancelledBills && (
-                              <div className="mb-2">
-                                <div className="font-medium text-red-600 mb-1">Bill Status: CANCELLED</div>
-                              </div>
-                            )}
+                            {hasCancelledBills && (() => {
+                              // Get cancellation reason from the cancelled bill in THIS invoice
+                              const cancelledBill = invoiceBills.find(bill => bill.status === 'cancelled');
+                              const cancellationReason = cancelledBill?.cancellationReason || 'No reason provided';
+                              
+                              return (
+                                <div className="mb-2">
+                                  <div className="font-medium text-red-600 mb-1">Bill Status: CANCELLED</div>
+                                  {cancellationReason && (
+                                    <div className="text-red-700 mt-1">
+                                      <span className="font-medium">Cancellation Reason:</span> {cancellationReason}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             {invoiceData.totalPaid > 0 && (
                               <div className="mb-1">
                                 <span className="font-medium">Amount Paid:</span> (Rs.) {numberToWords(Math.round(invoiceData.totalPaid))} Only
@@ -1460,9 +1880,23 @@ export default function SuperConsultantBilling() {
                             <span className="text-green-600 font-medium">₹{invoiceData.totalPaid.toFixed(2)}</span>
                           </div>
                         {(() => {
-                          const totalRefunded = selectedPatient.billing?.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0) || 0;
-                          const hasCancelledBills = selectedPatient.billing?.some(bill => bill.status === 'cancelled');
-                            const outstandingAmount = invoiceData.totals.total - invoiceData.totalPaid;
+                          // CRITICAL: Only calculate refunds from THIS invoice (not all bills)
+                          const invoiceNumber = invoiceData.invoiceNumber;
+                          const invoiceBills = selectedPatient.billing?.filter(bill => 
+                            bill.invoiceNumber === invoiceNumber
+                          ) || [];
+                          
+                          const totalRefunded = invoiceBills.reduce((sum, bill) => {
+                            // Sum refundAmount and also check refunds array
+                            let refundTotal = bill.refundAmount || 0;
+                            if (bill.refunds && Array.isArray(bill.refunds)) {
+                              refundTotal += bill.refunds.reduce((sum, refund) => sum + (refund.amount || 0), 0);
+                            }
+                            return sum + refundTotal;
+                          }, 0);
+                          
+                          const hasCancelledBills = invoiceBills.some(bill => bill.status === 'cancelled');
+                          const outstandingAmount = invoiceData.totals.total - invoiceData.totalPaid;
                           
                           return (
                             <>
@@ -1492,12 +1926,16 @@ export default function SuperConsultantBilling() {
                                     })()}
                                     <div className="flex justify-between text-xs text-slate-500 mt-1">
                                       <span>Payment Method:</span>
-                                      <span className="capitalize">{selectedPatient.billing?.find(bill => bill.paidAmount > 0)?.paymentMethod || 'cash'}</span>
+                                      <span className="capitalize">{invoiceBills.find(bill => bill.paidAmount > 0)?.paymentMethod || 'cash'}</span>
                                     </div>
                                     {totalRefunded > 0 && (
                                       <div className="flex justify-between text-xs text-slate-500 mt-1">
                                         <span>Refund Method:</span>
-                                        <span className="capitalize">{selectedPatient.billing?.find(bill => bill.refundAmount > 0)?.refundMethod || 'cash'}</span>
+                                        <span className="capitalize">{invoiceBills.find(bill => {
+                                          if (bill.refundAmount > 0) return true;
+                                          if (bill.refunds && Array.isArray(bill.refunds) && bill.refunds.length > 0) return true;
+                                          return false;
+                                        })?.refundMethod || invoiceBills.find(bill => bill.refunds?.[0]?.method)?.refunds?.[0]?.method || 'cash'}</span>
                                       </div>
                                     )}
                                   </>
@@ -1508,12 +1946,26 @@ export default function SuperConsultantBilling() {
                                   <span className="text-orange-600 font-medium">₹{outstandingAmount.toFixed(2)}</span>
                                 </div>
                               )}
-                              {hasCancelledBills && (
-                                <div className="flex justify-between">
-                                  <span>Status:</span>
-                                  <span className="text-red-600 font-bold">BILL CANCELLED</span>
-                                </div>
-                              )}
+                              {hasCancelledBills && (() => {
+                                // Get cancellation reason from the cancelled bill in THIS invoice
+                                const cancelledBill = invoiceBills.find(bill => bill.status === 'cancelled');
+                                const cancellationReason = cancelledBill?.cancellationReason || 'No reason provided';
+                                
+                                return (
+                                  <>
+                                    <div className="flex justify-between">
+                                      <span>Status:</span>
+                                      <span className="text-red-600 font-bold">BILL CANCELLED</span>
+                                    </div>
+                                    {cancellationReason && (
+                                      <div className="flex justify-between text-xs text-slate-600 mt-1">
+                                        <span>Reason:</span>
+                                        <span className="text-red-700">{cancellationReason}</span>
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                                 {!hasCancelledBills && outstandingAmount === 0 && invoiceData.totalPaid > 0 && (
                                 <div className="flex justify-between">
                                   <span>Status:</span>
@@ -1531,69 +1983,97 @@ export default function SuperConsultantBilling() {
                   {/* Transaction History */}
                   {(() => {
                     const transactions = [];
+                    const invoiceNumber = invoiceData.invoiceNumber;
                     
-                    selectedPatient.billing?.forEach(bill => {
-                      if (bill.type === 'consultation' && bill.consultationType?.startsWith('superconsultant_') && bill.invoiceNumber === invoiceData.invoiceNumber) {
+                    // Get all bills related to this invoice
+                    const relatedBills = selectedPatient.billing?.filter(bill => 
+                      bill.invoiceNumber === invoiceNumber
+                    ) || [];
+                    
+                    // Collect transactions from billing records
+                    relatedBills.forEach(bill => {
+                      // Add payment transactions
                       if (bill.paidAmount > 0) {
                         transactions.push({
                           type: 'payment',
                           amount: bill.paidAmount,
                           method: bill.paymentMethod || 'cash',
-                          date: bill.paidAt || bill.createdAt,
-                          description: bill.description || 'Payment'
+                          date: bill.paidAt || bill.createdAt || bill.updatedAt,
+                          description: bill.description || `${bill.type === 'consultation' ? 'Consultation' : 'Service'} Payment`,
+                          source: 'billing'
                         });
                       }
-                        if (bill.refundAmount > 0) {
-                          transactions.push({
-                            type: 'refund',
-                            amount: bill.refundAmount,
-                            method: bill.refundMethod || 'cash',
-                            date: bill.refundAt || bill.updatedAt || bill.createdAt,
-                            description: bill.description || 'Refund'
-                          });
-                        }
-                      }
-                      if (bill.type === 'service' && bill.invoiceNumber === invoiceData.invoiceNumber) {
-                        if (bill.paidAmount > 0) {
-                          transactions.push({
-                            type: 'payment',
-                            amount: bill.paidAmount,
-                            method: bill.paymentMethod || 'cash',
-                            date: bill.paidAt || bill.createdAt,
-                            description: bill.description || 'Payment'
-                          });
-                        }
-                        if (bill.refundAmount > 0) {
+                      
+                      // Add refund transactions
+                      if (bill.refundAmount > 0) {
                         transactions.push({
                           type: 'refund',
                           amount: bill.refundAmount,
                           method: bill.refundMethod || 'cash',
                           date: bill.refundAt || bill.updatedAt || bill.createdAt,
-                          description: bill.description || 'Refund'
+                          description: bill.refundReason || bill.description || 'Refund',
+                          source: 'billing'
                         });
+                      }
+                      
+                      // Also check refunds array if it exists
+                      if (bill.refunds && Array.isArray(bill.refunds) && bill.refunds.length > 0) {
+                        bill.refunds.forEach(refund => {
+                          transactions.push({
+                            type: 'refund',
+                            amount: refund.amount || 0,
+                            method: refund.method || bill.refundMethod || 'cash',
+                            date: refund.date || refund.createdAt || bill.updatedAt || bill.createdAt,
+                            description: refund.reason || refund.description || 'Refund',
+                            source: 'billing_refunds'
+                          });
+                        });
+                      }
+                    });
+                    
+                    // Include payment history from payment logs
+                    if (paymentHistory && Array.isArray(paymentHistory)) {
+                      paymentHistory.forEach(log => {
+                        // Match by invoice number or billing ID
+                        const matchesInvoice = log.invoiceNumber === invoiceNumber;
+                        const matchesBillingId = log.billingId && relatedBills.some(b => 
+                          b._id?.toString() === log.billingId?.toString()
+                        );
+                        
+                        if (matchesInvoice || matchesBillingId) {
+                          // Avoid duplicates by checking if we already have this transaction
+                          const isDuplicate = transactions.some(t => 
+                            t.source === 'payment_log' &&
+                            t.date === (log.createdAt || log.date) &&
+                            t.amount === log.amount
+                          );
+                          
+                          if (!isDuplicate) {
+                            transactions.push({
+                              type: 'payment',
+                              amount: log.amount || 0,
+                              method: log.paymentMethod || 'cash',
+                              date: log.createdAt || log.date || new Date(),
+                              description: log.description || log.notes || 'Payment',
+                              source: 'payment_log'
+                            });
+                          }
                         }
-                      }
+                      });
+                    }
+                    
+                    // Sort by date (most recent first)
+                    transactions.sort((a, b) => {
+                      const dateA = new Date(a.date || 0);
+                      const dateB = new Date(b.date || 0);
+                      return dateB.getTime() - dateA.getTime();
                     });
                     
-                    // Also include payment history from payment logs
-                    paymentHistory.forEach(log => {
-                      if (log.billingId && invoiceData.billing.some(b => b._id?.toString() === log.billingId?.toString())) {
-                        transactions.push({
-                          type: 'payment',
-                          amount: log.amount || 0,
-                          method: log.paymentMethod || 'cash',
-                          date: log.createdAt || log.date,
-                          description: log.description || log.notes || 'Payment'
-                        });
-                      }
-                    });
-                    
-                    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
-                    
-                    if (transactions.length > 0) {
-                      return (
-                        <div className="mb-6">
-                          <h4 className="text-sm font-semibold text-slate-800 mb-3">Transaction History</h4>
+                    // Always show transaction history section, even if empty
+                    return (
+                      <div className="mb-6">
+                        <h4 className="text-sm font-semibold text-slate-800 mb-3">Transaction History</h4>
+                        {transactions.length > 0 ? (
                           <table className="min-w-full border-collapse border border-slate-300">
                             <thead>
                               <tr className="bg-slate-100">
@@ -1606,9 +2086,15 @@ export default function SuperConsultantBilling() {
                             </thead>
                             <tbody>
                               {transactions.map((transaction, index) => (
-                                <tr key={index} className={transaction.type === 'refund' ? 'bg-orange-50' : 'bg-white'}>
+                                <tr key={`${transaction.source}-${index}-${transaction.date}`} className={transaction.type === 'refund' ? 'bg-orange-50' : 'bg-white'}>
                                   <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    {new Date(transaction.date).toLocaleDateString('en-GB')} {new Date(transaction.date).toLocaleTimeString('en-GB')}
+                                    {transaction.date ? (
+                                      <>
+                                        {new Date(transaction.date).toLocaleDateString('en-GB')} {new Date(transaction.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                                      </>
+                                    ) : (
+                                      'N/A'
+                                    )}
                                   </td>
                                   <td className="border border-slate-300 px-3 py-2 text-xs">
                                     <span className={`px-2 py-1 rounded-full font-medium ${
@@ -1620,7 +2106,7 @@ export default function SuperConsultantBilling() {
                                     </span>
                                   </td>
                                   <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    <div className="font-medium">{transaction.description}</div>
+                                    <div className="font-medium">{transaction.description || 'Transaction'}</div>
                                   </td>
                                   <td className="border border-slate-300 px-3 py-2 text-right text-xs font-medium">
                                     <span className={transaction.type === 'payment' ? 'text-green-600' : 'text-orange-600'}>
@@ -1628,16 +2114,19 @@ export default function SuperConsultantBilling() {
                                     </span>
                                   </td>
                                   <td className="border border-slate-300 px-3 py-2 text-xs capitalize">
-                                    {transaction.method}
+                                    {transaction.method || 'N/A'}
                                   </td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
-                        </div>
-                      );
-                    }
-                    return null;
+                        ) : (
+                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                            <p className="text-slate-500 text-sm">No transaction history available for this invoice.</p>
+                          </div>
+                        )}
+                      </div>
+                    );
                   })()}
 
                   {/* Generation Details */}
@@ -1692,6 +2181,178 @@ export default function SuperConsultantBilling() {
               </div>
                     </div>
                   )}
+
+      {/* Cancel Bill Modal */}
+      {showCancelBillModal && selectedPatient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
+              <h3 className="text-lg font-semibold text-slate-800">
+                Cancel Bill - {selectedPatient.name}
+              </h3>
+              <button
+                onClick={() => setShowCancelBillModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              <form onSubmit={handleCancelBillSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Cancellation Reason *
+                  </label>
+                  <textarea
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    rows={4}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent text-sm"
+                    placeholder="Please provide a reason for cancelling this bill..."
+                  />
+                </div>
+
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <div className="flex items-start">
+                    <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 mr-2 flex-shrink-0" />
+                    <div className="text-xs text-red-700">
+                      <p className="font-medium mb-1">Warning:</p>
+                      <p>This action will cancel the bill and cancel the superconsultant appointment. This action cannot be undone.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowCancelBillModal(false)}
+                    className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium"
+                  >
+                    Cancel Bill
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Process Refund Modal */}
+      {showRefundModal && selectedPatient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
+              <h3 className="text-lg font-semibold text-slate-800">
+                Process Refund - {selectedPatient.name}
+              </h3>
+              <button
+                onClick={() => setShowRefundModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              <form onSubmit={handleRefundSubmit} className="space-y-4">
+                {/* Payment Summary */}
+                {(() => {
+                  const superconsultantBill = selectedPatient.billing?.find(bill => 
+                    bill.type === 'consultation' && 
+                    bill.consultationType?.startsWith('superconsultant_')
+                  );
+                  
+                  if (!superconsultantBill) return null;
+                  
+                  const invoiceNumber = superconsultantBill.invoiceNumber;
+                  const relatedBills = selectedPatient.billing?.filter(bill => 
+                    bill.invoiceNumber === invoiceNumber
+                  ) || [];
+                  
+                  const totalPaid = relatedBills.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
+                  const totalRefunded = relatedBills.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0);
+                  const availableForRefund = totalPaid - totalRefunded;
+                  
+                  return (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                      <h4 className="text-sm font-semibold text-orange-800 mb-2">Refund Summary</h4>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-orange-700">Total Paid:</span>
+                          <span className="font-semibold">₹{totalPaid.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-orange-700">Already Refunded:</span>
+                          <span className="font-semibold text-red-600">₹{totalRefunded.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between border-t border-orange-300 pt-1">
+                          <span className="text-orange-700 font-semibold">Available for Refund:</span>
+                          <span className="font-bold text-green-600">₹{availableForRefund.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Refund Method *
+                  </label>
+                  <select
+                    value={refundData.refundMethod}
+                    onChange={(e) => setRefundData({...refundData, refundMethod: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="card">Card</option>
+                    <option value="upi">UPI</option>
+                    <option value="netbanking">Net Banking</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Refund Reason *
+                  </label>
+                  <textarea
+                    value={refundData.reason}
+                    onChange={(e) => setRefundData({...refundData, reason: e.target.value})}
+                    rows={4}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
+                    placeholder="Please provide a reason for this refund..."
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowRefundModal(false)}
+                    className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium"
+                  >
+                    Process Refund
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </ReceptionistLayout>
   );
 }
