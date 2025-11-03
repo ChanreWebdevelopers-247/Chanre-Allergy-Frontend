@@ -10,7 +10,6 @@ import {
   DollarSign,
   Building,
   Phone,
-  Globe,
   Mail,
   Info
 } from 'lucide-react';
@@ -24,7 +23,13 @@ const CenterSettings = () => {
     fees: {
       registrationFee: 150,
       consultationFee: 850,
-      serviceFee: 150
+      serviceFee: 150,
+      superconsultantFees: {
+        normal: 850,
+        audio: 950,
+        video: 1050,
+        reviewReports: 750
+      }
     },
     discountSettings: {
       staff: 10,
@@ -36,8 +41,6 @@ const CenterSettings = () => {
       promotion: 10,
       charity: 100
     },
-    website: 'www.chanreallergy.com',
-    labWebsite: 'www.chanrelabresults.com',
     fax: '080-42516600',
     missCallNumber: '080-42516666',
     mobileNumber: '9686197153'
@@ -71,10 +74,15 @@ const CenterSettings = () => {
       const response = await API.get(`/centers/${centerId}/fees`);
       if (response.data) {
         setSettings({
-          fees: response.data.fees || settings.fees,
+          fees: {
+            ...settings.fees,
+            ...response.data.fees,
+            superconsultantFees: {
+              ...settings.fees.superconsultantFees,
+              ...(response.data.fees?.superconsultantFees || {})
+            }
+          },
           discountSettings: response.data.discountSettings || settings.discountSettings,
-          website: response.data.website || settings.website,
-          labWebsite: response.data.labWebsite || settings.labWebsite,
           fax: response.data.fax || settings.fax,
           missCallNumber: response.data.missCallNumber || settings.missCallNumber,
           mobileNumber: response.data.mobileNumber || settings.mobileNumber
@@ -87,14 +95,31 @@ const CenterSettings = () => {
 
   const handleInputChange = (field, value) => {
     if (field.startsWith('fees.')) {
-      const feeField = field.split('.')[1];
-      setSettings(prev => ({
-        ...prev,
-        fees: {
-          ...prev.fees,
-          [feeField]: value
-        }
-      }));
+      const parts = field.split('.');
+      if (parts.length === 2) {
+        // Regular fee field (registrationFee, consultationFee, serviceFee)
+        const feeField = parts[1];
+        setSettings(prev => ({
+          ...prev,
+          fees: {
+            ...prev.fees,
+            [feeField]: value
+          }
+        }));
+      } else if (parts.length === 3 && parts[1] === 'superconsultantFees') {
+        // Superconsultant fee field (fees.superconsultantFees.normal, etc.)
+        const superconsultantFeeField = parts[2];
+        setSettings(prev => ({
+          ...prev,
+          fees: {
+            ...prev.fees,
+            superconsultantFees: {
+              ...prev.fees.superconsultantFees,
+              [superconsultantFeeField]: value
+            }
+          }
+        }));
+      }
     } else if (field.startsWith('discountSettings.')) {
       const discountField = field.split('.')[1];
       setSettings(prev => ({
@@ -243,6 +268,100 @@ const CenterSettings = () => {
                   <div className="text-sm text-blue-700">
                     <p className="font-medium mb-1">Fee Information</p>
                     <p>These fees will be automatically applied when creating invoices for patients. Receptionists can still override these amounts on a per-invoice basis if needed.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Superconsultant Fee Management Section */}
+          <div className="bg-white rounded-xl shadow-sm border border-purple-100">
+            <div className="p-6 border-b border-purple-100">
+              <h2 className="text-lg font-semibold text-slate-800 flex items-center">
+                <DollarSign className="h-5 w-5 mr-2 text-purple-500" />
+                Superconsultant Consultation Fees
+              </h2>
+              <p className="text-slate-600 mt-1 text-sm">
+                Set fees for different types of superconsultant consultations. These will be used when creating invoices in the Superconsultant Billing page.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Normal Consultation Fee (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    value={settings.fees.superconsultantFees.normal}
+                    onChange={(e) => handleInputChange('fees.superconsultantFees.normal', parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    required
+                    min="0"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Standard superconsultant consultation
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Audio Consultation Fee (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    value={settings.fees.superconsultantFees.audio}
+                    onChange={(e) => handleInputChange('fees.superconsultantFees.audio', parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    required
+                    min="0"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Audio/telephonic consultation
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Video Consultation Fee (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    value={settings.fees.superconsultantFees.video}
+                    onChange={(e) => handleInputChange('fees.superconsultantFees.video', parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    required
+                    min="0"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Video consultation
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Review Reports Fee (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    value={settings.fees.superconsultantFees.reviewReports}
+                    onChange={(e) => handleInputChange('fees.superconsultantFees.reviewReports', parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    required
+                    min="0"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Review existing lab reports
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <Info className="h-4 w-4 text-purple-500 mt-0.5 mr-2 flex-shrink-0" />
+                  <div className="text-sm text-purple-700">
+                    <p className="font-medium mb-1">Superconsultant Fee Information</p>
+                    <p>These fees will be used as default values when creating superconsultant invoices. Receptionists can still override these amounts on a per-invoice basis if needed.</p>
                   </div>
                 </div>
               </div>
@@ -400,34 +519,6 @@ const CenterSettings = () => {
             </div>
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center">
-                    <Globe className="h-4 w-4 mr-1" />
-                    Website
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.website}
-                    onChange={(e) => handleInputChange('website', e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                    placeholder="www.example.com"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center">
-                    <Globe className="h-4 w-4 mr-1" />
-                    Lab Website
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.labWebsite}
-                    onChange={(e) => handleInputChange('labWebsite', e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                    placeholder="www.example.com"
-                  />
-                </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center">
                     <Phone className="h-4 w-4 mr-1" />

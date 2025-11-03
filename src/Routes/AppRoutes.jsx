@@ -158,6 +158,7 @@ import ReceptionistViewPrescription from '../pages/Receptionist/FollowUp/Prescri
 import ReceptionistLayout from '../pages/Receptionist/ReceptionistLayout';
 import ReceptionistBilling from '../pages/Receptionist/Billing';
 import ConsultationBilling from '../pages/Receptionist/ConsultationBilling';
+import SuperConsultantBilling from '../pages/Receptionist/SuperConsultantBilling';
 import ReassignPatient from '../pages/Receptionist/ReassignPatient';
 import ReceptionistBillingTracker from '../pages/Receptionist/BillingTracker';
 import TransactionView from '../pages/Receptionist/TransactionView';
@@ -524,6 +525,7 @@ export default function AppRoutes() {
         <Route path="receptionist/view-prescription/:id" element={<ReceptionistLayout><ReceptionistViewPrescription /></ReceptionistLayout>} />
         <Route path="receptionist/billing" element={<ReceptionistLayout><ReceptionistBilling /></ReceptionistLayout>} />
         <Route path="receptionist/consultation-billing" element={<ReceptionistLayout><ConsultationBilling /></ReceptionistLayout>} />
+        <Route path="receptionist/superconsultant-billing" element={<ReceptionistLayout><SuperConsultantBilling /></ReceptionistLayout>} />
         <Route path="receptionist/reassign-patient" element={<ReceptionistLayout><ReassignPatient /></ReceptionistLayout>} />
         <Route path="receptionist/billing-tracker" element={<ReceptionistLayout><ReceptionistBillingTracker /></ReceptionistLayout>} />
         <Route path="receptionist/transactions" element={<ReceptionistLayout><TransactionView /></ReceptionistLayout>} />

@@ -177,12 +177,6 @@ export default function Sidebar(props) {
                 icon={<FaVials />}
                 isActive={isActive("/dashboard/superadmin/doctor/lab-reports")}
               />
-              <SidebarLink
-                to="/dashboard/superadmin/doctor/test-requests"
-                label="Test Request Reviews"
-                icon={<FaClipboardList />}
-                isActive={isActive("/dashboard/superadmin/doctor/test-requests")}
-              />
             </>
           )}
 
@@ -344,6 +338,12 @@ export default function Sidebar(props) {
                 label="Consultation Fee"
                 icon={<FaMoneyBillWave />}
                 isActive={isActive("/dashboard/receptionist/consultation-billing")}
+              />
+              <SidebarLink
+                to="/dashboard/receptionist/superconsultant-billing"
+                label="Superconsultant Billing"
+                icon={<FaUserCheck />}
+                isActive={isActive("/dashboard/receptionist/superconsultant-billing")}
               />
               <SidebarLink
                 to="/dashboard/receptionist/reassign-patient"

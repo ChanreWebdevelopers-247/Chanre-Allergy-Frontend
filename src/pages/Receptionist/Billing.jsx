@@ -182,7 +182,22 @@ function ReceptionistBilling() {
     fetchCenterDiscountSettings();
   }, [user]);
 
-
+  // Enhanced function to get partial payment data from localStorage
+  const getPartialPaymentData = (requestId) => {
+    const paymentKey = `partial_payment_${requestId}`;
+    const payments = JSON.parse(localStorage.getItem(paymentKey) || '[]');
+    const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+    
+    // Sort payments by timestamp (newest first)
+    const sortedPayments = payments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    return { 
+      payments: sortedPayments, 
+      totalPaid,
+      paymentCount: payments.length,
+      lastPayment: payments.length > 0 ? payments[payments.length - 1] : null
+    };
+  };
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -854,24 +869,18 @@ function ReceptionistBilling() {
       return;
     }
     
-    if (!paymentDetails.paymentAmount || paymentDetails.paymentAmount <= 0) {
-      toast.error('Payment amount must be greater than 0');
-      return;
-    }
-    
     const totalAmount = selectedForPayment.billing?.amount || 0;
     const paidAmount = selectedForPayment.billing?.paidAmount || 0;
     const remainingAmount = totalAmount - paidAmount;
     
-    if (paymentDetails.paymentAmount !== remainingAmount) {
-      toast.error(`Payment amount must equal the remaining balance of ${currencySymbol}${remainingAmount.toFixed(2)}. Full payment required.`);
+    // Enforce full payment - calculate remaining amount and use that
+    if (remainingAmount <= 0) {
+      toast.error('No remaining balance. This bill has already been paid in full.');
       return;
     }
     
-    if (paymentDetails.paymentAmount > remainingAmount) {
-      toast.error(`Payment amount cannot exceed remaining balance of ${currencySymbol}${remainingAmount.toFixed(2)}`);
-      return;
-    }
+    // Always use the full remaining amount (full payment required)
+    const paymentAmount = remainingAmount;
     
     try {
       // Create FormData for file upload
@@ -879,7 +888,7 @@ function ReceptionistBilling() {
       formData.append('paymentMethod', paymentDetails.paymentMethod);
       formData.append('transactionId', paymentDetails.transactionId);
       formData.append('paymentNotes', paymentDetails.paymentNotes || '');
-      formData.append('paymentAmount', paymentDetails.paymentAmount.toString());
+      formData.append('paymentAmount', paymentAmount.toString());
       
       // Add current paid amount and total amount for backend calculation
       formData.append('currentPaidAmount', paidAmount.toString());
@@ -908,7 +917,7 @@ function ReceptionistBilling() {
           paymentMethod: paymentDetails.paymentMethod,
           transactionId: paymentDetails.transactionId,
           paymentNotes: paymentDetails.paymentNotes || '',
-          paymentAmount: paymentDetails.paymentAmount,
+          paymentAmount: paymentAmount,
           currentPaidAmount: paidAmount,
           totalAmount: totalAmount
         };
@@ -930,13 +939,14 @@ function ReceptionistBilling() {
       
       const responseData = await response.json();
       
-      const newPaidAmount = paidAmount + paymentDetails.paymentAmount;
+      const newPaidAmount = paidAmount + paymentAmount;
       const isFullyPaid = newPaidAmount >= totalAmount;
       
+      // Full payment is always required, so this should always be true
       if (isFullyPaid) {
-        toast.success(`✅ Payment completed! Test request #${selectedForPayment._id.slice(-6)} is now unlocked. Total paid: ${currencySymbol}${newPaidAmount.toFixed(2)}. Report access is now available.`);
+        toast.success(`✅ Full payment completed! Test request #${selectedForPayment._id.slice(-6)} is now unlocked. Total paid: ${currencySymbol}${newPaidAmount.toFixed(2)}. Report access is now available.`);
       } else {
-        toast.error(`Payment amount must equal the total amount. Remaining: ${currencySymbol}${(totalAmount - paidAmount).toFixed(2)}`);
+        toast.error(`Full payment required. Expected: ${currencySymbol}${remainingAmount.toFixed(2)}, but payment was recorded as ${currencySymbol}${paymentAmount.toFixed(2)}`);
         return;
       }
       
@@ -2423,59 +2433,25 @@ function ReceptionistBilling() {
                     );
                   })()}
 
-                  {/* Payment Amount Input */}
+                  {/* Payment Amount Input - Full Payment Required */}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       Payment Amount <span className="text-red-500">*</span>
+                      <span className="text-xs text-slate-500 font-normal ml-2">(Full payment required)</span>
                     </label>
-                    <div className="flex items-center space-x-2">
-                      <input 
-                        type="number"
-                        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter payment amount"
-                        value={paymentDetails.paymentAmount}
-                        onChange={(e) => {
-                          const totalAmount = selectedForPayment.billing?.amount || 0;
-                          const paidAmount = selectedForPayment.billing?.paidAmount || 0;
-                          const actualRemainingAmount = totalAmount - paidAmount;
-                          
-                          setPaymentDetails(prev => ({ 
-                            ...prev, 
-                            paymentAmount: parseFloat(e.target.value) || 0
-                          }));
-                        }}
-                        min="0.01"
-                        max={(() => {
-                          const totalAmount = selectedForPayment.billing?.amount || 0;
-                          const paidAmount = selectedForPayment.billing?.paidAmount || 0;
-                          return totalAmount - paidAmount;
-                        })()}
-                        step="0.01"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const totalAmount = selectedForPayment.billing?.amount || 0;
-                          const paidAmount = selectedForPayment.billing?.paidAmount || 0;
-                          const actualRemainingAmount = totalAmount - paidAmount;
-                          
-                          setPaymentDetails(prev => ({ 
-                            ...prev, 
-                            paymentAmount: actualRemainingAmount
-                          }));
-                        }}
-                        className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-200 transition-colors"
-                      >
-                        Pay Full
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Maximum: {currencySymbol}{(() => {
+                    <input 
+                      type="number"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={(() => {
                         const totalAmount = selectedForPayment.billing?.amount || 0;
                         const paidAmount = selectedForPayment.billing?.paidAmount || 0;
                         return (totalAmount - paidAmount).toFixed(2);
                       })()}
+                      readOnly
+                      disabled
+                    />
+                    <p className="text-xs text-blue-600 mt-1 font-medium">
+                      Full payment of remaining balance is required to proceed
                     </p>
                   </div>
 
@@ -2536,7 +2512,7 @@ function ReceptionistBilling() {
                           <p>3. Center admin must verify the payment</p>
                           <p>4. Once verified, test request proceeds to lab</p>
                           <p className="mt-2 font-medium text-blue-800">
-                            Full Payment: Complete payment for this bill
+                            ⚠️ Full Payment Required: Only complete payment for the full remaining balance is accepted
                           </p>
                           <p className="mt-2 text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
                             📝 Updating existing test request #{selectedForPayment._id.slice(-6)} - No new request will be created
@@ -2557,26 +2533,19 @@ function ReceptionistBilling() {
                 </div>
                 <div className="p-4 border-t flex items-center justify-between flex-shrink-0 bg-white">
                   <div className="text-xs text-slate-500">
+                    <p>• Full payment of remaining balance is required</p>
                     <p>• Payment will be recorded and status updated accordingly</p>
                     <p>• Center admin must verify the payment before proceeding to lab</p>
                     <p>• Test request cannot proceed to lab without center admin verification</p>
-                    <p>• Full payment amount is required</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={closePaymentModal} className="px-3 py-2 text-sm rounded bg-slate-100 hover:bg-slate-200">Cancel</button>
                     <button 
                       onClick={handleMarkPaid} 
-                      disabled={!paymentDetails.paymentMethod || !paymentDetails.transactionId || !paymentDetails.paymentAmount || paymentDetails.paymentAmount <= 0}
-                      className={`px-3 py-2 text-sm rounded text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${
-                        paymentDetails.paymentAmount > 0 && paymentDetails.paymentAmount < ((selectedForPayment.billing?.amount || 0) - (selectedForPayment.billing?.paidAmount || 0))
-                          ? 'bg-purple-600 hover:bg-purple-700'
-                          : 'bg-emerald-600 hover:bg-emerald-700'
-                      }`}
+                      disabled={!paymentDetails.paymentMethod || !paymentDetails.transactionId}
+                      className="px-3 py-2 text-sm rounded text-white bg-emerald-600 hover:bg-emerald-700 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {paymentDetails.paymentAmount > 0 && paymentDetails.paymentAmount < ((selectedForPayment.billing?.amount || 0) - (selectedForPayment.billing?.paidAmount || 0))
-                        ? 'Record Partial Payment'
-                        : 'Record Payment'
-                      }
+                      Record Full Payment
                     </button>
                   </div>
                 </div>
