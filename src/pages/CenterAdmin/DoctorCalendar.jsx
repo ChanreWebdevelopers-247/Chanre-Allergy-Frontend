@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import API from '../../services/api';
+import { toast } from 'react-toastify';
 import { 
   Calendar, 
   Clock, 
@@ -13,7 +14,10 @@ import {
   Save,
   Edit,
   X,
-  CalendarX
+  CalendarX,
+  Info,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export default function DoctorCalendar() {
@@ -48,7 +52,44 @@ export default function DoctorCalendar() {
   const [bulkHolidayName, setBulkHolidayName] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingDate, setEditingDate] = useState(null);
-  const [activeTab, setActiveTab] = useState('calendar'); // 'calendar', 'availability', 'slots', 'view'
+  const [activeTab, setActiveTab] = useState('calendar'); // 'calendar', 'defaultHours', 'slots'
+  
+  // Default working hours state
+  const [defaultHours, setDefaultHours] = useState({
+    startTime: '09:00',
+    endTime: '17:00',
+    breakStartTime: '13:00',
+    breakEndTime: '14:00',
+    maxAppointments: 50,
+    slotDuration: 30,
+    excludeSundays: true,
+    overrideExisting: false
+  });
+  
+  // Bulk availability management states
+  const [bulkAvailabilityView, setBulkAvailabilityView] = useState(false);
+  const [selectedHolidayMonths, setSelectedHolidayMonths] = useState([]);
+  const [selectedUnavailableMonths, setSelectedUnavailableMonths] = useState([]);
+  const [selectedHolidayWeeks, setSelectedHolidayWeeks] = useState([]);
+  const [selectedUnavailableWeeks, setSelectedUnavailableWeeks] = useState([]);
+  const [selectedHolidayDays, setSelectedHolidayDays] = useState([]);
+  const [selectedUnavailableDays, setSelectedUnavailableDays] = useState([]);
+  const [bulkHolidayNameBulk, setBulkHolidayNameBulk] = useState('');
+  const [expandedMonthForDays, setExpandedMonthForDays] = useState(null); // Track which month is expanded for day selection
+  const [selectedDaysInMonth, setSelectedDaysInMonth] = useState({}); // Track selected days per month: { monthIndex: [dates] }
+
+  // Helper function to format dates consistently (YYYY-MM-DD)
+  const formatDateString = (date) => {
+    if (!date) return null;
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return date;
+    }
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
   useEffect(() => {
     fetchDoctors();
@@ -57,25 +98,8 @@ export default function DoctorCalendar() {
   useEffect(() => {
     if (selectedDoctor && currentYear) {
       fetchYearAvailability();
-      // Automatically mark Sundays as holidays when doctor/year changes
-      markSundaysForYear();
     }
   }, [selectedDoctor, currentYear]);
-
-  const markSundaysForYear = async () => {
-    if (!selectedDoctor || !currentYear) return;
-    try {
-      await API.post('/doctor-calendar/mark-sundays', {
-        doctorId: selectedDoctor,
-        year: currentYear
-      });
-      // Refresh availability after marking Sundays
-      fetchYearAvailability();
-    } catch (error) {
-      // Silently fail - might already be marked
-      console.log('Sundays may already be marked or error occurred:', error);
-    }
-  };
 
   useEffect(() => {
     if (selectedDoctor && selectedDate && activeTab === 'slots') {
@@ -93,7 +117,7 @@ export default function DoctorCalendar() {
       }
     } catch (error) {
       console.error('Error fetching doctors:', error);
-      alert('Failed to fetch doctors');
+      toast.error('Failed to fetch doctors');
     } finally {
       setLoading(false);
     }
@@ -112,11 +136,13 @@ export default function DoctorCalendar() {
         }
       });
       
-      // Organize by date for easy lookup
+      // Organize by date for easy lookup using formatDateString
       const dateMap = {};
       response.data.availabilities.forEach(avail => {
-        const dateStr = new Date(avail.date).toISOString().split('T')[0];
-        dateMap[dateStr] = avail;
+        const dateStr = formatDateString(avail.date);
+        if (dateStr) {
+          dateMap[dateStr] = avail;
+        }
       });
       setMonthData(dateMap);
     } catch (error) {
@@ -165,13 +191,13 @@ export default function DoctorCalendar() {
     const dateData = monthData[date];
     if (dateData) {
       setAvailability({
-        isAvailable: dateData.isAvailable,
+        isAvailable: dateData.isAvailable !== undefined ? dateData.isAvailable : true,
         isHoliday: dateData.isHoliday || false,
         holidayName: dateData.holidayName || '',
-        startTime: dateData.startTime || '09:00',
-        endTime: dateData.endTime || '17:00',
-        breakStartTime: dateData.breakStartTime || '13:00',
-        breakEndTime: dateData.breakEndTime || '14:00',
+        startTime: (dateData.startTime && typeof dateData.startTime === 'string' && dateData.startTime.trim() !== '') ? dateData.startTime : '09:00',
+        endTime: (dateData.endTime && typeof dateData.endTime === 'string' && dateData.endTime.trim() !== '') ? dateData.endTime : '17:00',
+        breakStartTime: (dateData.breakStartTime && typeof dateData.breakStartTime === 'string' && dateData.breakStartTime.trim() !== '') ? dateData.breakStartTime : '13:00',
+        breakEndTime: (dateData.breakEndTime && typeof dateData.breakEndTime === 'string' && dateData.breakEndTime.trim() !== '') ? dateData.breakEndTime : '14:00',
         notes: dateData.notes || '',
         maxAppointments: dateData.maxAppointments || 50
       });
@@ -191,12 +217,11 @@ export default function DoctorCalendar() {
       setEditingDate(date);
     }
     setShowEditModal(true);
-    setActiveTab('availability');
   };
 
   const handleSaveAvailability = async () => {
     if (!selectedDoctor || !editingDate) {
-      alert('Please select a doctor and date');
+      toast.error('Please select a doctor and date');
       return;
     }
     try {
@@ -206,12 +231,203 @@ export default function DoctorCalendar() {
         date: editingDate,
         ...availability
       });
-      alert('Availability saved successfully');
+      toast.success('Availability saved successfully');
       setShowEditModal(false);
       fetchYearAvailability();
     } catch (error) {
       console.error('Error saving availability:', error);
-      alert('Failed to save availability');
+      toast.error('Failed to save availability');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetDefaultHours = async () => {
+    if (!selectedDoctor) {
+      toast.error('Please select a doctor');
+      return;
+    }
+    
+    // Validate required fields
+    if (!defaultHours.startTime || !defaultHours.endTime) {
+      toast.error('Please set start time and end time');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      
+      const payload = {
+        doctorId: selectedDoctor,
+        year: currentYear,
+        startTime: defaultHours.startTime,
+        endTime: defaultHours.endTime,
+        breakStartTime: defaultHours.breakStartTime || null,
+        breakEndTime: defaultHours.breakEndTime || null,
+        maxAppointments: defaultHours.maxAppointments || 50,
+        slotDuration: defaultHours.slotDuration || 30,
+        excludeSundays: defaultHours.excludeSundays !== undefined ? defaultHours.excludeSundays : true,
+        overrideExisting: defaultHours.overrideExisting !== undefined ? defaultHours.overrideExisting : false
+      };
+      
+      console.log('Sending default working hours request:', payload);
+      
+      const response = await API.post('/doctor-calendar/default-working-hours', payload);
+      
+      console.log('Default working hours response:', response.data);
+      
+      if (response.data.success) {
+        toast.success(`Default working hours set successfully for ${response.data.count || 'all'} days in ${currentYear}`);
+        // Refresh availability data after a short delay to ensure backend has processed
+        setTimeout(() => {
+          fetchYearAvailability();
+        }, 1000);
+      } else {
+        toast.error(response.data.message || 'Failed to set default working hours');
+      }
+    } catch (error) {
+      console.error('Error setting default hours:', error);
+      console.error('Error response:', error.response?.data);
+      toast.error(error.response?.data?.message || 'Failed to set default working hours. Please check console for details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getAllWeeksInYear = (year) => {
+    const weeks = [];
+    const firstDay = new Date(year, 0, 1);
+    const lastDay = new Date(year, 11, 31);
+    
+    // Find first Monday of the year
+    let currentDate = new Date(firstDay);
+    const dayOfWeek = currentDate.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek) % 7;
+    if (daysToMonday > 0) {
+      currentDate.setDate(currentDate.getDate() + daysToMonday);
+    }
+    
+    let weekNum = 1;
+    while (currentDate <= lastDay) {
+      const weekStart = new Date(currentDate);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      const weekEnd = new Date(currentDate);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+      
+      if (weekEnd > lastDay) {
+        weekEnd.setTime(lastDay.getTime());
+      }
+      
+      weeks.push({
+        weekNum,
+        startDate: formatDateString(weekStart),
+        endDate: formatDateString(weekEnd),
+        label: `Week ${weekNum} (${weekStart.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${weekEnd.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })})`
+      });
+      
+      currentDate.setDate(currentDate.getDate() + 7);
+      weekNum++;
+    }
+    
+    return weeks;
+  };
+
+  const handleBulkSetAvailability = async (type, availabilityType) => {
+    if (!selectedDoctor) {
+      toast.error('Please select a doctor');
+      return;
+    }
+    
+    let dates = [];
+    
+    if (type === 'month') {
+      // Use combined selection for months - selected months can be used for either holiday or unavailable
+      const selectedMonths = [...new Set([...selectedHolidayMonths, ...selectedUnavailableMonths])];
+      selectedMonths.forEach(monthIndex => {
+        const daysInMonth = new Date(currentYear, monthIndex + 1, 0).getDate();
+        for (let day = 1; day <= daysInMonth; day++) {
+          const date = new Date(currentYear, monthIndex, day);
+          dates.push(formatDateString(date));
+        }
+      });
+    } else if (type === 'week') {
+      // Use combined selection for weeks - selected weeks can be used for holiday, available, or unavailable
+      const selectedWeeks = [...new Set([...selectedHolidayWeeks, ...selectedUnavailableWeeks])];
+      const allWeeks = getAllWeeksInYear(currentYear);
+      selectedWeeks.forEach(weekNum => {
+        const week = allWeeks.find(w => w.weekNum === weekNum);
+        if (week) {
+          const start = new Date(week.startDate);
+          const end = new Date(week.endDate);
+          const current = new Date(start);
+          current.setHours(0, 0, 0, 0);
+          end.setHours(0, 0, 0, 0);
+          
+          while (current <= end) {
+            dates.push(formatDateString(current));
+            current.setDate(current.getDate() + 1);
+          }
+        }
+      });
+    } else if (type === 'day') {
+      dates = availabilityType === 'holiday' ? selectedHolidayDays : selectedUnavailableDays;
+    }
+    
+    if (dates.length === 0) {
+      toast.error('Please select at least one date');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      const payload = {
+        doctorId: selectedDoctor,
+        dates: dates,
+        year: currentYear
+      };
+      
+      if (availabilityType === 'holiday') {
+        if (!bulkHolidayNameBulk.trim()) {
+          toast.error('Please provide a holiday name');
+          return;
+        }
+        payload.holidayName = bulkHolidayNameBulk;
+        await API.post('/doctor-calendar/bulk-holidays', payload);
+      } else {
+        // Set isAvailable based on availabilityType
+        payload.isAvailable = availabilityType === 'available';
+        await API.post('/doctor-calendar/bulk-availability', payload);
+      }
+      
+      toast.success(`Successfully set ${dates.length} dates as ${availabilityType === 'holiday' ? 'holidays' : availabilityType === 'available' ? 'available' : 'unavailable'}`);
+      
+      // Reset selections
+      if (type === 'month') {
+        setSelectedHolidayMonths([]);
+        setSelectedUnavailableMonths([]);
+        setSelectedDaysInMonth({});
+        setExpandedMonthForDays(null);
+      } else if (type === 'week') {
+        setSelectedHolidayWeeks([]);
+        setSelectedUnavailableWeeks([]);
+      } else {
+        if (availabilityType === 'holiday') {
+          setSelectedHolidayDays([]);
+        } else {
+          setSelectedUnavailableDays([]);
+        }
+      }
+      
+      if (availabilityType === 'holiday') {
+        setBulkHolidayNameBulk('');
+      }
+      
+      fetchYearAvailability();
+    } catch (error) {
+      console.error('Error setting bulk availability:', error);
+      toast.error(error.response?.data?.message || 'Failed to set bulk availability');
     } finally {
       setLoading(false);
     }
@@ -219,7 +435,7 @@ export default function DoctorCalendar() {
 
   const handleBulkSetHolidays = async () => {
     if (!selectedDoctor || selectedDates.length === 0 || !bulkHolidayName) {
-      alert('Please select dates and provide a holiday name');
+      toast.error('Please select dates and provide a holiday name');
       return;
     }
     try {
@@ -229,14 +445,14 @@ export default function DoctorCalendar() {
         dates: selectedDates,
         holidayName: bulkHolidayName
       });
-      alert(`Successfully set ${selectedDates.length} holidays`);
+      toast.success(`Successfully set ${selectedDates.length} holidays`);
       setShowHolidayModal(false);
       setSelectedDates([]);
       setBulkHolidayName('');
       fetchYearAvailability();
     } catch (error) {
       console.error('Error setting holidays:', error);
-      alert('Failed to set holidays');
+      toast.error('Failed to set holidays');
     } finally {
       setLoading(false);
     }
@@ -244,7 +460,7 @@ export default function DoctorCalendar() {
 
   const handleCreateSlots = async () => {
     if (!selectedDoctor || !selectedDate) {
-      alert('Please select a doctor and date');
+      toast.error('Please select a doctor and date');
       return;
     }
     try {
@@ -254,11 +470,11 @@ export default function DoctorCalendar() {
         date: selectedDate,
         ...slotSettings
       });
-      alert(`Successfully created ${response.data.slotsCreated} appointment slots`);
+      toast.success(`Successfully created ${response.data.slotsCreated} appointment slots`);
       fetchSlots();
     } catch (error) {
       console.error('Error creating slots:', error);
-      alert(error.response?.data?.message || 'Failed to create slots');
+      toast.error(error.response?.data?.message || 'Failed to create slots');
     } finally {
       setLoading(false);
     }
@@ -280,7 +496,7 @@ export default function DoctorCalendar() {
       // Add days of month
       for (let day = 1; day <= daysInMonth; day++) {
         const date = new Date(currentYear, month, day);
-        const dateStr = date.toISOString().split('T')[0];
+        const dateStr = formatDateString(date);
         days.push(dateStr);
       }
       
@@ -298,7 +514,7 @@ export default function DoctorCalendar() {
     const data = monthData[dateStr];
     if (!data) return 'unset';
     if (data.isHoliday) return 'holiday';
-    if (!data.isAvailable) return 'unavailable';
+    if (data.isAvailable === false) return 'unavailable';
     return 'available';
   };
 
@@ -316,6 +532,8 @@ export default function DoctorCalendar() {
   };
 
   const months = generateCalendarMonths();
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const allWeeks = getAllWeeksInYear(currentYear);
 
   const getSelectedDoctorName = () => {
     const doctor = doctors.find(d => d._id === selectedDoctor);
@@ -387,14 +605,14 @@ export default function DoctorCalendar() {
           12-Month Calendar
         </button>
         <button
-          onClick={() => setActiveTab('availability')}
+          onClick={() => setActiveTab('defaultHours')}
           className={`px-4 py-2 font-medium ${
-            activeTab === 'availability'
+            activeTab === 'defaultHours'
               ? 'border-b-2 border-blue-500 text-blue-600'
               : 'text-gray-600 hover:text-gray-800'
           }`}
         >
-          Edit Availability
+          Default Working Hours
         </button>
         <button
           onClick={() => setActiveTab('slots')}
@@ -407,6 +625,531 @@ export default function DoctorCalendar() {
           Create Slots
         </button>
       </div>
+
+      {/* Default Working Hours Tab */}
+      {activeTab === 'defaultHours' && selectedDoctor && (
+        <div className="space-y-6">
+          {/* Default Working Hours Card */}
+          <div className="bg-white rounded-xl shadow-lg p-8 border border-gray-100">
+            <div className="mb-6">
+              <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                Set Default Working Hours
+              </h2>
+              <p className="text-gray-600">Set default working hours for <span className="font-semibold text-blue-600">{getSelectedDoctorName()}</span> for all days in <span className="font-semibold text-blue-600">{currentYear}</span></p>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Start Time *
+                    </label>
+                    <input
+                      type="time"
+                      value={defaultHours.startTime}
+                      onChange={(e) => setDefaultHours({ ...defaultHours, startTime: e.target.value })}
+                      className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      End Time *
+                    </label>
+                    <input
+                      type="time"
+                      value={defaultHours.endTime}
+                      onChange={(e) => setDefaultHours({ ...defaultHours, endTime: e.target.value })}
+                      className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Break Start Time
+                    </label>
+                    <input
+                      type="time"
+                      value={defaultHours.breakStartTime}
+                      onChange={(e) => setDefaultHours({ ...defaultHours, breakStartTime: e.target.value })}
+                      className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Break End Time
+                    </label>
+                    <input
+                      type="time"
+                      value={defaultHours.breakEndTime}
+                      onChange={(e) => setDefaultHours({ ...defaultHours, breakEndTime: e.target.value })}
+                      className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-6">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Max Appointments per Day
+                  </label>
+                  <input
+                    type="number"
+                    value={defaultHours.maxAppointments}
+                    onChange={(e) => setDefaultHours({ ...defaultHours, maxAppointments: parseInt(e.target.value) })}
+                    className="w-full md:w-48 border-2 border-gray-300 rounded-lg px-4 py-3 text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    min="1"
+                  />
+                </div>
+
+                <div className="mt-6">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Minimum Consultation Time (minutes)
+                  </label>
+                  <input
+                    type="number"
+                    value={defaultHours.slotDuration}
+                    onChange={(e) => setDefaultHours({ ...defaultHours, slotDuration: parseInt(e.target.value) })}
+                    className="w-full md:w-48 border-2 border-gray-300 rounded-lg px-4 py-3 text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    min="15"
+                    step="15"
+                    placeholder="30"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Default: 30 minutes. This determines the duration of each appointment slot.</p>
+                </div>
+
+                <div className="mt-6 space-y-3">
+                  <label className="flex items-center space-x-3 p-3 bg-white rounded-lg border-2 border-gray-200 hover:border-blue-300 cursor-pointer transition-all">
+                    <input
+                      type="checkbox"
+                      checked={defaultHours.excludeSundays}
+                      onChange={(e) => setDefaultHours({ ...defaultHours, excludeSundays: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Exclude Sundays (keep Sundays as holidays)</span>
+                  </label>
+                  <label className="flex items-center space-x-3 p-3 bg-white rounded-lg border-2 border-gray-200 hover:border-blue-300 cursor-pointer transition-all">
+                    <input
+                      type="checkbox"
+                      checked={defaultHours.overrideExisting}
+                      onChange={(e) => setDefaultHours({ ...defaultHours, overrideExisting: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Override existing custom settings (if unchecked, only unset days will be updated)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-5">
+                <div className="flex items-start">
+                  <Info className="h-6 w-6 text-blue-600 mr-3 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-blue-900">
+                    <p className="font-bold mb-2 text-base">Important Information</p>
+                    <ul className="list-disc list-inside space-y-1.5 text-gray-700">
+                      <li>This will set default working hours for all weekdays in <strong>{currentYear}</strong></li>
+                      <li>Sundays will remain as holidays (if "Exclude Sundays" is checked)</li>
+                      <li>Existing holidays will be preserved unless "Override existing" is checked</li>
+                      <li>You can edit individual days from the Calendar view if you need to customize specific dates</li>
+                      <li>After setting defaults, you can mark holidays using the bulk options below</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={handleSetDefaultHours}
+                disabled={loading}
+                className="w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 font-semibold text-lg shadow-lg hover:shadow-xl transition-all transform hover:scale-[1.02]"
+              >
+                {loading ? 'Applying...' : `Apply Default Hours to All Days in ${currentYear}`}
+              </button>
+            </div>
+          </div>
+
+          {/* Bulk Availability Management Card */}
+          <div className="bg-white rounded-xl shadow-lg p-8 border border-gray-100">
+            <div className="mb-6">
+              <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                Bulk Set Holidays or Unavailable Days
+              </h2>
+              <p className="text-gray-600">Quickly set multiple dates as holidays or unavailable for <span className="font-semibold text-blue-600">{getSelectedDoctorName()}</span></p>
+            </div>
+            <div className="space-y-8">
+              {/* Month-wise */}
+              <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                <h4 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                  <Calendar className="h-5 w-5 mr-2 text-blue-600" />
+                  By Month
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
+                  {monthNames.map((month, idx) => {
+                    const isSelected = selectedHolidayMonths.includes(idx) || selectedUnavailableMonths.includes(idx);
+                    const isExpanded = expandedMonthForDays === idx;
+                    return (
+                      <div key={idx} className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-400 transition-all">
+                        <label className="flex items-center space-x-2 p-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                // Add to holiday months list (default), user will choose holiday/unavailable later
+                                if (!selectedHolidayMonths.includes(idx) && !selectedUnavailableMonths.includes(idx)) {
+                                  setSelectedHolidayMonths([...selectedHolidayMonths, idx]);
+                                }
+                              } else {
+                                setSelectedHolidayMonths(selectedHolidayMonths.filter(m => m !== idx));
+                                setSelectedUnavailableMonths(selectedUnavailableMonths.filter(m => m !== idx));
+                                // Clear selected days for this month
+                                const updated = { ...selectedDaysInMonth };
+                                delete updated[idx];
+                                setSelectedDaysInMonth(updated);
+                                if (expandedMonthForDays === idx) {
+                                  setExpandedMonthForDays(null);
+                                }
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-medium text-gray-700 flex-1">{month}</span>
+                          {isSelected && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedMonthForDays(isExpanded ? null : idx);
+                              }}
+                              className="text-blue-600 hover:text-blue-800 text-xs font-medium px-2 py-1"
+                            >
+                              {isExpanded ? 'Hide Days' : 'Select Days'}
+                            </button>
+                          )}
+                        </label>
+                        {/* Day selection grid for expanded month */}
+                        {isExpanded && isSelected && (
+                          <div className="p-3 border-t border-gray-200 bg-gray-50">
+                            <p className="text-xs font-semibold text-gray-700 mb-2">Select individual days:</p>
+                            <div className="grid grid-cols-7 gap-1">
+                              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+                                <div key={i} className="text-xs font-medium text-center text-gray-500 py-1">
+                                  {day}
+                                </div>
+                              ))}
+                              {(() => {
+                                const firstDay = new Date(currentYear, idx, 1);
+                                const lastDay = new Date(currentYear, idx + 1, 0);
+                                const daysInMonth = lastDay.getDate();
+                                const startingDayOfWeek = firstDay.getDay();
+                                const days = [];
+                                // Add empty cells for days before month starts
+                                for (let i = 0; i < startingDayOfWeek; i++) {
+                                  days.push(null);
+                                }
+                                // Add days of month
+                                for (let day = 1; day <= daysInMonth; day++) {
+                                  const date = new Date(currentYear, idx, day);
+                                  days.push(formatDateString(date));
+                                }
+                                const monthSelectedDays = selectedDaysInMonth[idx] || [];
+                                return days.map((dateStr, dayIdx) => {
+                                  if (!dateStr) {
+                                    return <div key={dayIdx} className="h-6"></div>;
+                                  }
+                                  const isDaySelected = monthSelectedDays.includes(dateStr);
+                                  return (
+                                    <button
+                                      key={dayIdx}
+                                      onClick={() => {
+                                        const current = monthSelectedDays;
+                                        const updated = isDaySelected
+                                          ? current.filter(d => d !== dateStr)
+                                          : [...current, dateStr];
+                                        setSelectedDaysInMonth({
+                                          ...selectedDaysInMonth,
+                                          [idx]: updated
+                                        });
+                                      }}
+                                      className={`h-6 text-xs rounded transition-all ${
+                                        isDaySelected
+                                          ? 'bg-blue-500 text-white ring-2 ring-blue-300'
+                                          : 'bg-white text-gray-700 hover:bg-blue-100 border border-gray-200'
+                                      }`}
+                                      title={new Date(dateStr).toLocaleDateString()}
+                                    >
+                                      {new Date(dateStr).getDate()}
+                                    </button>
+                                  );
+                                                                 });
+                               })()}
+                             </div>
+                             {(selectedDaysInMonth[idx] || []).length > 0 && (
+                               <p className="text-xs text-blue-600 mt-2 font-medium">
+                                 {(selectedDaysInMonth[idx] || []).length} day(s) selected
+                               </p>
+                             )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {(selectedHolidayMonths.length > 0 || selectedUnavailableMonths.length > 0 || Object.values(selectedDaysInMonth).some(days => days.length > 0)) && (
+                  <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
+                    <div className="flex flex-col md:flex-row gap-3">
+                      <input
+                        type="text"
+                        value={bulkHolidayNameBulk}
+                        onChange={(e) => setBulkHolidayNameBulk(e.target.value)}
+                        placeholder="Holiday name (required for holidays)"
+                        className="flex-1 border-2 border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <button
+                        onClick={async () => {
+                          // Check if any month has selected days, if so use those, otherwise use entire months
+                          const hasSelectedDays = Object.values(selectedDaysInMonth).some(days => days.length > 0);
+                          if (hasSelectedDays) {
+                            // Use selected days from expanded months
+                            const allSelectedDays = Object.values(selectedDaysInMonth).flat();
+                            if (allSelectedDays.length === 0) {
+                              toast.error('Please select at least one day');
+                              return;
+                            }
+                            try {
+                              setLoading(true);
+                              await API.post('/doctor-calendar/bulk-holidays', {
+                                doctorId: selectedDoctor,
+                                dates: allSelectedDays,
+                                holidayName: bulkHolidayNameBulk,
+                                year: currentYear
+                              });
+                              toast.success(`Successfully set ${allSelectedDays.length} days as holidays`);
+                              setSelectedDaysInMonth({});
+                              setSelectedHolidayMonths([]);
+                              setSelectedUnavailableMonths([]);
+                              setBulkHolidayNameBulk('');
+                              fetchYearAvailability();
+                            } catch (error) {
+                              console.error('Error setting holidays:', error);
+                              toast.error(error.response?.data?.message || 'Failed to set holidays');
+                            } finally {
+                              setLoading(false);
+                            }
+                          } else {
+                            // Use entire selected months
+                            handleBulkSetAvailability('month', 'holiday');
+                          }
+                        }}
+                        disabled={loading || (selectedHolidayMonths.length === 0 && selectedUnavailableMonths.length === 0 && Object.values(selectedDaysInMonth).every(days => days.length === 0)) || !bulkHolidayNameBulk.trim()}
+                        className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg hover:from-red-700 hover:to-red-800 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                      >
+                        Set as Holidays
+                      </button>
+                      <button
+                        onClick={async () => {
+                          // Check if any month has selected days, if so use those, otherwise use entire months
+                          const hasSelectedDays = Object.values(selectedDaysInMonth).some(days => days.length > 0);
+                          if (hasSelectedDays) {
+                            // Use selected days from expanded months
+                            const allSelectedDays = Object.values(selectedDaysInMonth).flat();
+                            if (allSelectedDays.length === 0) {
+                              toast.error('Please select at least one day');
+                              return;
+                            }
+                            try {
+                              setLoading(true);
+                              await API.post('/doctor-calendar/bulk-availability', {
+                                doctorId: selectedDoctor,
+                                dates: allSelectedDays,
+                                isAvailable: false,
+                                year: currentYear
+                              });
+                              toast.success(`Successfully set ${allSelectedDays.length} days as unavailable`);
+                              setSelectedDaysInMonth({});
+                              setSelectedHolidayMonths([]);
+                              setSelectedUnavailableMonths([]);
+                              fetchYearAvailability();
+                            } catch (error) {
+                              console.error('Error setting unavailable:', error);
+                              toast.error(error.response?.data?.message || 'Failed to set unavailable');
+                            } finally {
+                              setLoading(false);
+                            }
+                          } else {
+                            // Use entire selected months
+                            handleBulkSetAvailability('month', 'unavailable');
+                          }
+                        }}
+                        disabled={loading || (selectedHolidayMonths.length === 0 && selectedUnavailableMonths.length === 0 && Object.values(selectedDaysInMonth).every(days => days.length === 0))}
+                        className="px-6 py-2.5 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-lg hover:from-gray-700 hover:to-gray-800 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                      >
+                        Set as Unavailable
+                      </button>
+                      <button
+                        onClick={async () => {
+                          // Check if any month has selected days, if so use those, otherwise use entire months
+                          const hasSelectedDays = Object.values(selectedDaysInMonth).some(days => days.length > 0);
+                          if (hasSelectedDays) {
+                            // Use selected days from expanded months
+                            const allSelectedDays = Object.values(selectedDaysInMonth).flat();
+                            if (allSelectedDays.length === 0) {
+                              toast.error('Please select at least one day');
+                              return;
+                            }
+                            try {
+                              setLoading(true);
+                              await API.post('/doctor-calendar/bulk-availability', {
+                                doctorId: selectedDoctor,
+                                dates: allSelectedDays,
+                                isAvailable: true,
+                                year: currentYear
+                              });
+                              toast.success(`Successfully set ${allSelectedDays.length} days as available`);
+                              setSelectedDaysInMonth({});
+                              setSelectedHolidayMonths([]);
+                              setSelectedUnavailableMonths([]);
+                              fetchYearAvailability();
+                            } catch (error) {
+                              console.error('Error setting available:', error);
+                              toast.error(error.response?.data?.message || 'Failed to set available');
+                            } finally {
+                              setLoading(false);
+                            }
+                          } else {
+                            // Use entire selected months
+                            handleBulkSetAvailability('month', 'available');
+                          }
+                        }}
+                        disabled={loading || (selectedHolidayMonths.length === 0 && selectedUnavailableMonths.length === 0 && Object.values(selectedDaysInMonth).every(days => days.length === 0))}
+                        className="px-6 py-2.5 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg hover:from-green-700 hover:to-green-800 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                      >
+                        Set as Available
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Week-wise */}
+              <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                <h4 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                  <Clock className="h-5 w-5 mr-2 text-blue-600" />
+                  By Week
+                </h4>
+                <div className="bg-white border-2 border-gray-200 rounded-lg p-4 max-h-64 overflow-y-auto mb-4 shadow-inner">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {allWeeks.map((week) => (
+                      <label key={week.weekNum} className="flex items-center space-x-2 p-2 bg-gray-50 hover:bg-blue-50 rounded-lg border border-gray-200 hover:border-blue-300 cursor-pointer transition-all">
+                        <input
+                          type="checkbox"
+                          checked={
+                            (selectedHolidayWeeks.includes(week.weekNum) || selectedUnavailableWeeks.includes(week.weekNum))
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              if (!selectedHolidayWeeks.includes(week.weekNum) && !selectedUnavailableWeeks.includes(week.weekNum)) {
+                                setSelectedHolidayWeeks([...selectedHolidayWeeks, week.weekNum]);
+                              }
+                            } else {
+                              setSelectedHolidayWeeks(selectedHolidayWeeks.filter(w => w !== week.weekNum));
+                              setSelectedUnavailableWeeks(selectedUnavailableWeeks.filter(w => w !== week.weekNum));
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">{week.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                {(selectedHolidayWeeks.length > 0 || selectedUnavailableWeeks.length > 0) && (
+                  <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
+                    <div className="flex flex-col md:flex-row gap-3">
+                      <input
+                        type="text"
+                        value={bulkHolidayNameBulk}
+                        onChange={(e) => setBulkHolidayNameBulk(e.target.value)}
+                        placeholder="Holiday name (required for holidays)"
+                        className="flex-1 border-2 border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <button
+                        onClick={() => handleBulkSetAvailability('week', 'holiday')}
+                        disabled={loading || selectedHolidayWeeks.length === 0 || !bulkHolidayNameBulk.trim()}
+                        className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg hover:from-red-700 hover:to-red-800 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                      >
+                        Set as Holidays
+                      </button>
+                      <button
+                        onClick={() => handleBulkSetAvailability('week', 'unavailable')}
+                        disabled={loading || (selectedHolidayWeeks.length === 0 && selectedUnavailableWeeks.length === 0)}
+                        className="px-6 py-2.5 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-lg hover:from-gray-700 hover:to-gray-800 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                      >
+                        Set as Unavailable
+                      </button>
+                      <button
+                        onClick={() => handleBulkSetAvailability('week', 'available')}
+                        disabled={loading || (selectedHolidayWeeks.length === 0 && selectedUnavailableWeeks.length === 0)}
+                        className="px-6 py-2.5 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg hover:from-green-700 hover:to-green-800 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                      >
+                        Set as Available
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Day-wise */}
+              <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                <h4 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                  <CalendarX className="h-5 w-5 mr-2 text-blue-600" />
+                  By Individual Days
+                </h4>
+                <div className="bg-white rounded-lg p-6 border-2 border-gray-200">
+                  <p className="text-sm text-gray-600 mb-4">
+                    Select individual dates from the calendar view below or use the calendar to pick specific dates, then use the "Bulk Set Holidays" button above to set them as holidays.
+                  </p>
+                  <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div>
+                      <p className="font-semibold text-blue-900 mb-1">Quick Selection</p>
+                      <p className="text-sm text-blue-700">Go to the "12-Month Calendar" tab to select specific dates</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setActiveTab('calendar');
+                        setShowHolidayModal(true);
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-md hover:shadow-lg transition-all"
+                    >
+                      Open Calendar
+                    </button>
+                  </div>
+                  {selectedDates.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-sm font-semibold text-gray-700 mb-2">
+                        Selected Dates ({selectedDates.length}):
+                      </p>
+                      <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 bg-gray-50 rounded-lg">
+                        {selectedDates.map((date, idx) => (
+                          <span
+                            key={idx}
+                            className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium flex items-center gap-2"
+                          >
+                            {new Date(date).toLocaleDateString()}
+                            <button
+                              onClick={() => setSelectedDates(selectedDates.filter(d => d !== date))}
+                              className="hover:text-red-600"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 12-Month Calendar View */}
       {activeTab === 'calendar' && selectedDoctor && (
@@ -441,7 +1184,7 @@ export default function DoctorCalendar() {
                           dateStr ? 'hover:ring-2 hover:ring-blue-500' : ''
                         }`}
                         disabled={!dateStr}
-                        title={data?.isHoliday ? data.holidayName : data?.isAvailable ? 'Available' : 'Unavailable'}
+                        title={data?.isHoliday ? data.holidayName : data?.isAvailable === false ? 'Unavailable' : data?.isAvailable ? 'Available' : 'Not Set'}
                       >
                         {dateStr ? new Date(dateStr).getDate() : ''}
                       </button>
@@ -486,15 +1229,37 @@ export default function DoctorCalendar() {
             </div>
 
             <div className="space-y-4">
-              <div className="flex items-center space-x-4">
+              {/* Radio buttons for availability status */}
+              <div className="space-y-3">
                 <label className="flex items-center space-x-2">
                   <input
-                    type="checkbox"
+                    type="radio"
+                    name="availabilityStatus"
+                    checked={availability.isAvailable && !availability.isHoliday}
+                    onChange={() => setAvailability({ ...availability, isAvailable: true, isHoliday: false })}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm font-medium">Available on this date</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    name="availabilityStatus"
                     checked={availability.isHoliday}
-                    onChange={(e) => setAvailability({ ...availability, isHoliday: e.target.checked, isAvailable: !e.target.checked })}
+                    onChange={() => setAvailability({ ...availability, isHoliday: true, isAvailable: false })}
                     className="w-4 h-4"
                   />
                   <span className="text-sm font-medium">Mark as Holiday</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    name="availabilityStatus"
+                    checked={!availability.isAvailable && !availability.isHoliday}
+                    onChange={() => setAvailability({ ...availability, isAvailable: false, isHoliday: false })}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm font-medium">Unavailable</span>
                 </label>
               </div>
 
@@ -512,19 +1277,6 @@ export default function DoctorCalendar() {
                   />
                 </div>
               )}
-
-              <div className="flex items-center space-x-4">
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={availability.isAvailable && !availability.isHoliday}
-                    onChange={(e) => setAvailability({ ...availability, isAvailable: e.target.checked, isHoliday: false })}
-                    disabled={availability.isHoliday}
-                    className="w-4 h-4"
-                  />
-                  <span className="text-sm font-medium">Available on this date</span>
-                </label>
-              </div>
 
               {availability.isAvailable && !availability.isHoliday && (
                 <>
@@ -578,6 +1330,70 @@ export default function DoctorCalendar() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Max Appointments
+                    </label>
+                    <input
+                      type="number"
+                      value={availability.maxAppointments}
+                      onChange={(e) => setAvailability({ ...availability, maxAppointments: parseInt(e.target.value) })}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2"
+                      min="1"
+                    />
+                  </div>
+                </>
+              )}
+
+              {!availability.isHoliday && !availability.isAvailable && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Start Time (optional, saved for future use)
+                      </label>
+                      <input
+                        type="time"
+                        value={availability.startTime}
+                        onChange={(e) => setAvailability({ ...availability, startTime: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        End Time (optional, saved for future use)
+                      </label>
+                      <input
+                        type="time"
+                        value={availability.endTime}
+                        onChange={(e) => setAvailability({ ...availability, endTime: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Break Start (optional)
+                      </label>
+                      <input
+                        type="time"
+                        value={availability.breakStartTime}
+                        onChange={(e) => setAvailability({ ...availability, breakStartTime: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Break End (optional)
+                      </label>
+                      <input
+                        type="time"
+                        value={availability.breakEndTime}
+                        onChange={(e) => setAvailability({ ...availability, breakEndTime: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Max Appointments (optional)
                     </label>
                     <input
                       type="number"
@@ -691,7 +1507,7 @@ export default function DoctorCalendar() {
         </div>
       )}
 
-      {/* Slots Tab - keeping existing slots functionality */}
+      {/* Slots Tab */}
       {activeTab === 'slots' && (
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">

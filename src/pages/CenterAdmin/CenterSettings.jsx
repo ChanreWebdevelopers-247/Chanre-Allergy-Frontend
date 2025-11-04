@@ -130,10 +130,20 @@ const CenterSettings = () => {
         }
       }));
     } else {
-      setSettings(prev => ({
-        ...prev,
-        [field]: value
-      }));
+      // Handle regular fields
+      if (field === 'mobileNumber') {
+        // When mobile number is updated, also update miss call number
+        setSettings(prev => ({
+          ...prev,
+          mobileNumber: value,
+          missCallNumber: value
+        }));
+      } else {
+        setSettings(prev => ({
+          ...prev,
+          [field]: value
+        }));
+      }
     }
   };
 

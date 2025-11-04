@@ -2841,12 +2841,6 @@ export default function ReassignPatient() {
                              isFullyPaid ? 'FULLY PAID' : 'PENDING'}
                           </span>
                         </div>
-                        {isCancelled && latestBill.cancellationReason && (
-                          <div className="flex justify-between text-xs text-slate-600 mt-1">
-                            <span>Reason:</span>
-                            <span className="text-red-700 text-right max-w-[200px]">{latestBill.cancellationReason}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -2864,9 +2858,6 @@ export default function ReassignPatient() {
                         isPartiallyRefunded ? 'Partially Refunded' :
                         isFullyPaid ? 'Fully Paid' : 'Pending'
                       }</div>
-                      {isCancelled && latestBill.cancellationReason && (
-                        <div className="mt-1"><span className="font-medium">Cancellation Reason:</span> <span className="text-red-700">{latestBill.cancellationReason}</span></div>
-                      )}
                     </div>
                   </div>
 
@@ -2919,11 +2910,6 @@ export default function ReassignPatient() {
                                    latestBill.createdAt ? new Date(latestBill.createdAt).toLocaleTimeString('en-GB') : 
                                    'N/A'}
                                 </div>
-                                {latestBill.cancellationReason && (
-                                  <div className="text-xs text-red-700 mt-1">
-                                    <span className="font-medium">Reason:</span> {latestBill.cancellationReason}
-                                  </div>
-                                )}
                               </div>
                             </div>
                             <div className="text-right">
@@ -3021,12 +3007,6 @@ export default function ReassignPatient() {
                              isFullyPaid ? 'Fully Paid' : 'Pending'}
                           </span>
                         </div>
-                        {isCancelled && latestBill.cancellationReason && (
-                          <div className="flex justify-between mb-1 text-xs text-red-700 mt-1">
-                            <span className="font-medium">Reason:</span>
-                            <span className="text-right max-w-[200px]">{latestBill.cancellationReason}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
               </div>

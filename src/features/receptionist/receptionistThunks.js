@@ -111,7 +111,8 @@ export const fetchReceptionistPatients = createAsyncThunk(
     try {
       dispatch(setLoading(true));
       // Use the main patients endpoint to get all patients in the center
-      const res = await API.get('/patients');
+      // Request a high limit to get all patients (backend defaults to 10 per page)
+      const res = await API.get('/patients?limit=10000&page=1');
       
       // Extract patients from response (handle both array and paginated response)
       const patients = res.data.patients || res.data;

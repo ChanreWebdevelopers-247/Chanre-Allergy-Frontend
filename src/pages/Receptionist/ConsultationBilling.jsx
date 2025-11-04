@@ -353,6 +353,12 @@ export default function ConsultationBilling() {
   // Appointment autocomplete states
   const [patientAppointment, setPatientAppointment] = useState(null);
   const [appointmentLoading, setAppointmentLoading] = useState(false);
+  
+  // Available slots states for appointment booking
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [selectedAppointmentDate, setSelectedAppointmentDate] = useState('');
+  const [selectedSlotId, setSelectedSlotId] = useState(null);
 
   // Step 3: Bill Management
   const [showCancelBillModal, setShowCancelBillModal] = useState(false);
@@ -419,17 +425,199 @@ export default function ConsultationBilling() {
     }
   }, [showInvoicePreviewModal, invoiceData, user]);
 
-  // Set default appointment date when payment modal opens
+  // Set default appointment date when payment modal opens (only if not already set)
   useEffect(() => {
-    if (showPaymentModal && !paymentData.appointmentTime) {
-      // Set default appointment date to tomorrow at 9 AM
+    if (showPaymentModal && !selectedAppointmentDate && selectedPatient) {
+      // Don't set default if patient has existing appointment that will be auto-filled
+      // This prevents overwriting appointment dates
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(9, 0, 0, 0);
-      const defaultDate = tomorrow.toISOString().slice(0, 16);
-      setPaymentData(prev => ({...prev, appointmentTime: defaultDate}));
+      const defaultDate = tomorrow.toISOString().split('T')[0];
+      setSelectedAppointmentDate(defaultDate);
     }
-  }, [showPaymentModal]);
+  }, [showPaymentModal, selectedPatient]);
+
+  // Fetch available slots when appointment date or assigned doctor changes
+  useEffect(() => {
+    if (showPaymentModal && selectedPatient && selectedAppointmentDate) {
+      const assignedDoctorId = selectedPatient.assignedDoctor?._id || selectedPatient.assignedDoctor;
+      if (assignedDoctorId) {
+        fetchAvailableSlots(assignedDoctorId, selectedAppointmentDate);
+      } else {
+        setAvailableSlots([]);
+        setSelectedSlotId(null);
+      }
+    } else {
+      setAvailableSlots([]);
+      setSelectedSlotId(null);
+    }
+  }, [showPaymentModal, selectedPatient, selectedAppointmentDate]);
+
+  // Function to fetch available slots for assigned doctor and date
+  const fetchAvailableSlots = async (doctorId, date) => {
+    if (!doctorId || !date) {
+      setAvailableSlots([]);
+      setSelectedSlotId(null);
+      return;
+    }
+    try {
+      setSlotsLoading(true);
+      
+      // First, try to fetch existing slots
+      const response = await API.get('/doctor-calendar/slots', {
+        params: {
+          doctorId: doctorId,
+          date: date
+        }
+      });
+      const slots = response.data.slots || [];
+      
+      // If no slots exist, try to auto-create them using doctor's availability
+      if (slots.length === 0) {
+        try {
+          // Fetch doctor's availability for this date to get default times
+          const availabilityResponse = await API.get('/doctor-calendar/month-availability', {
+            params: {
+              doctorId: doctorId,
+              startDate: date,
+              endDate: date
+            }
+          });
+          
+          const availabilities = availabilityResponse.data.availabilities || [];
+          // Helper to format date consistently (YYYY-MM-DD)
+          const formatDateString = (dateValue) => {
+            if (!dateValue) return null;
+            if (typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+              return dateValue;
+            }
+            const d = new Date(dateValue);
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          };
+          
+          const dateAvailability = availabilities.find(avail => {
+            const availDate = formatDateString(avail.date);
+            return availDate === date;
+          });
+          
+          // Check if availability times are set
+          if (!dateAvailability || !dateAvailability.startTime || !dateAvailability.endTime) {
+            console.log('No availability times set for date:', date);
+            setAvailableSlots([]);
+            setSelectedSlotId(null);
+            setPaymentData(prev => ({...prev, appointmentTime: ''}));
+            return;
+          }
+          
+          // Check if doctor is explicitly unavailable or on holiday
+          if (dateAvailability.isHoliday) {
+            console.log('Doctor is on holiday on date:', date);
+            setAvailableSlots([]);
+            setSelectedSlotId(null);
+            setPaymentData(prev => ({...prev, appointmentTime: ''}));
+            return;
+          }
+          
+          if (dateAvailability.isAvailable === false) {
+            console.log('Doctor is marked as unavailable on date:', date);
+            setAvailableSlots([]);
+            setSelectedSlotId(null);
+            setPaymentData(prev => ({...prev, appointmentTime: ''}));
+            return;
+          }
+          
+          // Use availability times to create slots
+          const startTime = dateAvailability.startTime;
+          const endTime = dateAvailability.endTime;
+          const breakStartTime = dateAvailability.breakStartTime || null;
+          const breakEndTime = dateAvailability.breakEndTime || null;
+          
+          console.log('Auto-creating slots for date:', date, 'with times:', { startTime, endTime, breakStartTime, breakEndTime });
+          
+          // Auto-create slots
+          await API.post('/doctor-calendar/slots/create', {
+            doctorId: doctorId,
+            date: date,
+            slotDuration: 30,
+            startTime: startTime,
+            endTime: endTime,
+            breakStartTime: breakStartTime,
+            breakEndTime: breakEndTime
+          });
+          
+          // Wait a moment for database to update
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Fetch slots again after creation
+          const newResponse = await API.get('/doctor-calendar/slots', {
+            params: {
+              doctorId: doctorId,
+              date: date
+            }
+          });
+          const newSlots = newResponse.data.slots || [];
+          console.log(`Fetched ${newSlots.length} slots after creation`);
+          
+          const available = newSlots
+            .filter(slot => !slot.isBooked)
+            .map(slot => ({
+              value: `${slot.startTime} - ${slot.endTime}`,
+              display: `${slot.startTime} - ${slot.endTime}`,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              slotId: slot._id
+            }));
+          setAvailableSlots(available);
+          setSelectedSlotId(null);
+          setPaymentData(prev => ({...prev, appointmentTime: ''}));
+          return;
+        } catch (createError) {
+          console.error('Error auto-creating slots:', createError);
+          console.error('Error response:', createError.response?.data);
+          console.error('Error status:', createError.response?.status);
+          
+          // If creation fails, show error but continue with empty slots
+          if (createError.response?.status === 400) {
+            toast.error(createError.response?.data?.message || 'Cannot create slots for this date. Please check availability times.');
+          } else if (createError.response?.status === 403) {
+            toast.error('You do not have permission to create slots. Please contact the center administrator.');
+          } else {
+            toast.error('Failed to create slots. Please try again.');
+          }
+          
+          setAvailableSlots([]);
+          setSelectedSlotId(null);
+          setPaymentData(prev => ({...prev, appointmentTime: ''}));
+          return;
+        }
+      }
+      
+      // Filter only available slots and format them
+      const available = slots
+        .filter(slot => !slot.isBooked)
+        .map(slot => ({
+          value: `${slot.startTime} - ${slot.endTime}`,
+          display: `${slot.startTime} - ${slot.endTime}`,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          slotId: slot._id
+        }));
+      setAvailableSlots(available);
+      // Reset selected slot when fetching new slots
+      setSelectedSlotId(null);
+      setPaymentData(prev => ({...prev, appointmentTime: ''}));
+    } catch (error) {
+      console.error('Error fetching available slots:', error);
+      setAvailableSlots([]);
+      setSelectedSlotId(null);
+      setPaymentData(prev => ({...prev, appointmentTime: ''}));
+    } finally {
+      setSlotsLoading(false);
+    }
+  };
 
   // Removed auto-selection logic for reassigned patients
 
@@ -844,10 +1032,23 @@ export default function ConsultationBilling() {
             if (appointmentDateTime) {
               console.log('Setting appointment time to:', appointmentDateTime);
               
+              // Extract date part (YYYY-MM-DD) for selectedAppointmentDate
+              const datePart = appointmentDateTime.split('T')[0];
+              setSelectedAppointmentDate(datePart);
+              
               setPaymentData(prev => ({
                 ...prev,
                 appointmentTime: appointmentDateTime
               }));
+            } else if (appointment.confirmedDate || appointment.preferredDate) {
+              // If no time but we have a date, set just the date
+              const appointmentDate = appointment.confirmedDate || appointment.preferredDate;
+              const dateObj = new Date(appointmentDate);
+              const year = dateObj.getFullYear();
+              const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+              const day = String(dateObj.getDate()).padStart(2, '0');
+              const datePart = `${year}-${month}-${day}`;
+              setSelectedAppointmentDate(datePart);
             }
             
             // Show success message
@@ -1042,10 +1243,23 @@ export default function ConsultationBilling() {
         if (appointmentDateTime) {
           console.log('Setting appointment time to:', appointmentDateTime);
           
+          // Extract date part (YYYY-MM-DD) for selectedAppointmentDate
+          const datePart = appointmentDateTime.split('T')[0];
+          setSelectedAppointmentDate(datePart);
+          
           setPaymentData(prev => ({
             ...prev,
             appointmentTime: appointmentDateTime
           }));
+        } else if (appointment.confirmedDate || appointment.preferredDate) {
+          // If no time but we have a date, set just the date
+          const appointmentDate = appointment.confirmedDate || appointment.preferredDate;
+          const dateObj = new Date(appointmentDate);
+          const year = dateObj.getFullYear();
+          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+          const day = String(dateObj.getDate()).padStart(2, '0');
+          const datePart = `${year}-${month}-${day}`;
+          setSelectedAppointmentDate(datePart);
         }
         
         // Show success message
@@ -1086,13 +1300,24 @@ export default function ConsultationBilling() {
     }
 
     // Validate appointment time is set
-    if (!paymentData.appointmentTime) {
-      toast.error('Please schedule an appointment date and time');
+    if (!paymentData.appointmentTime || !selectedSlotId) {
+      toast.error('Please select an appointment date and time slot');
+      return;
+    }
+
+    // Validate assigned doctor exists
+    const assignedDoctorId = selectedPatient.assignedDoctor?._id || selectedPatient.assignedDoctor;
+    if (!assignedDoctorId) {
+      toast.error('Patient must have an assigned doctor to book an appointment');
       return;
     }
     
     // Validate appointment time is in the future (can be same day if time is in future)
-    const appointmentDate = new Date(paymentData.appointmentTime);
+    // Parse the datetime string (YYYY-MM-DDTHH:mm) in local timezone
+    const [datePart, timePart] = paymentData.appointmentTime.split('T');
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hours, minutes] = (timePart || '00:00').split(':').map(Number);
+    const appointmentDate = new Date(year, month - 1, day, hours, minutes);
     const now = new Date();
     
     if (appointmentDate <= now) {
@@ -1101,6 +1326,23 @@ export default function ConsultationBilling() {
     }
 
     try {
+      // First, book the selected slot
+      try {
+        const bookSlotResponse = await API.post('/doctor-calendar/slots/book', {
+          slotId: selectedSlotId,
+          patientId: selectedPatient._id,
+          notes: `Consultation billing appointment - ${paymentData.consultationType}`
+        });
+        
+        if (!bookSlotResponse.data.success) {
+          throw new Error(bookSlotResponse.data.message || 'Failed to book slot');
+        }
+      } catch (slotError) {
+        console.error('Error booking slot:', slotError);
+        toast.error(slotError.response?.data?.message || 'Failed to book appointment slot. Please select another slot.');
+        return;
+      }
+
       // Filter out superconsultation billing - only use consultation billing
       const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
       // Get invoice number from generatedInvoice or from patient's consultation billing
@@ -1114,7 +1356,8 @@ export default function ConsultationBilling() {
         paymentType: 'full',
         notes: paymentData.notes,
         appointmentTime: paymentData.appointmentTime,
-        consultationType: paymentData.consultationType
+        consultationType: paymentData.consultationType,
+        slotId: selectedSlotId // Include slot ID in payment payload
       };
 
       console.log('Processing payment:', paymentPayload);
@@ -1129,7 +1372,7 @@ export default function ConsultationBilling() {
         setShowPaymentModal(false);
         setShowInvoicePreviewModal(false);
         
-        // Clear payment data
+        // Clear payment data and slot selection
         setPaymentData({
           amount: '',
           paymentMethod: 'cash',
@@ -1137,6 +1380,9 @@ export default function ConsultationBilling() {
           appointmentTime: '',
           consultationType: 'OP'
         });
+        setSelectedAppointmentDate('');
+        setSelectedSlotId(null);
+        setAvailableSlots([]);
         
         // Update the specific patient in Redux store with the returned data
         if (response.data.patient) {
@@ -3924,6 +4170,9 @@ export default function ConsultationBilling() {
                 onClick={() => {
                   setShowPaymentModal(false);
                   setPatientAppointment(null);
+                  setSelectedAppointmentDate('');
+                  setSelectedSlotId(null);
+                  setAvailableSlots([]);
                 }}
                 className="text-slate-400 hover:text-slate-600"
               >
@@ -4125,26 +4374,126 @@ export default function ConsultationBilling() {
                       </div>
                     )}
                     
-                    <input
-                  type="datetime-local"
-                  value={paymentData.appointmentTime}
-                  onChange={(e) => setPaymentData({...paymentData, appointmentTime: e.target.value})}
-                  required
-                  min={(() => {
-                    const now = new Date();
-                    // Allow appointments from current time onwards (same-day appointments allowed)
-                    return now.toISOString().slice(0, 16);
-                  })()}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-                  placeholder="Select appointment date and time"
-                    />
+                    {/* Date Picker */}
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Appointment Date *
+                      </label>
+                      <input
+                        type="date"
+                        value={selectedAppointmentDate || ''}
+                        onChange={(e) => {
+                          const newDate = e.target.value;
+                          console.log('Date changed by user to:', newDate);
+                          if (newDate) {
+                            setSelectedAppointmentDate(newDate);
+                            setSelectedSlotId(null);
+                            setPaymentData(prev => ({...prev, appointmentTime: ''}));
+                          }
+                        }}
+                        min={new Date().toISOString().split('T')[0]}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                        required
+                        disabled={!selectedPatient?.assignedDoctor}
+                      />
+                      {!selectedPatient?.assignedDoctor && (
+                        <p className="text-xs text-amber-600 mt-1">
+                          Please assign a doctor to the patient first
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Slot Selector */}
+                    {selectedPatient?.assignedDoctor ? (
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Available Time Slots *
+                        </label>
+                        <select
+                          value={selectedSlotId || ''}
+                          onChange={(e) => {
+                            const slotId = e.target.value;
+                            setSelectedSlotId(slotId);
+                            // Find the selected slot and set appointmentTime
+                            const selectedSlot = availableSlots.find(slot => slot.slotId === slotId);
+                            if (selectedSlot && selectedAppointmentDate) {
+                              // Combine date and time into datetime format (local time, no timezone conversion)
+                              const [hours, minutes] = selectedSlot.startTime.split(':');
+                              // Parse date string (YYYY-MM-DD) and create date in local timezone
+                              const [year, month, day] = selectedAppointmentDate.split('-').map(Number);
+                              const appointmentDateTime = new Date(year, month - 1, day, parseInt(hours), parseInt(minutes), 0, 0);
+                              // Format as YYYY-MM-DDTHH:mm for datetime-local input
+                              const formattedDateTime = `${selectedAppointmentDate}T${selectedSlot.startTime}:00`;
+                              setPaymentData(prev => ({
+                                ...prev,
+                                appointmentTime: formattedDateTime
+                              }));
+                            }
+                          }}
+                          disabled={!selectedAppointmentDate || slotsLoading || availableSlots.length === 0}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs disabled:bg-gray-100 disabled:cursor-not-allowed"
+                          required
+                        >
+                          <option value="">
+                            {slotsLoading 
+                              ? 'Loading slots...' 
+                              : !selectedAppointmentDate 
+                              ? 'Select date first' 
+                              : availableSlots.length === 0 
+                              ? 'No slots available for this date' 
+                              : 'Select a time slot'}
+                          </option>
+                          {availableSlots.map((slot, idx) => (
+                            <option key={idx} value={slot.slotId}>
+                              {slot.display}
+                            </option>
+                          ))}
+                        </select>
+                        {slotsLoading && (
+                          <p className="text-xs text-slate-500 mt-1">Loading available slots...</p>
+                        )}
+                        {!slotsLoading && selectedAppointmentDate && availableSlots.length === 0 && (
+                          <p className="text-xs text-amber-600 mt-1">
+                            No slots available for {selectedPatient.assignedDoctor?.name || 'the assigned doctor'} on this date. 
+                            {(() => {
+                              const today = new Date().toISOString().split('T')[0];
+                              const selectedDate = selectedAppointmentDate;
+                              if (selectedDate >= today) {
+                                return ' Slots may need to be created first. Please ensure default working hours are set for this doctor in the Doctor Calendar.';
+                              }
+                              return ' Please select another date.';
+                            })()}
+                          </p>
+                        )}
+                        {selectedSlotId && paymentData.appointmentTime && (
+                          <p className="text-xs text-green-600 mt-1 font-medium">
+                            ✅ Appointment scheduled for: {(() => {
+                              // Parse the datetime string (YYYY-MM-DDTHH:mm) and display in local format
+                              const [datePart, timePart] = paymentData.appointmentTime.split('T');
+                              const [year, month, day] = datePart.split('-').map(Number);
+                              const [hours, minutes] = (timePart || '00:00').split(':').map(Number);
+                              const appointmentDate = new Date(year, month - 1, day, hours, minutes);
+                              return appointmentDate.toLocaleString('en-GB', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false
+                              });
+                            })()}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <p className="text-xs text-amber-700">
+                          ⚠️ Patient does not have an assigned doctor. Please assign a doctor first to book appointments.
+                        </p>
+                      </div>
+                    )}
                     <p className="text-xs text-slate-500 mt-1">
                       Doctor will only see this patient on the scheduled appointment date. Appointments can be scheduled for today or any future date.
-                      {paymentData.appointmentTime && (
-                        <span className="block mt-1 text-green-600 font-medium">
-                          ✅ Scheduled for: {new Date(paymentData.appointmentTime).toLocaleString()}
-                        </span>
-                      )}
                     </p>
                   </div>
                   
@@ -4194,6 +4543,9 @@ export default function ConsultationBilling() {
                   onClick={() => {
                     setShowPaymentModal(false);
                     setPatientAppointment(null);
+                    setSelectedAppointmentDate('');
+                    setSelectedSlotId(null);
+                    setAvailableSlots([]);
                   }}
                   className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-xs"
                     >

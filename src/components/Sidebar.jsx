@@ -298,17 +298,24 @@ export default function Sidebar(props) {
                 icon={<FaHome />}
                 isActive={isActive("/dashboard/accountant/dashboard")}
               />
-              <SidebarLink
-                to="/dashboard/accountant/billing"
-                label="Billing"
-                icon={<FaMoneyBillWave />}
-                isActive={isActive("/dashboard/accountant/billing")}
-              />
-              <SidebarLink
-                to="/dashboard/accountant/reports"
+              <SidebarGroup
                 label="Reports"
                 icon={<FaClipboardList />}
-                isActive={isActive("/dashboard/accountant/reports")}
+                open={centerOpen === 'accountant-reports'}
+                toggle={() => setCenterOpen(centerOpen === 'accountant-reports' ? null : 'accountant-reports')}
+                links={[
+                  { to: "/dashboard/accountant/reports/cancellation", label: "Cancellation Report" },
+                  { to: "/dashboard/accountant/reports/cancellation-regenerated", label: "Cancellation & Regenerated" },
+                  { to: "/dashboard/accountant/reports/category-wise", label: "Category Wise Report" },
+                  { to: "/dashboard/accountant/reports/collection", label: "Collection Report" },
+                  { to: "/dashboard/accountant/reports/discount", label: "Discount Report" },
+                  { to: "/dashboard/accountant/reports/pending-bills", label: "Pending Bills Report" },
+                  { to: "/dashboard/accountant/reports/refund", label: "Refund Report" },
+                  { to: "/dashboard/accountant/reports/transactions-summary", label: "Transactions Summary" },
+                  { to: "/dashboard/accountant/reports/revenue", label: "Revenue Report" },
+                  { to: "/dashboard/accountant/reports/penalty-collection", label: "Penalty Collection" }
+                ]}
+                currentPath={location.pathname}
               />
               <SidebarLink
                 to="/dashboard/accountant/profile"

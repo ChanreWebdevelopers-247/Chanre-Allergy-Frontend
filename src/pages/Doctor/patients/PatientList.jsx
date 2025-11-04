@@ -51,44 +51,125 @@ export default function PatientList() {
     dispatch(fetchAssignedPatients());
   }, [dispatch]);
 
-  // Filter patients based on search term (show all assigned patients)
+  // Filter patients based on appointment date (only show patients scheduled for today)
   useEffect(() => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0); // Set to start of today for date comparison
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
     const filtered = (assignedPatients || []).filter(patient => {
-      // Check if patient has a scheduled appointment
-      const scheduledAppointment = patient.appointments?.length > 0 
-        ? patient.appointments
-            .filter(apt => apt.status === 'scheduled' && (apt.type === 'reassignment_consultation' || !apt.type))
-            .sort((a, b) => new Date(b.scheduledAt || b.createdAt) - new Date(a.scheduledAt || a.createdAt))[0]
-        : null;
+      // Find the earliest scheduled appointment date (similar to RecentlyAssignedPatients)
+      let appointmentDate = null;
       
-      // If patient has a scheduled appointment, only show if appointment date has arrived
-      if (scheduledAppointment && scheduledAppointment.scheduledAt) {
-        const appointmentDate = new Date(scheduledAppointment.scheduledAt);
-        appointmentDate.setHours(0, 0, 0, 0);
+      // Priority 1: Check appointments array
+      if (patient.appointments && patient.appointments.length > 0) {
+        const allAppointments = patient.appointments.map(apt => {
+          const dateField = apt.scheduledAt || apt.appointmentTime || apt.confirmedDate || apt.preferredDate || apt.date;
+          if (!dateField) return null;
+          
+          try {
+            const aptDate = new Date(dateField);
+            if (!isNaN(aptDate.getTime())) {
+              return {
+                ...apt,
+                _appointmentDate: aptDate
+              };
+            }
+          } catch (e) {
+            // Invalid date
+          }
+          return null;
+        }).filter(apt => apt !== null && apt._appointmentDate);
         
-        // Only show if appointment date is today or in the past
-        if (appointmentDate > now) {
-          return false; // Hide patient if appointment is in the future
+        if (allAppointments.length > 0) {
+          // Sort by date (earliest first)
+          allAppointments.sort((a, b) => a._appointmentDate.getTime() - b._appointmentDate.getTime());
+          appointmentDate = new Date(allAppointments[0]._appointmentDate);
+          appointmentDate.setHours(0, 0, 0, 0);
         }
       }
       
-      // Apply search filter only
-      const matchesSearch = !searchTerm || 
-        patient?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      // Priority 2: Check patient.appointmentTime directly
+      if (!appointmentDate && patient.appointmentTime) {
+        try {
+          const directAppointmentDate = new Date(patient.appointmentTime);
+          if (!isNaN(directAppointmentDate.getTime())) {
+            appointmentDate = new Date(directAppointmentDate);
+            appointmentDate.setHours(0, 0, 0, 0);
+          }
+        } catch (e) {
+          // Invalid date
+        }
+      }
+      
+      // Priority 3: Check reassignedBilling records for appointmentTime
+      if (!appointmentDate && patient.reassignedBilling && patient.reassignedBilling.length > 0) {
+        const latestBill = patient.reassignedBilling[patient.reassignedBilling.length - 1];
+        if (latestBill.customData?.appointmentTime || latestBill.appointmentTime) {
+          try {
+            const billAppointmentDate = new Date(latestBill.customData?.appointmentTime || latestBill.appointmentTime);
+            if (!isNaN(billAppointmentDate.getTime())) {
+              appointmentDate = new Date(billAppointmentDate);
+              appointmentDate.setHours(0, 0, 0, 0);
+            }
+          } catch (e) {
+            // Invalid date
+          }
+        }
+      }
+      
+      // Priority 4: Check regular billing records
+      if (!appointmentDate && patient.billing && patient.billing.length > 0) {
+        const latestBill = patient.billing[patient.billing.length - 1];
+        if (latestBill.appointmentTime || latestBill.customData?.appointmentTime) {
+          try {
+            const billAppointmentDate = new Date(latestBill.appointmentTime || latestBill.customData?.appointmentTime);
+            if (!isNaN(billAppointmentDate.getTime())) {
+              appointmentDate = new Date(billAppointmentDate);
+              appointmentDate.setHours(0, 0, 0, 0);
+            }
+          } catch (e) {
+            // Invalid date
+          }
+        }
+      }
+      
+      // If patient has a scheduled appointment, show from appointment date onwards (permanently)
+      if (appointmentDate) {
+        // Show if appointment date is today or in the past (patient stays visible permanently once scheduled date arrives)
+        return appointmentDate.getTime() <= today.getTime();
+      }
+      
+      // If no appointment date, show patients assigned today or in the past (show all assigned patients)
+      const relevantDate = patient.isReassigned && patient.lastReassignedAt 
+        ? new Date(patient.lastReassignedAt)
+        : patient.assignedAt 
+          ? new Date(patient.assignedAt)
+          : null;
+      
+      if (!relevantDate) return false; // Only show patients with a date
+      
+      // Normalize the date for comparison
+      const relevantDateNormalized = new Date(relevantDate);
+      relevantDateNormalized.setHours(0, 0, 0, 0);
+      
+      // Show if assigned today or in the past (show all assigned patients)
+      return relevantDateNormalized.getTime() <= today.getTime();
+    });
+    
+    // Apply search filter
+    const searchFiltered = filtered.filter(patient => {
+      if (!searchTerm) return true;
+      
+      return patient?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         patient?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         patient?.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         patient?.contact?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         patient?.uhId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         patient?.assignedDoctor?.name?.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      return matchesSearch;
     });
 
     // Process patients to identify reassigned patients
-    const processedPatients = filtered.map(patient => {
+    const processedPatients = searchFiltered.map(patient => {
       // Check if patient has billing records for different doctors (indicating reassignment)
       const currentDoctorId = patient.assignedDoctor?._id || patient.assignedDoctor;
       const hasBillingForDifferentDoctor = patient.billing && patient.billing.some(bill => {
@@ -108,13 +189,77 @@ export default function PatientList() {
       
       const isReassignedPatient = hasBillingForDifferentDoctor || hasMultipleConsultationFees || wasPreviouslyReassigned;
       
-      // Get scheduled appointment time for sorting
-      const scheduledAppointment = patient.appointments?.length > 0 
-        ? patient.appointments
-            .filter(apt => apt.status === 'scheduled' && (apt.type === 'reassignment_consultation' || !apt.type))
-            .sort((a, b) => new Date(b.scheduledAt || b.createdAt) - new Date(a.scheduledAt || a.createdAt))[0]
-        : null;
-      const appointmentTime = scheduledAppointment?.scheduledAt ? new Date(scheduledAppointment.scheduledAt) : null;
+      // Get scheduled appointment time for sorting (use same logic as filtering)
+      let appointmentTime = null;
+      
+      // Priority 1: Check appointments array
+      if (patient.appointments && patient.appointments.length > 0) {
+        const allAppointments = patient.appointments.map(apt => {
+          const dateField = apt.scheduledAt || apt.appointmentTime || apt.confirmedDate || apt.preferredDate || apt.date;
+          if (!dateField) return null;
+          
+          try {
+            const aptDate = new Date(dateField);
+            if (!isNaN(aptDate.getTime())) {
+              return {
+                ...apt,
+                _appointmentDate: aptDate
+              };
+            }
+          } catch (e) {
+            // Invalid date
+          }
+          return null;
+        }).filter(apt => apt !== null && apt._appointmentDate);
+        
+        if (allAppointments.length > 0) {
+          // Sort by date (earliest first)
+          allAppointments.sort((a, b) => a._appointmentDate.getTime() - b._appointmentDate.getTime());
+          appointmentTime = allAppointments[0]._appointmentDate;
+        }
+      }
+      
+      // Priority 2: Check patient.appointmentTime directly
+      if (!appointmentTime && patient.appointmentTime) {
+        try {
+          const directAppointmentDate = new Date(patient.appointmentTime);
+          if (!isNaN(directAppointmentDate.getTime())) {
+            appointmentTime = directAppointmentDate;
+          }
+        } catch (e) {
+          // Invalid date
+        }
+      }
+      
+      // Priority 3: Check reassignedBilling records
+      if (!appointmentTime && patient.reassignedBilling && patient.reassignedBilling.length > 0) {
+        const latestBill = patient.reassignedBilling[patient.reassignedBilling.length - 1];
+        if (latestBill.customData?.appointmentTime || latestBill.appointmentTime) {
+          try {
+            const billAppointmentDate = new Date(latestBill.customData?.appointmentTime || latestBill.appointmentTime);
+            if (!isNaN(billAppointmentDate.getTime())) {
+              appointmentTime = billAppointmentDate;
+            }
+          } catch (e) {
+            // Invalid date
+          }
+        }
+      }
+      
+      // Priority 4: Check regular billing records
+      if (!appointmentTime && patient.billing && patient.billing.length > 0) {
+        const latestBill = patient.billing[patient.billing.length - 1];
+        if (latestBill.appointmentTime || latestBill.customData?.appointmentTime) {
+          try {
+            const billAppointmentDate = new Date(latestBill.appointmentTime || latestBill.customData?.appointmentTime);
+            if (!isNaN(billAppointmentDate.getTime())) {
+              appointmentTime = billAppointmentDate;
+            }
+          } catch (e) {
+            // Invalid date
+          }
+        }
+      }
       
       return {
         ...patient,

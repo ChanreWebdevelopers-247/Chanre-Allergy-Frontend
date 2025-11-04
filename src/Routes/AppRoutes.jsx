@@ -210,9 +210,17 @@ import RecentlyAssignedPatients from '../pages/Doctor/patients/RecentlyAssignedP
 
 // Accountant Pages
 import AccountantDashboard from '../pages/Accountant/Dashboard';
-import AccountantBilling from '../pages/Accountant/Billing';
-import AccountantReports from '../pages/Accountant/Reports';
 import AccountantProfile from '../pages/Accountant/Profile';
+import CancellationReport from '../pages/Accountant/CancellationReport';
+import CancellationAndRegeneratedReport from '../pages/Accountant/CancellationAndRegeneratedReport';
+import CategoryWiseReport from '../pages/Accountant/CategoryWiseReport';
+import CollectionReport from '../pages/Accountant/CollectionReport';
+import DiscountReport from '../pages/Accountant/DiscountReport';
+import PendingBillsReport from '../pages/Accountant/PendingBillsReport';
+import RefundReport from '../pages/Accountant/RefundReport';
+import TransactionsSummaryReport from '../pages/Accountant/TransactionsSummaryReport';
+import RevenueReport from '../pages/Accountant/RevenueReport';
+import PenaltyCollectionReport from '../pages/Accountant/PenaltyCollectionReport';
 
 // Center Admin Accountant Pages
 import ManageAccountants from '../pages/CenterAdmin/Accountant/ManageAccountants';
@@ -531,7 +539,7 @@ export default function AppRoutes() {
         <Route path="receptionist/transactions" element={<ReceptionistLayout><TransactionView /></ReceptionistLayout>} />
         <Route path="receptionist/appointment-management" element={<ReceptionistLayout><AppointmentManagement /></ReceptionistLayout>} />
         <Route path="receptionist/appointment-approvals" element={<ReceptionistLayout><ReceptionistAppointmentApprovals /></ReceptionistLayout>} />
-        <Route path="receptionist/book-slot" element={<ReceptionistLayout><BookSlot /></ReceptionistLayout>} />
+        <Route path="receptionist/book-slot" element={<BookSlot />} />
 
         {/* Doctor Routes */}
         <Route path="doctor/dashboard" element={<DoctorDashboard />} />
@@ -642,9 +650,19 @@ export default function AppRoutes() {
 
         {/* Accountant Routes */}
         <Route path="accountant/dashboard" element={<AccountantRouteProtection><AccountantDashboard /></AccountantRouteProtection>} />
-        <Route path="accountant/billing" element={<AccountantRouteProtection><AccountantBilling /></AccountantRouteProtection>} />
-        <Route path="accountant/reports" element={<AccountantRouteProtection><AccountantReports /></AccountantRouteProtection>} />
         <Route path="accountant/profile" element={<AccountantRouteProtection><AccountantProfile /></AccountantRouteProtection>} />
+        
+        {/* Accountant Report Routes */}
+        <Route path="accountant/reports/cancellation" element={<AccountantRouteProtection><CancellationReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/cancellation-regenerated" element={<AccountantRouteProtection><CancellationAndRegeneratedReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/category-wise" element={<AccountantRouteProtection><CategoryWiseReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/collection" element={<AccountantRouteProtection><CollectionReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/discount" element={<AccountantRouteProtection><DiscountReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/pending-bills" element={<AccountantRouteProtection><PendingBillsReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/refund" element={<AccountantRouteProtection><RefundReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/transactions-summary" element={<AccountantRouteProtection><TransactionsSummaryReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/revenue" element={<AccountantRouteProtection><RevenueReport /></AccountantRouteProtection>} />
+        <Route path="accountant/reports/penalty-collection" element={<AccountantRouteProtection><PenaltyCollectionReport /></AccountantRouteProtection>} />
       </Route>
     </Routes>
   );

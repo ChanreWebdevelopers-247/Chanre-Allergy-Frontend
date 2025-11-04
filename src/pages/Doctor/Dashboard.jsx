@@ -20,6 +20,7 @@ const DoctorDashboard = () => {
   } = useSelector((state) => state.doctor);
 
   const [activeTab, setActiveTab] = useState('patients');
+  const [filteredPatients, setFilteredPatients] = useState([]);
   const [stats, setStats] = useState({
     totalPatients: 0,
     pendingTests: 0,
@@ -33,7 +34,7 @@ const DoctorDashboard = () => {
       const response = await API.get('/dashboard/doctor/stats');
       const baseStats = response.data;
       
-      // Calculate recent patients (assigned today and paid consultation fee)
+      // Calculate recent patients (scheduled for today and paid consultation fee)
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
@@ -42,9 +43,54 @@ const DoctorDashboard = () => {
       console.log('Total assigned patients:', assignedPatients.length);
       
       const recentPatients = assignedPatients.filter(patient => {
-        if (!patient.assignedAt) {
-          console.log(`❌ Patient ${patient.name}: No assignedAt date`);
-          return false;
+        // Find appointment date (same logic as filtering)
+        let appointmentDate = null;
+        
+        if (patient.appointments && patient.appointments.length > 0) {
+          const allAppointments = patient.appointments.map(apt => {
+            const dateField = apt.scheduledAt || apt.appointmentTime || apt.confirmedDate || apt.preferredDate || apt.date;
+            if (!dateField) return null;
+            try {
+              const aptDate = new Date(dateField);
+              if (!isNaN(aptDate.getTime())) {
+                return { ...apt, _appointmentDate: aptDate };
+              }
+            } catch (e) {}
+            return null;
+          }).filter(apt => apt !== null && apt._appointmentDate);
+          
+          if (allAppointments.length > 0) {
+            allAppointments.sort((a, b) => a._appointmentDate.getTime() - b._appointmentDate.getTime());
+            appointmentDate = new Date(allAppointments[0]._appointmentDate);
+            appointmentDate.setHours(0, 0, 0, 0);
+          }
+        }
+        
+        if (!appointmentDate && patient.appointmentTime) {
+          try {
+            const directAppointmentDate = new Date(patient.appointmentTime);
+            if (!isNaN(directAppointmentDate.getTime())) {
+              appointmentDate = new Date(directAppointmentDate);
+              appointmentDate.setHours(0, 0, 0, 0);
+            }
+          } catch (e) {}
+        }
+        
+        // Only count patients scheduled for TODAY (not past or future)
+        if (appointmentDate) {
+          if (appointmentDate.getTime() !== today.getTime()) {
+            return false; // Not today
+          }
+        } else {
+          // No appointment date - check if assigned today
+          if (!patient.assignedAt) {
+            return false;
+          }
+          const assignedDate = new Date(patient.assignedAt);
+          assignedDate.setHours(0, 0, 0, 0);
+          if (assignedDate.getTime() !== today.getTime()) {
+            return false; // Not assigned today
+          }
         }
         
         // Check if patient has paid consultation fee
@@ -56,19 +102,7 @@ const DoctorDashboard = () => {
           (bill.status === 'paid' || bill.status === 'completed')
         );
         
-        const assignedDate = new Date(patient.assignedAt);
-        assignedDate.setHours(0, 0, 0, 0);
-        
-        const isToday = assignedDate.getTime() === today.getTime();
-        
-        console.log(`📋 Patient ${patient.name}:`);
-        console.log(`  - Assigned Date: ${assignedDate.toDateString()}`);
-        console.log(`  - Is Today: ${isToday}`);
-        console.log(`  - Has Consultation Fee: ${hasConsultationFee}`);
-        console.log(`  - Has Paid Consultation Fee: ${hasPaidConsultationFee}`);
-        console.log(`  - Billing:`, patient.billing);
-        
-        return isToday && hasPaidConsultationFee;
+        return hasPaidConsultationFee;
       }).length;
       
       console.log('✅ Recent patients count:', recentPatients);
@@ -99,6 +133,100 @@ const DoctorDashboard = () => {
     dispatch(fetchTestRequests());
     dispatch(fetchDoctorNotifications());
   }, [dispatch]);
+
+  // Filter patients based on appointment date (only show patients scheduled for today)
+  useEffect(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const filtered = (assignedPatients || []).filter(patient => {
+      // Find the earliest scheduled appointment date
+      let appointmentDate = null;
+      
+      // Priority 1: Check appointments array
+      if (patient.appointments && patient.appointments.length > 0) {
+        const allAppointments = patient.appointments.map(apt => {
+          const dateField = apt.scheduledAt || apt.appointmentTime || apt.confirmedDate || apt.preferredDate || apt.date;
+          if (!dateField) return null;
+          try {
+            const aptDate = new Date(dateField);
+            if (!isNaN(aptDate.getTime())) {
+              return { ...apt, _appointmentDate: aptDate };
+            }
+          } catch (e) {}
+          return null;
+        }).filter(apt => apt !== null && apt._appointmentDate);
+        
+        if (allAppointments.length > 0) {
+          allAppointments.sort((a, b) => a._appointmentDate.getTime() - b._appointmentDate.getTime());
+          appointmentDate = new Date(allAppointments[0]._appointmentDate);
+          appointmentDate.setHours(0, 0, 0, 0);
+        }
+      }
+      
+      // Priority 2: Check patient.appointmentTime directly
+      if (!appointmentDate && patient.appointmentTime) {
+        try {
+          const directAppointmentDate = new Date(patient.appointmentTime);
+          if (!isNaN(directAppointmentDate.getTime())) {
+            appointmentDate = new Date(directAppointmentDate);
+            appointmentDate.setHours(0, 0, 0, 0);
+          }
+        } catch (e) {}
+      }
+      
+      // Priority 3: Check reassignedBilling records
+      if (!appointmentDate && patient.reassignedBilling && patient.reassignedBilling.length > 0) {
+        const latestBill = patient.reassignedBilling[patient.reassignedBilling.length - 1];
+        if (latestBill.customData?.appointmentTime || latestBill.appointmentTime) {
+          try {
+            const billAppointmentDate = new Date(latestBill.customData?.appointmentTime || latestBill.appointmentTime);
+            if (!isNaN(billAppointmentDate.getTime())) {
+              appointmentDate = new Date(billAppointmentDate);
+              appointmentDate.setHours(0, 0, 0, 0);
+            }
+          } catch (e) {}
+        }
+      }
+      
+      // Priority 4: Check regular billing records
+      if (!appointmentDate && patient.billing && patient.billing.length > 0) {
+        const latestBill = patient.billing[patient.billing.length - 1];
+        if (latestBill.appointmentTime || latestBill.customData?.appointmentTime) {
+          try {
+            const billAppointmentDate = new Date(latestBill.appointmentTime || latestBill.customData?.appointmentTime);
+            if (!isNaN(billAppointmentDate.getTime())) {
+              appointmentDate = new Date(billAppointmentDate);
+              appointmentDate.setHours(0, 0, 0, 0);
+            }
+          } catch (e) {}
+        }
+      }
+      
+      // If patient has a scheduled appointment, ONLY show on that date
+      if (appointmentDate) {
+        // Only show if appointment date is exactly today
+        return appointmentDate.getTime() === today.getTime();
+      }
+      
+      // If no appointment date, fall back to assignment date (show patients assigned today)
+      const relevantDate = patient.isReassigned && patient.lastReassignedAt 
+        ? new Date(patient.lastReassignedAt)
+        : patient.assignedAt 
+          ? new Date(patient.assignedAt)
+          : null;
+      
+      if (!relevantDate) return false;
+      
+      const relevantDateNormalized = new Date(relevantDate);
+      relevantDateNormalized.setHours(0, 0, 0, 0);
+      
+      // Show if assigned today
+      return relevantDateNormalized.getTime() === today.getTime();
+    });
+    
+    setFilteredPatients(filtered);
+  }, [assignedPatients]);
 
   // Update stats when assignedPatients changes
   useEffect(() => {
@@ -391,14 +519,14 @@ const DoctorDashboard = () => {
                   </div>
                 )}
 
-                {assignedPatients.length === 0 ? (
+                {filteredPatients.length === 0 ? (
                   <div className="text-center py-8">
                     <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                    <p className="text-slate-500">No patients assigned yet</p>
+                    <p className="text-slate-500">No patients scheduled for today</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {assignedPatients.map((patient) => (
+                    {filteredPatients.map((patient) => (
                       <div
                         key={patient._id}
                         className="bg-slate-50 rounded-lg p-4 border border-slate-200 hover:border-blue-300 transition-colors cursor-pointer"

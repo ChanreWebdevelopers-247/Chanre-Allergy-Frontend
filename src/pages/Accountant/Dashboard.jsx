@@ -1,223 +1,144 @@
-import React, { useState, useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import { 
-  FaUsers, 
-  FaUserMd, 
-  FaUserTie, 
-  FaChartLine, 
-  FaCalendarAlt,
-  FaMoneyBillWave,
-  FaFileInvoice,
-  FaClipboardList,
-  FaBuilding
-} from 'react-icons/fa';
-// Remove this import as it's not needed - user data comes from Redux store
-import { getAccountantDashboard } from '../../services/api';
+  XCircle, 
+  RotateCcw, 
+  Tag, 
+  DollarSign, 
+  Percent, 
+  Clock, 
+  Undo2, 
+  BarChart3, 
+  TrendingUp, 
+  AlertTriangle,
+  Building2
+} from 'lucide-react';
 
 const AccountantDashboard = () => {
-  const dispatch = useDispatch();
   const navigate = useNavigate();
   const { user } = useSelector((state) => state.auth);
-  const [dashboardData, setDashboardData] = useState({
-    totalPatients: 0,
-    totalDoctors: 0,
-    totalReceptionists: 0,
-    recentPatients: 0,
-    centerId: null
-  });
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        const response = await getAccountantDashboard();
-        setDashboardData(response.data);
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (user) {
-      fetchDashboardData();
-    }
-  }, [user]);
-
-  const stats = [
+  const reportLinks = [
     {
-      title: 'Total Patients',
-      value: dashboardData?.totalPatients || 0,
-      icon: FaUsers,
-      color: 'bg-blue-500',
-      textColor: 'text-blue-600'
+      title: 'Cancellation Report',
+      description: 'View cancelled bills',
+      icon: XCircle,
+      color: 'from-red-500 to-red-600',
+      route: '/dashboard/accountant/reports/cancellation'
     },
     {
-      title: 'Total Doctors',
-      value: dashboardData?.totalDoctors || 0,
-      icon: FaUserMd,
-      color: 'bg-green-500',
-      textColor: 'text-green-600'
+      title: 'Cancellation & Regenerated',
+      description: 'Bills cancelled and regenerated',
+      icon: RotateCcw,
+      color: 'from-orange-500 to-orange-600',
+      route: '/dashboard/accountant/reports/cancellation-regenerated'
     },
     {
-      title: 'Total Receptionists',
-      value: dashboardData?.totalReceptionists || 0,
-      icon: FaUserTie,
-      color: 'bg-purple-500',
-      textColor: 'text-purple-600'
+      title: 'Category Wise Report',
+      description: 'Billing by bill type',
+      icon: Tag,
+      color: 'from-blue-500 to-blue-600',
+      route: '/dashboard/accountant/reports/category-wise'
     },
     {
-      title: 'Recent Patients (7 days)',
-      value: dashboardData?.recentPatients || 0,
-      icon: FaCalendarAlt,
-      color: 'bg-orange-500',
-      textColor: 'text-orange-600'
-    }
-  ];
-
-  const quickActions = [
-    {
-      title: 'View Billing',
-      description: 'Access billing information and reports',
-      icon: FaMoneyBillWave,
-      color: 'bg-green-100 hover:bg-green-200',
-      textColor: 'text-green-600',
-      onClick: () => navigate('/dashboard/accountant/billing')
+      title: 'Collection Report',
+      description: 'Collected payments',
+      icon: DollarSign,
+      color: 'from-green-500 to-green-600',
+      route: '/dashboard/accountant/reports/collection'
     },
     {
-      title: 'Financial Reports',
-      description: 'Generate and view financial reports',
-      icon: FaChartLine,
-      color: 'bg-blue-100 hover:bg-blue-200',
-      textColor: 'text-blue-600',
-      onClick: () => navigate('/dashboard/accountant/reports')
+      title: 'Discount Report',
+      description: 'Bills with discounts',
+      icon: Percent,
+      color: 'from-purple-500 to-purple-600',
+      route: '/dashboard/accountant/reports/discount'
     },
     {
-      title: 'Invoice Management',
-      description: 'Manage invoices and payments',
-      icon: FaFileInvoice,
-      color: 'bg-purple-100 hover:bg-purple-200',
-      textColor: 'text-purple-600',
-      onClick: () => navigate('/dashboard/accountant/invoices')
+      title: 'Pending Bills',
+      description: 'Unpaid bills',
+      icon: Clock,
+      color: 'from-yellow-500 to-yellow-600',
+      route: '/dashboard/accountant/reports/pending-bills'
     },
     {
-      title: 'Transaction History',
-      description: 'View transaction history and logs',
-      icon: FaClipboardList,
-      color: 'bg-orange-100 hover:bg-orange-200',
-      textColor: 'text-orange-600',
-      onClick: () => navigate('/dashboard/accountant/transactions')
+      title: 'Refund Report',
+      description: 'Refunded transactions',
+      icon: Undo2,
+      color: 'from-pink-500 to-pink-600',
+      route: '/dashboard/accountant/reports/refund'
+    },
+    {
+      title: 'Transactions Summary',
+      description: 'All transactions overview',
+      icon: BarChart3,
+      color: 'from-indigo-500 to-indigo-600',
+      route: '/dashboard/accountant/reports/transactions-summary'
+    },
+    {
+      title: 'Revenue Report',
+      description: 'Revenue breakdown',
+      icon: TrendingUp,
+      color: 'from-cyan-500 to-cyan-600',
+      route: '/dashboard/accountant/reports/revenue'
+    },
+    {
+      title: 'Penalty Collection',
+      description: 'Penalty amounts',
+      icon: AlertTriangle,
+      color: 'from-red-600 to-red-700',
+      route: '/dashboard/accountant/reports/penalty-collection'
     }
   ];
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
 
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Accountant Dashboard</h1>
-        <p className="text-gray-600 mt-2">
-          Welcome back, {user?.name}. Here's an overview of your center's financial data.
-        </p>
-        {user?.centerId && (
-          <div className="mt-2">
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-              <FaBuilding className="mr-1" />
-              {user?.centerId?.name || 'Center'}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {stats.map((stat, index) => {
-          const IconComponent = stat.icon;
-          return (
-            <div key={index} className="bg-white rounded-lg shadow-md p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">{stat.title}</p>
-                  <p className="text-3xl font-bold text-gray-900">{stat.value}</p>
-                </div>
-                <div className={`p-3 rounded-full ${stat.color}`}>
-                  <IconComponent className="h-6 w-6 text-white" />
-                </div>
-              </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 sm:p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <h1 className="text-xl font-bold text-slate-800 mb-1">
+            Accountant Dashboard
+          </h1>
+          <p className="text-xs text-slate-600">
+            Welcome back, {user?.name}. Access all financial reports and analytics.
+          </p>
+          {user?.centerId && (
+            <div className="mt-2">
+              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                <Building2 className="mr-1 h-3 w-3" />
+                {user?.centerId?.name || 'Center'}
+              </span>
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
 
-      {/* Quick Actions */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Quick Actions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {quickActions.map((action, index) => {
-            const IconComponent = action.icon;
+        {/* Reports Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {reportLinks.map((report, index) => {
+            const IconComponent = report.icon;
             return (
               <div
                 key={index}
-                className={`${action.color} ${action.textColor} rounded-lg p-6 cursor-pointer transition-colors duration-200`}
-                onClick={action.onClick}
+                onClick={() => navigate(report.route)}
+                className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer overflow-hidden group border border-gray-100"
               >
-                <div className="flex items-center mb-4">
-                  <IconComponent className="h-8 w-8 mr-3" />
-                  <h3 className="text-lg font-semibold">{action.title}</h3>
+                <div className={`bg-gradient-to-br ${report.color} p-4 text-white`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <IconComponent className="h-5 w-5" />
+                    <span className="text-xs font-medium opacity-80">Report</span>
+                  </div>
+                  <h3 className="text-sm font-bold mb-1">{report.title}</h3>
+                  <p className="text-xs opacity-90 leading-tight">{report.description}</p>
                 </div>
-                <p className="text-sm opacity-80">{action.description}</p>
+                <div className="p-3 bg-gray-50 group-hover:bg-gray-100 transition-colors">
+                  <span className="text-xs font-medium text-slate-700 group-hover:text-blue-600">
+                    View Report →
+                  </span>
+                </div>
               </div>
             );
           })}
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Recent Activity</h2>
-          <button
-            onClick={() => navigate('/dashboard/accountant/billing')}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-          >
-            View All →
-          </button>
-        </div>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-            <div className="flex items-center">
-              <div className="p-2 bg-blue-100 rounded-full mr-4">
-                <FaUsers className="h-5 w-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="font-medium text-gray-900">New patients registered</p>
-                <p className="text-sm text-gray-600">Last 7 days: {dashboardData?.recentPatients || 0} patients</p>
-              </div>
-            </div>
-            <span className="text-sm text-gray-500">Recent</span>
-          </div>
-          
-          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-            <div className="flex items-center">
-              <div className="p-2 bg-green-100 rounded-full mr-4">
-                <FaMoneyBillWave className="h-5 w-5 text-green-600" />
-              </div>
-              <div>
-                <p className="font-medium text-gray-900">Financial reports available</p>
-                <p className="text-sm text-gray-600">Access billing and payment information</p>
-              </div>
-            </div>
-            <span className="text-sm text-gray-500">Available</span>
-          </div>
         </div>
       </div>
     </div>

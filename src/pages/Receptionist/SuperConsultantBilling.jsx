@@ -29,6 +29,7 @@ import {
 import { toast } from 'react-toastify';
 import API from '../../services/api';
 import { store } from '../../redux/store';
+import Pagination from '../../components/Pagination';
 
 export default function SuperConsultantBilling() {
   const dispatch = useDispatch();
@@ -41,6 +42,12 @@ export default function SuperConsultantBilling() {
   const [filteredPatients, setFilteredPatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [patientTestRequests, setPatientTestRequests] = useState({}); // Store test requests by patient ID
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'Pending Payment', 'Paid', 'Partial Payment', 'No Invoice', etc.
+  const [appointmentDateFilter, setAppointmentDateFilter] = useState('all'); // 'all', 'past', 'upcoming', 'today'
   
   // Invoice creation state
   const [showCreateInvoiceModal, setShowCreateInvoiceModal] = useState(false);
@@ -241,24 +248,6 @@ export default function SuperConsultantBilling() {
     fetchTestRequests();
   }, [patients]);
 
-  // Filter patients - show all patients to allow creating superconsultant consultations for any patient
-  useEffect(() => {
-    if (searchTerm.trim()) {
-      // When searching, filter by search term
-      const filtered = patients.filter(patient => 
-        patient.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.uhId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.assignedDoctor?.name?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    setFilteredPatients(filtered);
-    } else {
-      // No search - show ALL patients to allow creating superconsultant consultations
-      setFilteredPatients(patients);
-    }
-  }, [patients, searchTerm]);
-
   // Get patient status for superconsultant billing
   const getPatientStatus = (patient) => {
     if (!patient.billing || patient.billing.length === 0) {
@@ -330,6 +319,71 @@ export default function SuperConsultantBilling() {
 
     return { status: 'Pending Payment', color: 'text-orange-600 bg-orange-100', icon: <Clock className="h-4 w-4" /> };
   };
+
+  // Filter patients - show all patients to allow creating superconsultant consultations for any patient
+  useEffect(() => {
+    let filtered = patients;
+    
+    // Apply search filter
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(patient => 
+        patient.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        patient.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        patient.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        patient.uhId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        patient.assignedDoctor?.name?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(patient => {
+        const statusInfo = getPatientStatus(patient);
+        return statusInfo.status === statusFilter;
+      });
+    }
+    
+    // Apply appointment date filter
+    if (appointmentDateFilter !== 'all') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      filtered = filtered.filter(patient => {
+        const appointmentData = getSuperconsultantAppointmentData(patient);
+        if (!appointmentData || !appointmentData.date) {
+          // Patients without appointments - include only if filter is 'all'
+          return appointmentDateFilter === 'all';
+        }
+        
+        const appointmentDate = new Date(appointmentData.date);
+        appointmentDate.setHours(0, 0, 0, 0);
+        
+        if (appointmentDateFilter === 'past') {
+          return appointmentDate < today;
+        } else if (appointmentDateFilter === 'upcoming') {
+          return appointmentDate >= tomorrow;
+        } else if (appointmentDateFilter === 'today') {
+          return appointmentDate.getTime() === today.getTime();
+        }
+        
+        return true;
+      });
+    }
+    
+    setFilteredPatients(filtered);
+    // Reset to first page when filters change
+    setCurrentPage(1);
+  }, [patients, searchTerm, statusFilter, appointmentDateFilter]);
+  
+  // Calculate paginated patients
+  const paginatedPatients = filteredPatients.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+  
+  const totalPages = Math.ceil(filteredPatients.length / itemsPerPage);
 
   // Get superconsultant appointment display data
   // For superconsultant billing, we specifically look for appointmentTime set during payment processing
@@ -1050,13 +1104,47 @@ export default function SuperConsultantBilling() {
           {/* Patients List */}
           <div className="bg-white rounded-xl shadow-sm border border-blue-100">
             <div className="p-4 sm:p-6 border-b border-blue-100">
-              <h2 className="text-sm font-semibold text-slate-800 flex items-center">
-                <Receipt className="h-5 w-5 mr-2 text-blue-500" />
-                All Patients ({filteredPatients.length})
-              </h2>
-              <p className="text-slate-600 mt-1 text-xs">
-                Create invoices for any patient to set up superconsultant consultation
-              </p>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800 flex items-center">
+                    <Receipt className="h-5 w-5 mr-2 text-blue-500" />
+                    All Patients ({filteredPatients.length})
+                  </h2>
+                  <p className="text-slate-600 mt-1 text-xs">
+                    Create invoices for any patient to set up superconsultant consultation
+                  </p>
+                </div>
+                
+                {/* Filters */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Filter className="h-4 w-4 text-slate-500" />
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="No Invoice">No Invoice</option>
+                    <option value="No Superconsultant Invoice">No Superconsultant Invoice</option>
+                    <option value="Pending Payment">Pending Payment</option>
+                    <option value="Partial Payment">Partial Payment</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Bill Cancelled">Bill Cancelled</option>
+                    <option value="Refunded">Refunded</option>
+                    <option value="Partially Refunded">Partially Refunded</option>
+                  </select>
+                  <select
+                    value={appointmentDateFilter}
+                    onChange={(e) => setAppointmentDateFilter(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  >
+                    <option value="all">All Appointments</option>
+                    <option value="past">Past Appointments</option>
+                    <option value="today">Today</option>
+                    <option value="upcoming">Upcoming Appointments</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -1087,7 +1175,7 @@ export default function SuperConsultantBilling() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-slate-200">
-                    {filteredPatients.map((patient) => {
+                    {paginatedPatients.map((patient) => {
                         const statusInfo = getPatientStatus(patient);
                       const consultationBill = patient.billing?.find(bill => 
                         bill.type === 'consultation' && 
@@ -1323,6 +1411,23 @@ export default function SuperConsultantBilling() {
                   </table>
               )}
             </div>
+            
+            {/* Pagination */}
+            {!loading && filteredPatients.length > 0 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={filteredPatients.length}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={(newItemsPerPage) => {
+                  setItemsPerPage(newItemsPerPage);
+                  setCurrentPage(1); // Reset to first page when changing items per page
+                }}
+                showItemsPerPage={true}
+                showPageInfo={true}
+              />
+            )}
           </div>
         </div>
       </div>
