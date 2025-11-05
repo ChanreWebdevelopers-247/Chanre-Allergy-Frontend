@@ -28,7 +28,8 @@ const RevenueReport = () => {
 
   useEffect(() => {
     fetchData();
-  }, [dateRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -348,7 +349,9 @@ const RevenueReport = () => {
             </div>
             <div className="flex items-end gap-2">
               <button
-                onClick={fetchData}
+                onClick={() => {
+                  fetchData();
+                }}
                 className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 <Filter className="mr-1 h-4 w-4" />

@@ -31,58 +31,182 @@ const RefundReport = () => {
 
   useEffect(() => {
     fetchData();
-  }, [dateRange, currentPage, itemsPerPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, itemsPerPage]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+      console.log('🔍 Refund Report - Fetching data with dateRange:', dateRange);
+      
       const response = await getBillingData({
         startDate: dateRange.startDate || undefined,
-        endDate: dateRange.endDate || undefined
+        endDate: dateRange.endDate || undefined,
+        // Don't pass pagination params to get all bills
       });
       
+      console.log('🔍 Refund Report - API Response:', {
+        billsCount: response.bills?.length || 0,
+        firstFewBills: response.bills?.slice(0, 3)
+      });
+      
+      if (!response || !response.bills) {
+        console.warn('⚠️ Refund Report - No bills in response:', response);
+        setData([]);
+        setSummary({ totalRefunded: 0, totalRefundAmount: 0 });
+        return;
+      }
+      
       const allBills = response.bills || [];
+      console.log('🔍 Refund Report - Total bills received:', allBills.length);
+      
+      // Parse date range for filtering
+      let startDate = null;
+      let endDate = null;
+      if (dateRange.startDate) {
+        startDate = new Date(dateRange.startDate);
+        startDate.setHours(0, 0, 0, 0);
+      }
+      if (dateRange.endDate) {
+        endDate = new Date(dateRange.endDate);
+        endDate.setHours(23, 59, 59, 999);
+      }
+      
+      // Log first bill structure to debug
+      if (allBills.length > 0) {
+        console.log('🔍 Refund Report - Sample bill structure:', JSON.stringify(allBills[0], null, 2));
+        console.log('🔍 Refund Report - Sample bill refund fields:', {
+          refunds: allBills[0].refunds,
+          status: allBills[0].status,
+          refundedAmount: allBills[0].refundedAmount,
+          refundAmount: allBills[0].refundAmount
+        });
+      }
       
       // Extract individual refund entries
       const refundEntries = [];
       
       allBills.forEach(bill => {
-        // Check if bill has refunds array
+        // Check if bill has refunds array (most reliable source)
         if (bill.refunds && bill.refunds.length > 0) {
+          console.log(`✅ Found refunds array for bill ${bill.invoiceNumber || bill.billNo}:`, bill.refunds.length);
           bill.refunds.forEach(refund => {
+            const refundDate = refund.refundedAt || refund.date || refund.createdAt || bill.date || bill.cancelledAt;
+            const refundDateObj = new Date(refundDate);
+            
+            // Filter by date range if dates are provided
+            const isInRange = !startDate || !endDate || 
+              (refundDateObj >= startDate && refundDateObj <= endDate);
+            
+            if (isInRange) {
+              refundEntries.push({
+                refundedDate: refundDate,
+                patientId: bill.patientId || bill.uhId || 'N/A',
+                patientName: bill.patientName || 'N/A',
+                billNumber: bill.invoiceNumber || bill.billNo || 'N/A',
+                receiptNumber: refund.receiptNumber || bill.receiptNumber || 'N/A',
+                approvedBy: refund.approvedByName || refund.approvedBy || refund.refundedByName || refund.refundedBy || bill.refundedByName || bill.cancelledByName || bill.cancelledBy || 'N/A',
+                refundedBy: refund.refundedByName || refund.refundedBy || bill.refundedByName || bill.refundedBy || bill.cancelledByName || bill.cancelledBy || 'N/A',
+                totalAmount: bill.amount || 0,
+                paidAmount: bill.paidAmount || bill.amount || 0,
+                discount: bill.discountAmount || bill.discount || bill.discounts || 0,
+                refundAmount: refund.amount || 0,
+                comments: refund.refundReason || refund.notes || refund.refundNotes || refund.reason || bill.cancellationReason || ''
+              });
+            }
+          });
+        } 
+        // Check if bill has refundedAmount > 0 (even if status is 'cancelled' or 'refunded')
+        else if ((bill.refundedAmount && bill.refundedAmount > 0) || (bill.refundAmount && bill.refundAmount > 0)) {
+          const refundAmt = bill.refundedAmount || bill.refundAmount || 0;
+          const refundDate = bill.refundedAt || bill.cancelledAt || bill.date || bill.createdAt;
+          const refundDateObj = new Date(refundDate);
+          
+          // Filter by date range if dates are provided
+          const isInRange = !startDate || !endDate || 
+            (refundDateObj >= startDate && refundDateObj <= endDate);
+          
+          if (isInRange) {
+            console.log(`✅ Found refundedAmount for bill ${bill.invoiceNumber || bill.billNo}:`, refundAmt, 'Status:', bill.status);
             refundEntries.push({
-              refundedDate: refund.refundedAt || bill.date,
+              refundedDate: refundDate,
               patientId: bill.patientId || bill.uhId || 'N/A',
               patientName: bill.patientName || 'N/A',
               billNumber: bill.invoiceNumber || bill.billNo || 'N/A',
-              receiptNumber: refund.receiptNumber || bill.receiptNumber || 'N/A',
-              approvedBy: refund.approvedBy || refund.approvedByName || refund.refundedBy || refund.refundedByName || 'N/A',
-              refundedBy: refund.refundedBy || refund.refundedByName || 'N/A',
+              receiptNumber: bill.receiptNumber || 'N/A',
+              approvedBy: bill.refundedByName || bill.refundedBy || bill.cancelledByName || bill.cancelledBy || 'N/A',
+              refundedBy: bill.refundedByName || bill.refundedBy || bill.cancelledByName || bill.cancelledBy || 'N/A',
               totalAmount: bill.amount || 0,
               paidAmount: bill.paidAmount || bill.amount || 0,
-              discount: bill.discountAmount || bill.discount || 0,
-              refundAmount: refund.amount || 0,
-              comments: refund.refundReason || refund.notes || refund.refundNotes || ''
+              discount: bill.discountAmount || bill.discount || bill.discounts || 0,
+              refundAmount: refundAmt,
+              comments: bill.refundReason || bill.refundNotes || bill.cancellationReason || bill.notes || ''
             });
-          });
-        } else if (bill.status === 'refunded' || bill.status === 'partially_refunded') {
-          // If no refunds array but status indicates refund, create entry from bill level data
-          refundEntries.push({
-            refundedDate: bill.refundedAt || bill.date,
-            patientId: bill.patientId || bill.uhId || 'N/A',
-            patientName: bill.patientName || 'N/A',
-            billNumber: bill.invoiceNumber || bill.billNo || 'N/A',
-            receiptNumber: bill.receiptNumber || 'N/A',
-            approvedBy: bill.refundedBy || bill.refundedByName || 'N/A',
-            refundedBy: bill.refundedBy || bill.refundedByName || 'N/A',
-            totalAmount: bill.amount || 0,
-            paidAmount: bill.paidAmount || bill.amount || 0,
-            discount: bill.discountAmount || bill.discount || 0,
-            refundAmount: bill.refundedAmount || bill.refundAmount || 0,
-            comments: bill.refundReason || bill.refundNotes || bill.notes || ''
-          });
+          }
+        }
+        // Check if bill status is refunded or partially_refunded
+        else if (bill.status === 'refunded' || bill.status === 'partially_refunded') {
+          const refundDate = bill.refundedAt || bill.cancelledAt || bill.date || bill.createdAt;
+          const refundDateObj = new Date(refundDate);
+          
+          // Filter by date range if dates are provided
+          const isInRange = !startDate || !endDate || 
+            (refundDateObj >= startDate && refundDateObj <= endDate);
+          
+          if (isInRange) {
+            console.log(`✅ Found refund status for bill ${bill.invoiceNumber || bill.billNo}:`, bill.status);
+            refundEntries.push({
+              refundedDate: refundDate,
+              patientId: bill.patientId || bill.uhId || 'N/A',
+              patientName: bill.patientName || 'N/A',
+              billNumber: bill.invoiceNumber || bill.billNo || 'N/A',
+              receiptNumber: bill.receiptNumber || 'N/A',
+              approvedBy: bill.refundedByName || bill.refundedBy || bill.cancelledByName || bill.cancelledBy || 'N/A',
+              refundedBy: bill.refundedByName || bill.refundedBy || bill.cancelledByName || bill.cancelledBy || 'N/A',
+              totalAmount: bill.amount || 0,
+              paidAmount: bill.paidAmount || bill.amount || 0,
+              discount: bill.discountAmount || bill.discount || bill.discounts || 0,
+              refundAmount: bill.refundedAmount || bill.refundAmount || 0,
+              comments: bill.refundReason || bill.refundNotes || bill.cancellationReason || bill.notes || ''
+            });
+          }
+        }
+        // Check if bill is cancelled and has paidAmount > 0 (might indicate refund)
+        else if (bill.status === 'cancelled' && bill.paidAmount > 0) {
+          // Calculate refund as the difference between paid amount and any balance
+          // If bill was cancelled and fully paid, refund should be the paid amount
+          const potentialRefund = bill.paidAmount - (bill.balance || 0);
+          if (potentialRefund > 0) {
+            const refundDate = bill.refundedAt || bill.cancelledAt || bill.date || bill.createdAt;
+            const refundDateObj = new Date(refundDate);
+            
+            // Filter by date range if dates are provided
+            const isInRange = !startDate || !endDate || 
+              (refundDateObj >= startDate && refundDateObj <= endDate);
+            
+            if (isInRange) {
+              console.log(`✅ Found potential refund for cancelled bill ${bill.invoiceNumber || bill.billNo}:`, potentialRefund);
+              refundEntries.push({
+                refundedDate: refundDate,
+                patientId: bill.patientId || bill.uhId || 'N/A',
+                patientName: bill.patientName || 'N/A',
+                billNumber: bill.invoiceNumber || bill.billNo || 'N/A',
+                receiptNumber: bill.receiptNumber || 'N/A',
+                approvedBy: bill.refundedByName || bill.refundedBy || bill.cancelledByName || bill.cancelledBy || 'N/A',
+                refundedBy: bill.refundedByName || bill.refundedBy || bill.cancelledByName || bill.cancelledBy || 'N/A',
+                totalAmount: bill.amount || 0,
+                paidAmount: bill.paidAmount || bill.amount || 0,
+                discount: bill.discountAmount || bill.discount || bill.discounts || 0,
+                refundAmount: potentialRefund,
+                comments: bill.refundReason || bill.refundNotes || bill.cancellationReason || bill.notes || ''
+              });
+            }
+          }
         }
       });
+      
+      console.log('🔍 Refund Report - Refund entries found:', refundEntries.length);
+      console.log('🔍 Refund Report - Sample refund entry:', refundEntries[0]);
       
       // Sort by refunded date
       refundEntries.sort((a, b) => new Date(a.refundedDate) - new Date(b.refundedDate));
@@ -95,9 +219,16 @@ const RefundReport = () => {
         totalRefunded: refundEntries.length,
         totalRefundAmount
       });
+      
+      console.log('🔍 Refund Report - Final summary:', {
+        totalRefunded: refundEntries.length,
+        totalRefundAmount
+      });
     } catch (error) {
-      console.error('Error fetching refund report:', error);
-      toast.error('Failed to fetch refund report');
+      console.error('❌ Error fetching refund report:', error);
+      toast.error('Failed to fetch refund report: ' + (error.message || 'Unknown error'));
+      setData([]);
+      setSummary({ totalRefunded: 0, totalRefundAmount: 0 });
     } finally {
       setLoading(false);
     }
@@ -220,7 +351,10 @@ const RefundReport = () => {
             </div>
             <div className="flex items-end gap-2">
               <button
-                onClick={fetchData}
+                onClick={() => {
+                  setCurrentPage(1);
+                  fetchData();
+                }}
                 className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 <Filter className="mr-1 h-4 w-4" />

@@ -32,7 +32,8 @@ const CancellationAndRegeneratedReport = () => {
 
   useEffect(() => {
     fetchData();
-  }, [dateRange, currentPage, itemsPerPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, itemsPerPage]);
 
   const fetchData = async () => {
     try {
@@ -236,7 +237,10 @@ const CancellationAndRegeneratedReport = () => {
             </div>
             <div className="flex items-end gap-2">
               <button
-                onClick={fetchData}
+                onClick={() => {
+                  setCurrentPage(1);
+                  fetchData();
+                }}
                 className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 <Filter className="mr-1 h-4 w-4" />

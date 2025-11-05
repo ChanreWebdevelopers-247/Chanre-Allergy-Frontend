@@ -938,7 +938,7 @@ const CenterAdminBilling = () => {
     // Proportional discount = (360 / 460) * 46 = 36
     let proportionalDiscountOnRemoved = 0;
     if (originalSubTotal > 0 && removedSubTotal > 0 && originalDiscounts > 0) {
-      proportionalDiscountOnRemoved = (removedSubTotal / originalSubTotal) * originalDiscounts;
+      proportionalDiscountOnRemoved = (removedSubTotal / originalSubTotal) * originalDiscounts;   
     }
     
     // Calculate proportional tax for removed items (if applicable)

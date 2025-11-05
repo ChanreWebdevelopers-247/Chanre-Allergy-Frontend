@@ -79,7 +79,8 @@ const CollectionReport = () => {
 
   useEffect(() => {
     fetchData();
-  }, [dateRange, consultationType, currentPage, itemsPerPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consultationType, currentPage, itemsPerPage]);
 
   const fetchData = async () => {
     try {
@@ -123,13 +124,23 @@ const CollectionReport = () => {
         const billDate = new Date(bill.date || bill.createdAt);
         const isOldBill = startDate && billDate < startDate;
 
-        // Track refunds
+        // Track refunds - check multiple sources
         if (bill.refunds && bill.refunds.length > 0) {
           bill.refunds.forEach(refund => {
             totalRefund += refund.amount || 0;
           });
-        } else if (bill.status === 'refunded') {
+        } else if (bill.refundedAmount && bill.refundedAmount > 0) {
+          totalRefund += bill.refundedAmount;
+        } else if (bill.refundAmount && bill.refundAmount > 0) {
+          totalRefund += bill.refundAmount;
+        } else if (bill.status === 'refunded' || bill.status === 'partially_refunded') {
           totalRefund += bill.refundedAmount || bill.refundAmount || 0;
+        } else if (bill.status === 'cancelled' && bill.paidAmount > 0) {
+          // If bill is cancelled and was paid, calculate refund
+          const potentialRefund = bill.paidAmount - (bill.balance || 0);
+          if (potentialRefund > 0) {
+            totalRefund += potentialRefund;
+          }
         }
 
         // If bill has payment history, extract individual payments
@@ -411,7 +422,10 @@ const CollectionReport = () => {
             </div>
             <div className="flex items-end gap-2">
               <button
-                onClick={fetchData}
+                onClick={() => {
+                  setCurrentPage(1);
+                  fetchData();
+                }}
                 className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 <Filter className="mr-1 h-4 w-4" />

@@ -24,7 +24,8 @@ const CancellationReport = () => {
 
   useEffect(() => {
     fetchData();
-  }, [dateRange, consultationType, currentPage, itemsPerPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consultationType, currentPage, itemsPerPage]);
 
   const fetchData = async () => {
     try {
@@ -67,12 +68,12 @@ const CancellationReport = () => {
 
   const handleExport = () => {
     const csvData = [
-      ['Cancellation Report', '', '', '', '', '', '', '', '', '', ''],
-      ['Generated On', new Date().toLocaleString(), '', '', '', '', '', '', '', '', ''],
-      ['Date Range', `${dateRange.startDate || 'All'} to ${dateRange.endDate || 'All'}`, '', '', '', '', '', '', '', '', ''],
-      ['Consultation Type', consultationType || 'All', '', '', '', '', '', '', '', '', ''],
-      ['', '', '', '', '', '', '', '', '', '', ''],
-      ['S.No.', 'Date Created', 'Date Cancelled', 'Patient Id', 'Patient Name', 'Bill Number', 'Created By', 'Cancelled By', 'Sales Amount', 'DAAB Amount', 'comments']
+      ['Cancellation Report', '', '', '', '', '', '', '', '', ''],
+      ['Generated On', new Date().toLocaleString(), '', '', '', '', '', '', '', ''],
+      ['Date Range', `${dateRange.startDate || 'All'} to ${dateRange.endDate || 'All'}`, '', '', '', '', '', '', '', ''],
+      ['Consultation Type', consultationType || 'All', '', '', '', '', '', '', '', ''],
+      ['', '', '', '', '', '', '', '', '', ''],
+      ['S.No.', 'Date Created', 'Date Cancelled', 'Patient Id', 'Patient Name', 'Bill Number', 'Cancelled By', 'Sales Amount', 'DAAB Amount', 'comments']
     ];
 
     data.forEach((bill, index) => {
@@ -85,7 +86,6 @@ const CancellationReport = () => {
         bill.uhId || 'N/A',
         bill.patientName || 'N/A',
         bill.invoiceNumber || bill.billNo || 'N/A',
-        bill.createdByName || 'N/A',
         bill.cancelledByName || 'N/A',
         (bill.amount || 0).toFixed(2),
         (bill.discountAmount || 0).toFixed(2),
@@ -93,8 +93,8 @@ const CancellationReport = () => {
       ]);
     });
 
-    csvData.push(['', '', '', '', '', '', '', '', '', '', '']);
-    csvData.push(['Total :', '', '', '', '', '', '', '', summary.totalSalesAmount.toFixed(2), summary.totalDAABAmount.toFixed(2), '']);
+      csvData.push(['', '', '', '', '', '', '', '', '', '']);
+      csvData.push(['Total :', '', '', '', '', '', '', summary.totalSalesAmount.toFixed(2), summary.totalDAABAmount.toFixed(2), '']);
 
     const csvContent = csvData.map(row => 
       row.map(cell => `"${cell}"`).join(',')
@@ -208,7 +208,10 @@ const CancellationReport = () => {
             </div>
             <div className="flex items-end gap-2">
               <button
-                onClick={fetchData}
+                onClick={() => {
+                  setCurrentPage(1);
+                  fetchData();
+                }}
                 className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 <Filter className="mr-1 h-4 w-4" />
@@ -237,7 +240,6 @@ const CancellationReport = () => {
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Id</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Name</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bill Number</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created By</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cancelled By</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sales Amount</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">DAAB Amount</th>
@@ -247,7 +249,7 @@ const CancellationReport = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan="11" className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan="10" className="px-4 py-8 text-center text-sm text-gray-500">
                       No cancelled bills found for the selected period.
                     </td>
                   </tr>
@@ -266,7 +268,6 @@ const CancellationReport = () => {
                         <td className="px-4 py-2 text-sm font-medium text-slate-900">
                           {bill.invoiceNumber || bill.billNo || 'N/A'}
                         </td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.createdByName || 'N/A'}</td>
                         <td className="px-4 py-2 text-sm text-slate-700">{bill.cancelledByName || 'N/A'}</td>
                         <td className="px-4 py-2 text-sm font-medium text-slate-900">
                           {(bill.amount || 0).toFixed(2)}
@@ -283,7 +284,7 @@ const CancellationReport = () => {
                 )}
                 {paginatedData.length > 0 && (
                   <tr className="bg-gray-50 font-bold">
-                    <td colSpan="8" className="px-4 py-2 text-sm font-bold text-slate-900 text-right">Total :</td>
+                    <td colSpan="7" className="px-4 py-2 text-sm font-bold text-slate-900 text-right">Total :</td>
                     <td className="px-4 py-2 text-sm font-bold text-slate-900">{summary.totalSalesAmount.toFixed(2)}</td>
                     <td className="px-4 py-2 text-sm font-bold text-slate-900">{summary.totalDAABAmount.toFixed(2)}</td>
                     <td className="px-4 py-2"></td>
