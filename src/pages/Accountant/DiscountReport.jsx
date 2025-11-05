@@ -15,11 +15,25 @@ const DiscountReport = () => {
   });
   const [summary, setSummary] = useState({
     totalDiscount: 0,
-    totalBills: 0,
-    averageDiscount: 0
+    totalBills: 0
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const formattedHours = String(hours).padStart(2, '0');
+    return `${day}-${month}-${year} ${formattedHours}:${minutes} ${ampm}`;
+  };
 
   useEffect(() => {
     fetchData();
@@ -34,30 +48,43 @@ const DiscountReport = () => {
       });
       
       // Filter bills with discounts
-      const billsWithDiscount = response.bills?.filter(bill => 
-        (bill.discount && bill.discount > 0) || 
-        (bill.customData?.discountPercentage && bill.customData.discountPercentage > 0)
-      ) || [];
-      
-      setData(billsWithDiscount);
-      
-      const totalDiscount = billsWithDiscount.reduce((sum, bill) => {
-        const discountAmount = bill.discount || 0;
+      const billsWithDiscount = response.bills?.filter(bill => {
+        const discountAmount = bill.discountAmount || bill.discount || 0;
         const discountPercentage = bill.customData?.discountPercentage || 0;
         const billAmount = bill.amount || 0;
-        
-        if (discountPercentage > 0) {
-          return sum + (billAmount * discountPercentage / 100);
-        }
-        return sum + discountAmount;
-      }, 0);
+        const calculatedDiscount = discountPercentage > 0 ? (billAmount * discountPercentage / 100) : discountAmount;
+        return calculatedDiscount > 0;
+      }) || [];
       
-      const averageDiscount = billsWithDiscount.length > 0 ? totalDiscount / billsWithDiscount.length : 0;
+      // Format data for display
+      const formattedData = billsWithDiscount.map(bill => {
+        const discountAmount = bill.discountAmount || bill.discount || 0;
+        const discountPercentage = bill.customData?.discountPercentage || 0;
+        const totalAmount = bill.amount || 0;
+        const calculatedDiscount = discountPercentage > 0 ? (totalAmount * discountPercentage / 100) : discountAmount;
+        const paidAmount = bill.paidAmount || (totalAmount - calculatedDiscount);
+        
+        return {
+          ...bill,
+          date: bill.date || bill.createdAt,
+          patientId: bill.patientId || bill.uhId || 'N/A',
+          patientName: bill.patientName || 'N/A',
+          userName: bill.createdByName || bill.generatedByName || 'N/A',
+          totalAmount,
+          discount: calculatedDiscount,
+          paidAmount,
+          paymentStatus: bill.status === 'paid' ? 'Paid' : bill.status === 'pending' ? 'Pending' : bill.status === 'partially_paid' ? 'Partially Paid' : bill.status || 'Pending',
+          remarks: bill.notes || bill.customData?.discountReason || bill.discountReason || ''
+        };
+      });
+      
+      setData(formattedData);
+      
+      const totalDiscount = formattedData.reduce((sum, bill) => sum + (bill.discount || 0), 0);
       
       setSummary({
         totalDiscount,
-        totalBills: billsWithDiscount.length,
-        averageDiscount
+        totalBills: formattedData.length
       });
     } catch (error) {
       console.error('Error fetching discount report:', error);
@@ -68,37 +95,30 @@ const DiscountReport = () => {
   };
 
   const handleExport = () => {
+    const dateRangeText = dateRange.startDate && dateRange.endDate 
+      ? `${dateRange.startDate} to ${dateRange.endDate}`
+      : 'All';
+    
     const csvData = [
-      ['Discount Report', '', '', '', '', '', '', ''],
-      ['Generated On', new Date().toLocaleString(), '', '', '', '', '', ''],
-      ['Date Range', `${dateRange.startDate || 'All'} to ${dateRange.endDate || 'All'}`, '', '', '', '', '', ''],
-      ['', '', '', '', '', '', '', ''],
-      ['Invoice Number', 'Patient Name', 'UH ID', 'Bill Type', 'Original Amount', 'Discount Amount', 'Final Amount', 'Date']
+      ['Discount Report', dateRangeText],
+      ['', ''],
+      ['S.No.', 'Date', 'Patient Id', 'Patient Name', 'User', 'Total Amount', 'Discount', 'Paid Amount', 'Payment Status', 'Remarks']
     ];
 
-    data.forEach(bill => {
-      const discountAmount = bill.discount || 0;
-      const discountPercentage = bill.customData?.discountPercentage || 0;
-      const billAmount = bill.amount || 0;
-      const finalDiscount = discountPercentage > 0 ? (billAmount * discountPercentage / 100) : discountAmount;
-      const finalAmount = billAmount - finalDiscount;
-      
+    data.forEach((bill, index) => {
       csvData.push([
-        bill.invoiceNumber || bill.billNo || 'N/A',
-        bill.patientName || 'N/A',
-        bill.uhId || 'N/A',
-        bill.billType || 'N/A',
-        billAmount,
-        finalDiscount,
-        finalAmount,
-        new Date(bill.date).toLocaleDateString()
+        index + 1,
+        formatDateTime(bill.date),
+        bill.patientId,
+        bill.patientName,
+        bill.userName,
+        (bill.totalAmount || 0).toFixed(2),
+        (bill.discount || 0).toFixed(2),
+        (bill.paidAmount || 0).toFixed(2),
+        bill.paymentStatus,
+        bill.remarks
       ]);
     });
-
-    csvData.push(['', '', '', '', '', '', '', '']);
-    csvData.push(['Total Bills with Discount', summary.totalBills, '', '', '', '', '', '']);
-    csvData.push(['Total Discount Given', summary.totalDiscount, '', '', '', '', '', '']);
-    csvData.push(['Average Discount', summary.averageDiscount.toFixed(2), '', '', '', '', '', '']);
 
     const csvContent = csvData.map(row => 
       row.map(cell => `"${cell}"`).join(',')
@@ -130,7 +150,11 @@ const DiscountReport = () => {
         {/* Header */}
         <div className="mb-4">
           <h1 className="text-lg font-bold text-slate-800">Discount Report</h1>
-          <p className="text-xs text-slate-600 mt-1">View all bills with discounts applied</p>
+          <p className="text-xs text-slate-600 mt-1">
+            {dateRange.startDate && dateRange.endDate 
+              ? `${dateRange.startDate} to ${dateRange.endDate}`
+              : 'View all bills with discounts applied'}
+          </p>
           {user?.centerId && (
             <div className="mt-2">
               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
@@ -142,12 +166,12 @@ const DiscountReport = () => {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           <div className="bg-white rounded-lg shadow-sm p-4 border border-green-100">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium text-slate-600 uppercase">Total Discount Given</p>
-                <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.totalDiscount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+                <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.totalDiscount.toFixed(2)}</p>
               </div>
               <Percent className="h-8 w-8 text-green-500" />
             </div>
@@ -159,15 +183,6 @@ const DiscountReport = () => {
                 <p className="text-xl font-bold text-slate-800 mt-1">{summary.totalBills}</p>
               </div>
               <Percent className="h-8 w-8 text-blue-500" />
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm p-4 border border-purple-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-slate-600 uppercase">Average Discount</p>
-                <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.averageDiscount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
-              </div>
-              <Percent className="h-8 w-8 text-purple-500" />
             </div>
           </div>
         </div>
@@ -218,55 +233,50 @@ const DiscountReport = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">UH ID</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bill Type</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Original Amount</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Final Amount</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">S.No.</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Id</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Name</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total Amount</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Paid Amount</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Payment Status</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan="10" className="px-4 py-8 text-center text-sm text-gray-500">
                       No bills with discounts found for the selected period.
                     </td>
                   </tr>
                 ) : (
-                  paginatedData.map((bill) => {
-                    const discountAmount = bill.discount || 0;
-                    const discountPercentage = bill.customData?.discountPercentage || 0;
-                    const billAmount = bill.amount || 0;
-                    const finalDiscount = discountPercentage > 0 ? (billAmount * discountPercentage / 100) : discountAmount;
-                    const finalAmount = billAmount - finalDiscount;
-                    
+                  paginatedData.map((bill, index) => {
+                    const globalIndex = (currentPage - 1) * itemsPerPage + index;
                     return (
-                      <tr key={bill._id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-sm font-medium text-slate-900">
-                          {bill.invoiceNumber || bill.billNo || 'N/A'}
-                        </td>
+                      <tr key={bill._id || index} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 text-sm text-slate-700">{globalIndex + 1}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{formatDateTime(bill.date)}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{bill.patientId}</td>
                         <td className="px-4 py-2 text-sm text-slate-700">{bill.patientName}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.uhId}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{bill.userName}</td>
+                        <td className="px-4 py-2 text-sm text-slate-900">{(bill.totalAmount || 0).toFixed(2)}</td>
+                        <td className="px-4 py-2 text-sm font-medium text-green-600">
+                          {(bill.discount || 0).toFixed(2)}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-slate-900">{(bill.paidAmount || 0).toFixed(2)}</td>
                         <td className="px-4 py-2">
-                          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700">
-                            {bill.billType}
+                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                            bill.paymentStatus === 'Paid' ? 'bg-green-100 text-green-800' :
+                            bill.paymentStatus === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {bill.paymentStatus}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-sm text-slate-900">
-                          ₹{billAmount.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-2 text-sm font-medium text-green-600">
-                          {discountPercentage > 0 ? `${discountPercentage}%` : ''} ₹{finalDiscount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-4 py-2 text-sm font-medium text-slate-900">
-                          ₹{finalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-slate-600">
-                          {new Date(bill.date).toLocaleDateString()}
-                        </td>
+                        <td className="px-4 py-2 text-sm text-slate-600">{bill.remarks}</td>
                       </tr>
                     );
                   })

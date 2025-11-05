@@ -15,6 +15,7 @@ const CategoryWiseReport = () => {
   });
   const [summary, setSummary] = useState({
     consultation: { count: 0, amount: 0 },
+    superconsultant: { count: 0, amount: 0 },
     reassignment: { count: 0, amount: 0 },
     lab: { count: 0, amount: 0 }
   });
@@ -37,6 +38,7 @@ const CategoryWiseReport = () => {
       setData(bills);
       
       const consultation = bills.filter(b => b.billType === 'Consultation' && b.status !== 'cancelled' && b.status !== 'refunded');
+      const superconsultant = bills.filter(b => b.billType === 'Superconsultant' && b.status !== 'cancelled' && b.status !== 'refunded');
       const reassignment = bills.filter(b => b.billType === 'Reassignment' && b.status !== 'cancelled' && b.status !== 'refunded');
       const lab = bills.filter(b => b.billType === 'Lab/Test' && b.status !== 'cancelled' && b.status !== 'refunded');
       
@@ -44,6 +46,10 @@ const CategoryWiseReport = () => {
         consultation: {
           count: consultation.length,
           amount: consultation.reduce((sum, b) => sum + (b.amount || 0), 0)
+        },
+        superconsultant: {
+          count: superconsultant.length,
+          amount: superconsultant.reduce((sum, b) => sum + (b.amount || 0), 0)
         },
         reassignment: {
           count: reassignment.length,
@@ -71,11 +77,12 @@ const CategoryWiseReport = () => {
       ['Category', 'Bill Count', 'Total Amount', 'Average Amount', 'Percentage']
     ];
 
-    const totalAmount = summary.consultation.amount + summary.reassignment.amount + summary.lab.amount;
-    const totalCount = summary.consultation.count + summary.reassignment.count + summary.lab.count;
+    const totalAmount = summary.consultation.amount + summary.superconsultant.amount + summary.reassignment.amount + summary.lab.amount;
+    const totalCount = summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count;
 
     const categories = [
       { name: 'Consultation', ...summary.consultation },
+      { name: 'Superconsultant', ...summary.superconsultant },
       { name: 'Reassignment', ...summary.reassignment },
       { name: 'Lab/Test', ...summary.lab }
     ];
@@ -108,7 +115,7 @@ const CategoryWiseReport = () => {
     toast.success('Report exported successfully!');
   };
 
-  const totalAmount = summary.consultation.amount + summary.reassignment.amount + summary.lab.amount;
+  const totalAmount = summary.consultation.amount + summary.superconsultant.amount + summary.reassignment.amount + summary.lab.amount;
   const totalPages = Math.ceil(data.length / itemsPerPage);
   const paginatedData = data.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
@@ -138,7 +145,7 @@ const CategoryWiseReport = () => {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-white rounded-lg shadow-sm p-4 border border-blue-100">
             <div className="flex items-center justify-between mb-2">
               <Tag className="h-6 w-6 text-blue-500" />
@@ -153,6 +160,24 @@ const CategoryWiseReport = () => {
             {totalAmount > 0 && (
               <p className="text-xs text-slate-600 mt-1">
                 {((summary.consultation.amount / totalAmount) * 100).toFixed(2)}% of total
+              </p>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm p-4 border border-teal-100">
+            <div className="flex items-center justify-between mb-2">
+              <Tag className="h-6 w-6 text-teal-500" />
+              <span className="px-2 py-1 text-xs font-semibold rounded-full bg-teal-100 text-teal-800">
+                Superconsultant
+              </span>
+            </div>
+            <p className="text-xs font-medium text-slate-600 uppercase mb-1">Total Bills</p>
+            <p className="text-xl font-bold text-slate-800 mb-1">{summary.superconsultant.count}</p>
+            <p className="text-xs font-medium text-slate-600 uppercase mb-1">Total Amount</p>
+            <p className="text-lg font-bold text-slate-800">₹{summary.superconsultant.amount.toLocaleString()}</p>
+            {totalAmount > 0 && (
+              <p className="text-xs text-slate-600 mt-1">
+                {((summary.superconsultant.amount / totalAmount) * 100).toFixed(2)}% of total
               </p>
             )}
           </div>
@@ -250,6 +275,7 @@ const CategoryWiseReport = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {[
                   { name: 'Consultation', ...summary.consultation, color: 'blue' },
+                  { name: 'Superconsultant', ...summary.superconsultant, color: 'teal' },
                   { name: 'Reassignment', ...summary.reassignment, color: 'orange' },
                   { name: 'Lab/Test', ...summary.lab, color: 'purple' }
                 ].map((cat, index) => {
@@ -283,12 +309,12 @@ const CategoryWiseReport = () => {
                 <tr className="bg-gray-50 font-bold">
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">TOTAL</td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">
-                    {summary.consultation.count + summary.reassignment.count + summary.lab.count}
+                    {summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count}
                   </td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">₹{totalAmount.toLocaleString()}</td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">
-                    ₹{((summary.consultation.count + summary.reassignment.count + summary.lab.count) > 0 
-                      ? (totalAmount / (summary.consultation.count + summary.reassignment.count + summary.lab.count)).toFixed(2)
+                    ₹{((summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count) > 0 
+                      ? (totalAmount / (summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count)).toFixed(2)
                       : 0)}
                   </td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">100%</td>

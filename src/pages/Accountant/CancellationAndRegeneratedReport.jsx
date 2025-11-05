@@ -14,13 +14,21 @@ const CancellationAndRegeneratedReport = () => {
     endDate: ''
   });
   const [summary, setSummary] = useState({
-    totalCancelled: 0,
-    totalRegenerated: 0,
-    cancelledAmount: 0,
-    regeneratedAmount: 0
+    totalCancelledAmount: 0,
+    totalRegeneratedAmount: 0,
+    difference: 0
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
 
   useEffect(() => {
     fetchData();
@@ -36,25 +44,55 @@ const CancellationAndRegeneratedReport = () => {
       
       const allBills = response.bills || [];
       
-      // Find bills that were cancelled and then regenerated
+      // Find cancelled bills
       const cancelledBills = allBills.filter(bill => bill.status === 'cancelled');
+      
+      // Find regenerated bills (bills created after cancellation for same patient)
       const regeneratedBills = allBills.filter(bill => 
-        bill.status === 'paid' || bill.status === 'pending' || bill.status === 'partially_paid'
+        bill.status !== 'cancelled' && bill.status !== 'refunded'
       );
       
-      // Match cancelled bills with regenerated ones (same patient, similar date)
+      // Match cancelled bills with regenerated ones
       const matchedBills = [];
       
       cancelledBills.forEach(cancelled => {
-        const regenerated = regeneratedBills.find(reg => 
-          reg.patientId?.toString() === cancelled.patientId?.toString() &&
-          Math.abs(new Date(reg.date) - new Date(cancelled.date)) < 7 * 24 * 60 * 60 * 1000 // Within 7 days
-        );
+        // Find regenerated bills for same patient created after cancellation
+        const regenerated = regeneratedBills
+          .filter(reg => {
+            const samePatient = reg.patientId?.toString() === cancelled.patientId?.toString();
+            const afterCancellation = cancelled.cancelledAt 
+              ? new Date(reg.createdAt || reg.date) >= new Date(cancelled.cancelledAt)
+              : new Date(reg.createdAt || reg.date) >= new Date(cancelled.date);
+            const withinReasonableTime = Math.abs(
+              new Date(reg.createdAt || reg.date) - new Date(cancelled.cancelledAt || cancelled.date)
+            ) < 30 * 24 * 60 * 60 * 1000; // Within 30 days
+            
+            return samePatient && afterCancellation && withinReasonableTime;
+          })
+          .sort((a, b) => new Date(a.createdAt || a.date) - new Date(b.createdAt || b.date))[0]; // Get earliest regenerated bill
         
         if (regenerated) {
+          // Format service items
+          const oldItems = cancelled.services?.map(s => s.name || s.serviceName || s.description || '').join(', ') || cancelled.description || 'N/A';
+          const newItems = regenerated.services?.map(s => s.name || s.serviceName || s.description || '').join(', ') || regenerated.description || 'N/A';
+          
           matchedBills.push({
-            cancelledBill: cancelled,
-            regeneratedBill: regenerated,
+            cancelledBill: {
+              ...cancelled,
+              orderDate: cancelled.createdAt || cancelled.date,
+              canDate: cancelled.cancelledAt || cancelled.date,
+              canBillNo: cancelled.invoiceNumber || cancelled.billNo || 'N/A',
+              canBy: cancelled.cancelledByName || 'N/A',
+              comments: cancelled.cancellationReason || '',
+              oldItems
+            },
+            regeneratedBill: {
+              ...regenerated,
+              orderDate: regenerated.createdAt || regenerated.date,
+              newBillNo: regenerated.invoiceNumber || regenerated.billNo || 'N/A',
+              createdBy: regenerated.createdByName || 'N/A',
+              newItems
+            },
             patientName: cancelled.patientName,
             uhId: cancelled.uhId
           });
@@ -63,14 +101,14 @@ const CancellationAndRegeneratedReport = () => {
       
       setData(matchedBills);
       
-      const cancelledAmount = cancelledBills.reduce((sum, bill) => sum + (bill.amount || 0), 0);
-      const regeneratedAmount = matchedBills.reduce((sum, item) => sum + (item.regeneratedBill.amount || 0), 0);
+      const totalCancelledAmount = matchedBills.reduce((sum, item) => sum + (item.cancelledBill.amount || 0), 0);
+      const totalRegeneratedAmount = matchedBills.reduce((sum, item) => sum + (item.regeneratedBill.amount || 0), 0);
+      const difference = totalRegeneratedAmount - totalCancelledAmount;
       
       setSummary({
-        totalCancelled: cancelledBills.length,
-        totalRegenerated: matchedBills.length,
-        cancelledAmount,
-        regeneratedAmount
+        totalCancelledAmount,
+        totalRegeneratedAmount,
+        difference
       });
     } catch (error) {
       console.error('Error fetching cancellation and regenerated report:', error);
@@ -82,33 +120,35 @@ const CancellationAndRegeneratedReport = () => {
 
   const handleExport = () => {
     const csvData = [
-      ['Cancellation and Regenerated Report', '', '', '', '', '', '', '', ''],
-      ['Generated On', new Date().toLocaleString(), '', '', '', '', '', '', ''],
-      ['Date Range', `${dateRange.startDate || 'All'} to ${dateRange.endDate || 'All'}`, '', '', '', '', '', '', ''],
-      ['', '', '', '', '', '', '', '', ''],
-      ['Patient Name', 'UH ID', 'Cancelled Invoice', 'Cancelled Amount', 'Cancelled Date', 'Regenerated Invoice', 'Regenerated Amount', 'Regenerated Date', 'Net Difference']
+      ['Cancel & Regenerate Report', '', '', '', '', '', '', '', '', '', ''],
+      ['Date Range', `${dateRange.startDate || 'All'} to ${dateRange.endDate || 'All'}`, '', '', '', '', '', '', '', '', ''],
+      ['', '', '', '', '', '', '', '', '', '', ''],
+      ['Cancelled Bill Details', '', '', '', '', '', 'New Bill Details', '', '', '', ''],
+      ['S.No.', 'Order Date', 'Can. Date', 'Can. Bill No', 'Can. By', 'Comments', 'Order Date', 'New Bill No', 'Created by', 'Old Items', 'New Items']
     ];
 
-    data.forEach(item => {
-      const netDiff = (item.regeneratedBill.amount || 0) - (item.cancelledBill.amount || 0);
+    data.forEach((item, index) => {
       csvData.push([
-        item.patientName || 'N/A',
-        item.uhId || 'N/A',
-        item.cancelledBill.invoiceNumber || item.cancelledBill.billNo || 'N/A',
-        item.cancelledBill.amount || 0,
-        new Date(item.cancelledBill.date).toLocaleDateString(),
-        item.regeneratedBill.invoiceNumber || item.regeneratedBill.billNo || 'N/A',
-        item.regeneratedBill.amount || 0,
-        new Date(item.regeneratedBill.date).toLocaleDateString(),
-        netDiff
+        index + 1,
+        formatDate(item.cancelledBill.orderDate),
+        formatDate(item.cancelledBill.canDate),
+        item.cancelledBill.canBillNo,
+        item.cancelledBill.canBy,
+        item.cancelledBill.comments,
+        formatDate(item.regeneratedBill.orderDate),
+        item.regeneratedBill.newBillNo,
+        item.regeneratedBill.createdBy,
+        item.cancelledBill.oldItems,
+        item.regeneratedBill.newItems
       ]);
     });
 
-    csvData.push(['', '', '', '', '', '', '', '', '']);
-    csvData.push(['Total Cancelled Bills', summary.totalCancelled, '', '', '', '', '', '', '']);
-    csvData.push(['Total Regenerated Bills', summary.totalRegenerated, '', '', '', '', '', '', '']);
-    csvData.push(['Total Cancelled Amount', summary.cancelledAmount, '', '', '', '', '', '', '']);
-    csvData.push(['Total Regenerated Amount', summary.regeneratedAmount, '', '', '', '', '', '', '']);
+    csvData.push(['', '', '', '', '', '', '', '', '', '', '']);
+    csvData.push(['Grand Total', summary.totalCancelledAmount.toFixed(2), '', '', '', '', summary.totalRegeneratedAmount.toFixed(2), '', '', '', '']);
+    csvData.push(['Difference', summary.difference.toFixed(2), '', '', '', '', '', '', '', '', '']);
+    csvData.push(['', '', '', '', '', '', '', '', '', '', '']);
+    csvData.push(['## - Bill Amount inclusive of Discount', '', '', '', '', '', '', '', '', '', '']);
+    csvData.push(['Printed at', new Date().toLocaleString(), 'by', user?.name || 'User', '', '', '', '', '', '', '']);
 
     const csvContent = csvData.map(row => 
       row.map(cell => `"${cell}"`).join(',')
@@ -117,7 +157,7 @@ const CancellationAndRegeneratedReport = () => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `cancellation_regenerated_report_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `cancel_regenerate_report_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     
     toast.success('Report exported successfully!');
@@ -139,8 +179,12 @@ const CancellationAndRegeneratedReport = () => {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-4">
-          <h1 className="text-lg font-bold text-slate-800">Cancellation and Regenerated Report</h1>
-          <p className="text-xs text-slate-600 mt-1">View bills that were cancelled and then regenerated</p>
+          <h1 className="text-lg font-bold text-slate-800">Cancel & Regenerate Report</h1>
+          <p className="text-xs text-slate-600 mt-1">
+            {dateRange.startDate && dateRange.endDate 
+              ? `from ${dateRange.startDate} to ${dateRange.endDate}`
+              : 'View bills that were cancelled and then regenerated'}
+          </p>
           {user?.centerId && (
             <div className="mt-2">
               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
@@ -152,22 +196,20 @@ const CancellationAndRegeneratedReport = () => {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <div className="bg-white rounded-lg shadow-sm p-4 border border-red-100">
-            <p className="text-xs font-medium text-slate-600 uppercase">Cancelled Bills</p>
-            <p className="text-xl font-bold text-slate-800 mt-1">{summary.totalCancelled}</p>
+            <p className="text-xs font-medium text-slate-600 uppercase">Total Cancelled Amount</p>
+            <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.totalCancelledAmount.toFixed(2)}</p>
           </div>
           <div className="bg-white rounded-lg shadow-sm p-4 border border-green-100">
-            <p className="text-xs font-medium text-slate-600 uppercase">Regenerated Bills</p>
-            <p className="text-xl font-bold text-slate-800 mt-1">{summary.totalRegenerated}</p>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm p-4 border border-orange-100">
-            <p className="text-xs font-medium text-slate-600 uppercase">Cancelled Amount</p>
-            <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.cancelledAmount.toLocaleString()}</p>
+            <p className="text-xs font-medium text-slate-600 uppercase">Total Regenerated Amount</p>
+            <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.totalRegeneratedAmount.toFixed(2)}</p>
           </div>
           <div className="bg-white rounded-lg shadow-sm p-4 border border-blue-100">
-            <p className="text-xs font-medium text-slate-600 uppercase">Regenerated Amount</p>
-            <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.regeneratedAmount.toLocaleString()}</p>
+            <p className="text-xs font-medium text-slate-600 uppercase">Difference</p>
+            <p className={`text-xl font-bold mt-1 ${summary.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              ₹{summary.difference.toFixed(2)}
+            </p>
           </div>
         </div>
 
@@ -217,53 +259,94 @@ const CancellationAndRegeneratedReport = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">UH ID</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cancelled Invoice</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cancelled Amount</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Regenerated Invoice</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Regenerated Amount</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Net Difference</th>
+                  <th colSpan="6" className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-red-50 border-r-2 border-gray-300">
+                    Cancelled Bill Details
+                  </th>
+                  <th colSpan="5" className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-green-50">
+                    New Bill Details
+                  </th>
+                </tr>
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">S.No.</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Can. Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Can. Bill No</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Can. By</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase border-r-2 border-gray-300">Comments</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Bill No</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created by</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Old Items</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Items</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan="11" className="px-4 py-8 text-center text-sm text-gray-500">
                       No cancelled and regenerated bills found for the selected period.
                     </td>
                   </tr>
                 ) : (
                   paginatedData.map((item, index) => {
-                    const netDiff = (item.regeneratedBill.amount || 0) - (item.cancelledBill.amount || 0);
+                    const globalIndex = (currentPage - 1) * itemsPerPage + index;
                     return (
                       <tr key={index} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-sm font-medium text-slate-900">{item.patientName}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{item.uhId}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">
-                          {item.cancelledBill.invoiceNumber || item.cancelledBill.billNo || 'N/A'}
+                        <td className="px-4 py-2 text-sm text-slate-700">{globalIndex + 1}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{formatDate(item.cancelledBill.orderDate)}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{formatDate(item.cancelledBill.canDate)}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.cancelledBill.canBillNo}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.cancelledBill.canBy}</td>
+                        <td className="px-4 py-2 text-sm text-slate-600 border-r-2 border-gray-300">{item.cancelledBill.comments}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{formatDate(item.regeneratedBill.orderDate)}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.regeneratedBill.newBillNo}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.regeneratedBill.createdBy}</td>
+                        <td className="px-4 py-2 text-sm text-slate-600 max-w-xs truncate" title={item.cancelledBill.oldItems}>
+                          {item.cancelledBill.oldItems}
                         </td>
-                        <td className="px-4 py-2 text-sm font-medium text-red-600">
-                          ₹{(item.cancelledBill.amount || 0).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-slate-700">
-                          {item.regeneratedBill.invoiceNumber || item.regeneratedBill.billNo || 'N/A'}
-                        </td>
-                        <td className="px-4 py-2 text-sm font-medium text-green-600">
-                          ₹{(item.regeneratedBill.amount || 0).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-2 text-sm font-medium">
-                          <span className={netDiff >= 0 ? 'text-green-600' : 'text-red-600'}>
-                            ₹{netDiff.toLocaleString()}
-                          </span>
+                        <td className="px-4 py-2 text-sm text-slate-600 max-w-xs truncate" title={item.regeneratedBill.newItems}>
+                          {item.regeneratedBill.newItems}
                         </td>
                       </tr>
                     );
                   })
                 )}
+                {paginatedData.length > 0 && (
+                  <>
+                    <tr className="bg-gray-50 font-bold">
+                      <td colSpan="5" className="px-4 py-2 text-sm font-bold text-slate-900 text-right">Grand Total</td>
+                      <td className="px-4 py-2 text-sm font-bold text-slate-900 border-r-2 border-gray-300">
+                        {(summary.totalCancelledAmount || 0).toFixed(2)}
+                      </td>
+                      <td colSpan="4" className="px-4 py-2"></td>
+                      <td className="px-4 py-2 text-sm font-bold text-slate-900">
+                        {(summary.totalRegeneratedAmount || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr className="bg-gray-50 font-bold">
+                      <td colSpan="5" className="px-4 py-2 text-sm font-bold text-slate-900 text-right">Difference</td>
+                      <td className={`px-4 py-2 text-sm font-bold border-r-2 border-gray-300 ${summary.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {summary.difference.toFixed(2)}
+                      </td>
+                      <td colSpan="5" className="px-4 py-2"></td>
+                    </tr>
+                  </>
+                )}
               </tbody>
             </table>
           </div>
+          
+          {/* Footer */}
+          {paginatedData.length > 0 && (
+            <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+              <p className="text-xs text-gray-600 text-center">
+                ## - Bill Amount inclusive of Discount
+              </p>
+              <p className="text-xs text-gray-500 text-center mt-1">
+                Printed at {new Date().toLocaleString()} by {user?.name || 'User'}
+              </p>
+            </div>
+          )}
           
           {data.length > 0 && (
             <Pagination
