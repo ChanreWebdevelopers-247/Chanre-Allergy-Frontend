@@ -66,104 +66,159 @@ const DiscountReport = () => {
       const allBills = response.bills || [];
       console.log('🔍 Discount Report - Total bills received:', allBills.length);
       
+      // Apply date range filtering if dates are provided (frontend safety check)
+      let filteredBills = allBills;
+      if (dateRange.startDate || dateRange.endDate) {
+        const startDate = dateRange.startDate ? new Date(dateRange.startDate) : null;
+        const endDate = dateRange.endDate ? new Date(dateRange.endDate) : null;
+        if (startDate) startDate.setHours(0, 0, 0, 0);
+        if (endDate) endDate.setHours(23, 59, 59, 999);
+        
+        filteredBills = allBills.filter(bill => {
+          const billDate = new Date(bill.date || bill.createdAt || bill.generatedAt);
+          const matchesStart = !startDate || billDate >= startDate;
+          const matchesEnd = !endDate || billDate <= endDate;
+          return matchesStart && matchesEnd;
+        });
+        console.log('🔍 Discount Report - Bills after date filtering:', filteredBills.length);
+      }
+      
       // Log first bill structure to debug
-      if (allBills.length > 0) {
-        console.log('🔍 Discount Report - Sample bill structure:', JSON.stringify(allBills[0], null, 2));
+      if (filteredBills.length > 0) {
+        console.log('🔍 Discount Report - Sample bill structure:', JSON.stringify(filteredBills[0], null, 2));
         console.log('🔍 Discount Report - Sample bill discount fields:', {
-          discountAmount: allBills[0].discountAmount,
-          discount: allBills[0].discount,
-          customData: allBills[0].customData,
-          services: allBills[0].services,
-          amount: allBills[0].amount,
-          paidAmount: allBills[0].paidAmount
+          discountAmount: filteredBills[0].discountAmount,
+          discountPercentage: filteredBills[0].discountPercentage,
+          discountReason: filteredBills[0].discountReason,
+          customData: filteredBills[0].customData,
+          services: filteredBills[0].services,
+          amount: filteredBills[0].amount,
+          paidAmount: filteredBills[0].paidAmount
         });
       }
       
       // Filter bills with discounts - check multiple discount fields and calculations
-      const billsWithDiscount = allBills.filter(bill => {
-        // Check all possible discount field names
-        const discountAmount = bill.discountAmount || bill.discount || bill.discounts || 0;
-        const discountPercentage = bill.customData?.discountPercentage || bill.discountPercentage || 0;
+      const billsWithDiscount = filteredBills.filter((bill, index) => {
         const billAmount = bill.amount || 0;
         const paidAmount = bill.paidAmount || 0;
         
-        // Calculate discount if percentage is provided
-        const calculatedDiscount = discountPercentage > 0 ? (billAmount * discountPercentage / 100) : discountAmount;
+        // Check all possible discount field names from all billing types
+        // Regular billing fields
+        const discountAmount = bill.discountAmount || bill.discount || 0;
+        const discountPercentage = bill.discountPercentage || 0;
+        const discountReason = bill.discountReason || '';
         
-        // Also check if there's a discount based on difference between amount and what should be paid
-        // Some invoices might have discount stored as difference: amount - (actual charged amount)
-        // Check if customData has discount information
-        const customDiscount = bill.customData?.discount || bill.customData?.discountAmount || bill.customData?.discounts || 0;
+        // Reassignment/Superconsultant billing fields (from customData)
+        const customDiscountAmount = bill.customData?.discountAmount || bill.customData?.discount || 0;
+        const customDiscountPercentage = bill.customData?.discountPercentage || 0;
+        const customDiscountReason = bill.customData?.discountReason || bill.customData?.discountNotes || '';
         
-        // Check if the discount is stored in the invoice-level discount field (singular or plural)
-        const invoiceDiscount = bill.discount || bill.discounts || 0;
+        // Combined discount values (check all sources)
+        const totalDiscountAmount = discountAmount || customDiscountAmount || 0;
+        const totalDiscountPercentage = discountPercentage || customDiscountPercentage || 0;
+        const totalDiscountReason = discountReason || customDiscountReason || '';
         
-        // Check if services total differs from invoice amount (indicates discount)
-        let servicesTotal = 0;
-        if (bill.services && bill.services.length > 0) {
-          servicesTotal = bill.services.reduce((sum, service) => {
-            return sum + (service.charges || service.amount || service.unitPrice || 0);
-          }, 0);
+        // Log first few bills for debugging
+        if (index < 3) {
+          console.log(`🔍 Checking bill ${index + 1}/${filteredBills.length}:`, {
+            billType: bill.billType || 'Unknown',
+            invoiceNumber: bill.invoiceNumber || bill.billNo,
+            discountAmount: bill.discountAmount,
+            discount: bill.discount,
+            discountPercentage: bill.discountPercentage,
+            discountReason: bill.discountReason,
+            customData: bill.customData,
+            customDiscountAmount,
+            customDiscountPercentage,
+            customDiscountReason,
+            servicesCount: bill.services?.length || 0,
+            amount: bill.amount,
+            paidAmount: bill.paidAmount
+          });
         }
         
-        // If services total is greater than invoice amount, there's a discount
-        const impliedDiscountFromServices = servicesTotal > billAmount ? servicesTotal - billAmount : 0;
-        
-        // Calculate total possible discount from all sources
-        const totalDiscount = Math.max(
-          calculatedDiscount,
-          discountAmount,
-          customDiscount,
-          invoiceDiscount,
-          impliedDiscountFromServices
-        );
-        
-        // Also check if there's a discount by comparing amount vs a calculated grand total
-        // If customData has a grandTotal that's less than amount, that's a discount
-        if (bill.customData?.grandTotal && bill.customData.grandTotal < billAmount) {
-          const impliedDiscount = billAmount - bill.customData.grandTotal;
-          if (impliedDiscount > 0) {
-            console.log(`✅ Found discount via grandTotal for bill ${bill.invoiceNumber || bill.billNo}:`, impliedDiscount);
-            return true;
-          }
+        // Priority 1: Check explicit discount fields (from all sources)
+        if (totalDiscountAmount > 0) {
+          console.log(`✅ Found explicit discount for bill ${bill.invoiceNumber || bill.billNo} (${bill.billType || 'Unknown'}):`, {
+            discountAmount: totalDiscountAmount,
+            source: bill.discountAmount ? 'discountAmount' : bill.customData?.discountAmount ? 'customData.discountAmount' : 'discount'
+          });
+          return true;
         }
         
-        // Check if services total is greater than bill amount (indicates discount was applied)
-        // This is the most common case: services add up to more than the invoice amount
-        if (servicesTotal > billAmount && servicesTotal > 0 && billAmount > 0) {
-          const serviceDiscount = servicesTotal - billAmount;
-          if (serviceDiscount > 0.01) { // Use 0.01 to account for rounding
-            console.log(`✅ Found discount via services total for bill ${bill.invoiceNumber || bill.billNo}:`, {
-              servicesTotal,
-              billAmount,
-              discount: serviceDiscount
+        // Priority 2: Check discountPercentage (from all sources)
+        if (totalDiscountPercentage > 0 && billAmount > 0) {
+          const calculatedDiscount = billAmount * totalDiscountPercentage / 100;
+          if (calculatedDiscount > 0) {
+            console.log(`✅ Found discountPercentage for bill ${bill.invoiceNumber || bill.billNo} (${bill.billType || 'Unknown'}):`, {
+              percentage: totalDiscountPercentage,
+              calculatedDiscount,
+              source: bill.discountPercentage ? 'discountPercentage' : 'customData.discountPercentage'
             });
             return true;
           }
         }
         
-        // Also check if there's a discount in the invoice structure
-        // Sometimes discount is stored as: amount - (amount after discount)
-        // If paidAmount is less than amount, that could indicate a discount was applied
-        if (paidAmount > 0 && paidAmount < billAmount) {
-          const differenceDiscount = billAmount - paidAmount;
-          if (differenceDiscount > 0.01) { // Use 0.01 to account for rounding
-            console.log(`✅ Found discount via paidAmount difference for bill ${bill.invoiceNumber || bill.billNo}:`, differenceDiscount);
+        // Priority 3: Check discountReason (indicates discount was applied)
+        if (totalDiscountReason && totalDiscountReason.trim().length > 0) {
+          console.log(`✅ Found discountReason for bill ${bill.invoiceNumber || bill.billNo} (${bill.billType || 'Unknown'}):`, totalDiscountReason);
+          return true;
+        }
+        
+        // Priority 4: Check if services total differs from invoice amount (indicates discount)
+        let servicesTotal = 0;
+        let servicesWithDiscount = [];
+        
+        // Check customData.servicesTotal first (for Lab/Test billing)
+        if (bill.customData?.servicesTotal && bill.customData.servicesTotal > 0) {
+          servicesTotal = bill.customData.servicesTotal;
+        } else if (bill.customData?.subTotal && bill.customData.subTotal > 0) {
+          // Use subTotal as servicesTotal if available
+          servicesTotal = bill.customData.subTotal;
+        } else if (bill.services && bill.services.length > 0) {
+          // Calculate from services array
+          bill.services.forEach(service => {
+            const serviceAmount = service.charges || service.amount || service.unitPrice || 0;
+            servicesTotal += serviceAmount;
+            
+            // Check if individual service has discount
+            if (service.discountAmount > 0 || service.discount > 0 || service.discountPercentage > 0) {
+              servicesWithDiscount.push({
+                name: service.name || service.serviceName,
+                discountAmount: service.discountAmount || service.discount || 0,
+                discountPercentage: service.discountPercentage || 0
+              });
+            }
+          });
+        }
+        
+        // If any individual service has discount
+        if (servicesWithDiscount.length > 0) {
+          console.log(`✅ Found discounts in individual services for bill ${bill.invoiceNumber || bill.billNo} (${bill.billType || 'Unknown'}):`, servicesWithDiscount);
+          return true;
+        }
+        
+        // If services total is greater than bill amount, there's a discount
+        if (servicesTotal > billAmount && servicesTotal > 0 && billAmount > 0) {
+          const serviceDiscount = servicesTotal - billAmount;
+          if (serviceDiscount > 0) {
+            console.log(`✅ Found discount via services total for bill ${bill.invoiceNumber || bill.billNo} (${bill.billType || 'Unknown'}):`, {
+              servicesTotal,
+              billAmount,
+              discount: serviceDiscount,
+              source: bill.customData?.servicesTotal ? 'customData.servicesTotal' : bill.customData?.subTotal ? 'customData.subTotal' : 'services array'
+            });
             return true;
           }
         }
         
-        // Check if bill has any discount applied (explicit discount fields)
-        if (totalDiscount > 0.01) { // Use 0.01 to account for rounding
-          console.log(`✅ Found discount for bill ${bill.invoiceNumber || bill.billNo}:`, {
-            discountAmount,
-            invoiceDiscount,
-            customDiscount,
-            calculatedDiscount,
-            impliedDiscountFromServices,
-            totalDiscount
-          });
-          return true;
+        // Priority 5: Check if customData has a grandTotal that's less than amount
+        if (bill.customData?.grandTotal && bill.customData.grandTotal < billAmount && billAmount > 0) {
+          const impliedDiscount = billAmount - bill.customData.grandTotal;
+          if (impliedDiscount > 0) {
+            console.log(`✅ Found discount via grandTotal for bill ${bill.invoiceNumber || bill.billNo} (${bill.billType || 'Unknown'}):`, impliedDiscount);
+            return true;
+          }
         }
         
         return false;
@@ -173,97 +228,185 @@ const DiscountReport = () => {
       
       // Format data for display
       const formattedData = billsWithDiscount.map(bill => {
-        // Check all possible discount field names (singular and plural)
-        const discountAmount = bill.discountAmount || bill.discount || bill.discounts || 0;
-        const discountPercentage = bill.customData?.discountPercentage || bill.discountPercentage || 0;
-        const customDiscount = bill.customData?.discount || bill.customData?.discountAmount || bill.customData?.discounts || 0;
-        const invoiceDiscount = bill.discount || bill.discounts || 0;
         const totalAmount = bill.amount || 0;
         const paidAmount = bill.paidAmount || 0;
         
-        // Calculate services total
+        // Get discount fields from all billing types (same as filter logic)
+        // Regular billing fields
+        const discountAmount = bill.discountAmount || bill.discount || 0;
+        const discountPercentage = bill.discountPercentage || 0;
+        const discountReason = bill.discountReason || '';
+        
+        // Reassignment/Superconsultant billing fields (from customData)
+        const customDiscountAmount = bill.customData?.discountAmount || bill.customData?.discount || 0;
+        const customDiscountPercentage = bill.customData?.discountPercentage || 0;
+        const customDiscountReason = bill.customData?.discountReason || bill.customData?.discountNotes || '';
+        
+        // Combined discount values (check all sources)
+        const totalDiscountAmount = discountAmount || customDiscountAmount || 0;
+        const totalDiscountPercentage = discountPercentage || customDiscountPercentage || 0;
+        const totalDiscountReason = discountReason || customDiscountReason || '';
+        
+        // Calculate services total and check for individual service discounts
         let servicesTotal = 0;
-        if (bill.services && bill.services.length > 0) {
-          servicesTotal = bill.services.reduce((sum, service) => {
-            return sum + (service.charges || service.amount || service.unitPrice || 0);
-          }, 0);
+        let totalServiceDiscount = 0;
+        
+        // Check customData.servicesTotal first (for Lab/Test billing)
+        if (bill.customData?.servicesTotal && bill.customData.servicesTotal > 0) {
+          servicesTotal = bill.customData.servicesTotal;
+        } else if (bill.customData?.subTotal && bill.customData.subTotal > 0) {
+          // Use subTotal as servicesTotal if available
+          servicesTotal = bill.customData.subTotal;
+        } else if (bill.services && bill.services.length > 0) {
+          // Calculate from services array
+          bill.services.forEach(service => {
+            const serviceAmount = service.charges || service.amount || service.unitPrice || 0;
+            servicesTotal += serviceAmount;
+            
+            // Accumulate discounts from individual services
+            const serviceDiscount = service.discountAmount || service.discount || 0;
+            const serviceDiscountPercent = service.discountPercentage || 0;
+            if (serviceDiscount > 0) {
+              totalServiceDiscount += serviceDiscount;
+            } else if (serviceDiscountPercent > 0 && serviceAmount > 0) {
+              totalServiceDiscount += serviceAmount * serviceDiscountPercent / 100;
+            }
+          });
         }
         
-        // Calculate actual discount amount from all possible sources
+        // Calculate actual discount amount (same priority as filter logic)
         let calculatedDiscount = 0;
         let discountType = '';
         
-        // Priority 1: Check if services total differs from invoice amount (most reliable)
-        if (servicesTotal > totalAmount && servicesTotal > 0 && totalAmount > 0) {
+        // Priority 1: Explicit discountAmount from all sources
+        if (totalDiscountAmount > 0) {
+          calculatedDiscount = totalDiscountAmount;
+          discountType = 'Fixed';
+        }
+        // Priority 2: Discounts from individual services
+        else if (totalServiceDiscount > 0) {
+          calculatedDiscount = totalServiceDiscount;
+          discountType = 'Fixed';
+        }
+        // Priority 3: Percentage discount from all sources
+        else if (totalDiscountPercentage > 0 && totalAmount > 0) {
+          calculatedDiscount = totalAmount * totalDiscountPercentage / 100;
+          discountType = `${totalDiscountPercentage}%`;
+        }
+        // Priority 4: Services total vs invoice amount
+        else if (servicesTotal > totalAmount && servicesTotal > 0 && totalAmount > 0) {
           calculatedDiscount = servicesTotal - totalAmount;
           discountType = 'Fixed';
         }
-        // Priority 2: Check if there's a grandTotal in customData that indicates discount
+        // Priority 5: grandTotal difference
         else if (bill.customData?.grandTotal && bill.customData.grandTotal < totalAmount) {
           calculatedDiscount = totalAmount - bill.customData.grandTotal;
           discountType = 'Fixed';
         }
-        // Priority 3: Check percentage discount
-        else if (discountPercentage > 0) {
-          calculatedDiscount = totalAmount * discountPercentage / 100;
-          discountType = `${discountPercentage}%`;
+        
+        const finalPaidAmount = paidAmount > 0 ? paidAmount : (totalAmount - calculatedDiscount);
+        
+        // Extract discount reason from all sources with better priority
+        let finalDiscountReason = '';
+        
+        // Priority 1: Check discountReason field (most reliable)
+        if (totalDiscountReason && totalDiscountReason.trim().length > 0) {
+          finalDiscountReason = totalDiscountReason.trim();
         }
-        // Priority 4: Check fixed discount amounts (take the largest)
-        else {
-          calculatedDiscount = Math.max(discountAmount || 0, customDiscount || 0, invoiceDiscount || 0);
-          discountType = 'Fixed';
+        // Priority 2: Check customData discountReason or discountNotes
+        else if (bill.customData?.discountReason && bill.customData.discountReason.trim().length > 0) {
+          finalDiscountReason = bill.customData.discountReason.trim();
+        }
+        else if (bill.customData?.discountNotes && bill.customData.discountNotes.trim().length > 0) {
+          finalDiscountReason = bill.customData.discountNotes.trim();
+        }
+        // Priority 3: Check billing notes (for Lab/Test)
+        else if (bill.notes && bill.notes.trim().length > 0) {
+          finalDiscountReason = bill.notes.trim();
+        }
+        else if (bill.customData?.notes && bill.customData.notes.trim().length > 0) {
+          finalDiscountReason = bill.customData.notes.trim();
+        }
+        // Priority 4: Check customData remarks
+        else if (bill.customData?.remarks && bill.customData.remarks.trim().length > 0) {
+          finalDiscountReason = bill.customData.remarks.trim();
         }
         
-        // Priority 5: If still no discount found but paidAmount is less than amount, calculate difference
-        if (calculatedDiscount === 0 && paidAmount > 0 && paidAmount < totalAmount) {
-          calculatedDiscount = totalAmount - paidAmount;
-          discountType = 'Fixed';
+        // If still no reason found but discount exists, try to infer from discount percentage
+        if (!finalDiscountReason && totalDiscountPercentage > 0) {
+          // Map common discount percentages to reasons
+          const percentageReasons = {
+            10: 'Staff Discount',
+            20: 'Senior Citizen Discount',
+            15: 'Student Discount',
+            5: 'Referral Discount',
+            100: 'Charity Case'
+          };
+          finalDiscountReason = percentageReasons[totalDiscountPercentage] || `Discount (${totalDiscountPercentage}%)`;
         }
         
-        // Priority 6: If still no discount, check if amount doesn't match a calculated grand total
-        // This handles cases where discount is applied but not explicitly stored
-        if (calculatedDiscount === 0) {
-          // Try to find discount from invoice structure
-          // If there's a tax field, sometimes grandTotal = amount - discount - tax
-          // But we'll use the explicit discount fields first
-          const explicitDiscount = Math.max(
-            discountAmount || 0,
-            customDiscount || 0,
-            invoiceDiscount || 0
-          );
-          if (explicitDiscount > 0) {
-            calculatedDiscount = explicitDiscount;
-            discountType = 'Fixed';
+        // Use uhId for patientId (prioritize uhId over MongoDB ObjectId)
+        const displayPatientId = bill.uhId || (bill.patientId && typeof bill.patientId === 'string' && bill.patientId.length === 24 ? '' : bill.patientId) || '';
+        
+        // Extract user name from multiple sources
+        let displayUserName = '';
+        if (bill.createdByName && bill.createdByName !== 'N/A') {
+          displayUserName = bill.createdByName;
+        } else if (bill.generatedByName && bill.generatedByName !== 'N/A') {
+          displayUserName = bill.generatedByName;
+        } else if (bill.paymentHistory && bill.paymentHistory.length > 0) {
+          // Try to get from payment history (check all entries, not just first)
+          for (const payment of bill.paymentHistory) {
+            if (payment.processedByName && payment.processedByName !== 'N/A') {
+              displayUserName = payment.processedByName;
+              break;
+            } else if (payment.createdByName && payment.createdByName !== 'N/A') {
+              displayUserName = payment.createdByName;
+              break;
+            } else if (payment.processedBy) {
+              // If name not populated, try to get from ID (though this shouldn't happen if backend works)
+              const processedById = typeof payment.processedBy === 'object' ? payment.processedBy._id || payment.processedBy.id : payment.processedBy;
+              if (processedById) {
+                // This is a fallback - ideally backend should populate names
+                console.log(`⚠️ Payment has processedBy ID but no name: ${processedById}`);
+              }
+            }
           }
         }
         
-        const finalPaidAmount = paidAmount || (totalAmount - calculatedDiscount);
+        // Final fallback: if still empty, try to get from any user field on the bill
+        if (!displayUserName && bill.generatedBy) {
+          const generatedById = typeof bill.generatedBy === 'object' ? bill.generatedBy._id || bill.generatedBy.id : bill.generatedBy;
+          if (generatedById) {
+            console.log(`⚠️ Bill has generatedBy ID but no name: ${generatedById}`);
+          }
+        }
         
-        // Extract discount reason from multiple possible fields
-        const discountReason = 
-          bill.customData?.discountReason || 
-          bill.discountReason || 
-          bill.customData?.remarks ||
-          bill.notes || 
-          bill.customData?.notes ||
-          bill.customData?.discountNotes ||
-          '';
+        // Format patient name (remove N/A)
+        const displayPatientName = bill.patientName && bill.patientName !== 'N/A' ? bill.patientName : '';
+        
+        // Format bill number (remove N/A)
+        const displayBillNumber = bill.invoiceNumber || bill.billNo || '';
+        
+        // Format remarks (remove N/A if empty)
+        const displayRemarks = finalDiscountReason && finalDiscountReason !== 'N/A' ? finalDiscountReason : '';
         
         return {
           ...bill,
           date: bill.date || bill.createdAt,
-          billNumber: bill.invoiceNumber || bill.billNo || 'N/A',
-          patientId: bill.patientId || bill.uhId || 'N/A',
-          patientName: bill.patientName || 'N/A',
-          userName: bill.createdByName || bill.generatedByName || 'N/A',
+          billNumber: displayBillNumber,
+          billType: bill.billType || 'Unknown', // Include bill type for identification
+          patientId: displayPatientId,
+          patientName: displayPatientName,
+          userName: displayUserName,
           totalAmount,
           discount: calculatedDiscount,
-          discountType,
-          discountPercentage: discountPercentage > 0 ? discountPercentage : null,
+          discountType: discountType || 'Fixed',
+          discountPercentage: totalDiscountPercentage > 0 ? totalDiscountPercentage : null,
           discountAmount: calculatedDiscount > 0 ? calculatedDiscount : null,
           paidAmount: finalPaidAmount,
           paymentStatus: bill.status === 'paid' ? 'Paid' : bill.status === 'completed' ? 'Paid' : bill.status === 'pending' ? 'Pending' : bill.status === 'partially_paid' ? 'Partially Paid' : bill.status || 'Pending',
-          remarks: discountReason
+          remarks: displayRemarks
         };
       });
       
@@ -304,7 +447,7 @@ const DiscountReport = () => {
     const csvData = [
       ['Discount Report', dateRangeText],
       ['', ''],
-      ['S.No.', 'Date', 'Bill Number', 'Patient Id', 'Patient Name', 'User', 'Total Amount', 'Discount Type', 'Discount', 'Paid Amount', 'Payment Status', 'Remarks']
+      ['S.No.', 'Date', 'Bill Number', 'Bill Type', 'Patient Id', 'Patient Name', 'User', 'Total Amount', 'Discount Type', 'Discount', 'Paid Amount', 'Payment Status', 'Remarks']
     ];
 
     data.forEach((bill, index) => {
@@ -312,6 +455,7 @@ const DiscountReport = () => {
         index + 1,
         formatDateTime(bill.date),
         bill.billNumber,
+        bill.billType || 'Unknown',
         bill.patientId,
         bill.patientName,
         bill.userName,
@@ -350,7 +494,7 @@ const DiscountReport = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 sm:p-6">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full mx-auto">
         {/* Header */}
         <div className="mb-4">
           <h1 className="text-lg font-bold text-slate-800">Discount Report</h1>
@@ -443,6 +587,7 @@ const DiscountReport = () => {
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">S.No.</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bill Number</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bill Type</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Id</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Name</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
@@ -457,7 +602,7 @@ const DiscountReport = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan="12" className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan="13" className="px-4 py-8 text-center text-sm text-gray-500">
                       No bills with discounts found for the selected period.
                     </td>
                   </tr>
@@ -468,10 +613,21 @@ const DiscountReport = () => {
                       <tr key={bill._id || index} className="hover:bg-gray-50">
                         <td className="px-4 py-2 text-sm text-slate-700">{globalIndex + 1}</td>
                         <td className="px-4 py-2 text-sm text-slate-700">{formatDateTime(bill.date)}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700 font-medium">{bill.billNumber}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.patientId}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.patientName}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.userName}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700 font-medium">{bill.billNumber || '-'}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">
+                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                            bill.billType === 'Consultation' ? 'bg-blue-100 text-blue-800' :
+                            bill.billType === 'Reassignment' ? 'bg-purple-100 text-purple-800' :
+                            bill.billType === 'Superconsultant' ? 'bg-indigo-100 text-indigo-800' :
+                            bill.billType === 'Lab/Test' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {bill.billType || 'Unknown'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{bill.patientId || '-'}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{bill.patientName || '-'}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{bill.userName || '-'}</td>
                         <td className="px-4 py-2 text-sm text-slate-900">{(bill.totalAmount || 0).toFixed(2)}</td>
                         <td className="px-4 py-2 text-sm text-slate-700">
                           <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
@@ -494,7 +650,7 @@ const DiscountReport = () => {
                             {bill.paymentStatus}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-sm text-slate-600">{bill.remarks || 'N/A'}</td>
+                        <td className="px-4 py-2 text-sm text-slate-600">{bill.remarks || '-'}</td>
                       </tr>
                     );
                   })
