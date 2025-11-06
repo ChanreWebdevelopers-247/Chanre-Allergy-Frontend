@@ -16,6 +16,13 @@ import {
   Users
 } from 'lucide-react';
 
+const toLocalISODate = (date) => {
+  const offsetMillis = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offsetMillis).toISOString().split('T')[0];
+};
+
+const getCurrentTimeHHMM = () => new Date().toTimeString().slice(0, 5);
+
 export default function ScheduleCollection() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -38,6 +45,11 @@ export default function ScheduleCollection() {
 
   // Available collectors (lab staff)
   const [availableCollectors, setAvailableCollectors] = useState([]);
+
+  const minSelectableDate = toLocalISODate(new Date());
+  const minSelectableTime = formData.sampleCollectionScheduledDate === minSelectableDate
+    ? getCurrentTimeHHMM()
+    : undefined;
 
   useEffect(() => {
     if (id) {
@@ -129,22 +141,17 @@ export default function ScheduleCollection() {
       return;
     }
 
-    // Validate date format and allow past dates for rescheduling
     const selectedDate = new Date(`${formData.sampleCollectionScheduledDate}T${formData.sampleCollectionScheduledTime}`);
     const now = new Date();
-    
-    // Allow past dates (for rescheduling when collection couldn't happen on scheduled date)
-    // But show a warning if the date is more than 7 days in the past
-    const daysDifference = Math.floor((now - selectedDate) / (1000 * 60 * 60 * 24));
-    
-    if (daysDifference > 7) {
-      setError('Collection date cannot be more than 7 days in the past. Please contact admin if you need to schedule for an earlier date.');
+
+    if (Number.isNaN(selectedDate.getTime())) {
+      setError('Invalid collection date or time. Please select a valid future slot.');
       return;
     }
-    
-    if (daysDifference > 0) {
-      // Show warning for past dates but allow submission
-      console.log(`⚠️ Warning: Scheduling collection for ${daysDifference} day(s) in the past`);
+
+    if (selectedDate <= now) {
+      setError('Collection date and time cannot be in the past. Please choose a future slot.');
+      return;
     }
 
     try {
@@ -363,7 +370,7 @@ export default function ScheduleCollection() {
               <p>• Billing must be completed (status: generated, payment_received, or paid)</p>
               <p>• Lab staff must be assigned to the test request</p>
               <p>• Test request must be in a valid status for collection scheduling</p>
-              <p>• Past dates are allowed for rescheduling (up to 7 days in the past)</p>
+              <p>• Collection appointments must be scheduled for a future date and time</p>
             </div>
           </div>
           
@@ -405,11 +412,12 @@ export default function ScheduleCollection() {
                   name="sampleCollectionScheduledDate"
                   value={formData.sampleCollectionScheduledDate}
                   onChange={handleInputChange}
+                  min={minSelectableDate}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   required
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  You can select past dates for rescheduling if collection couldn't happen on the originally scheduled date
+                  Select a future date. Past dates are not allowed.
                 </p>
               </div>
               
@@ -422,6 +430,7 @@ export default function ScheduleCollection() {
                   name="sampleCollectionScheduledTime"
                   value={formData.sampleCollectionScheduledTime}
                   onChange={handleInputChange}
+                  min={minSelectableTime}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   required
                 />

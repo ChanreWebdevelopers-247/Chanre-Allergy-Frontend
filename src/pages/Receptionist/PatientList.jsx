@@ -249,7 +249,7 @@ export default function ReceptionistPatientList() {
           </div>
 
           {/* Patients Table */}
-          <div className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden">
+          <div className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-x-auto">
             <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
@@ -358,10 +358,12 @@ export default function ReceptionistPatientList() {
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center text-xs text-slate-900">
-                            <MapPin className="h-3 w-3 mr-2 text-slate-400" />
-                            {patient.address || 'No address'}
+                        <td className="px-6 py-4">
+                          <div className="flex items-start text-xs text-slate-900 max-w-[220px]">
+                            <MapPin className="h-3 w-3 mr-2 mt-0.5 text-slate-400" />
+                            <span className="break-words whitespace-normal leading-snug">
+                              {patient.address || 'No address'}
+                            </span>
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center text-xs font-medium">

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchSuperAdminDoctorAssignedPatients } from '../../../features/superadmin/superAdminDoctorSlice';
+import { normalizePatientsArray } from '../../../utils/normalizePatientsArray';
 import { Calendar, Clock, Search, Filter, User, Phone, Mail, Eye, FileText } from 'lucide-react';
 
 const MyPatients = () => {
@@ -11,6 +12,8 @@ const MyPatients = () => {
   const { assignedPatients, workingLoading, workingError } = useSelector(
     (state) => state.superAdminDoctors
   );
+
+  const normalizedPatients = useMemo(() => normalizePatientsArray(assignedPatients), [assignedPatients]);
 
   const [searchTerm, setSearchTerm] = useState('');
   // Initialize filter from URL parameter or default to 'all'
@@ -53,7 +56,7 @@ const MyPatients = () => {
 
   // Filter patients based on search and appointment filter
   const filteredPatients = useMemo(() => {
-    let filtered = assignedPatients || [];
+    let filtered = [...normalizedPatients];
 
     // Apply appointment filter
     const today = new Date();
@@ -94,7 +97,7 @@ const MyPatients = () => {
     }
 
     return filtered;
-  }, [assignedPatients, filterType, searchTerm]);
+  }, [normalizedPatients, filterType, searchTerm]);
 
   if (workingLoading) {
     return (
@@ -117,7 +120,7 @@ const MyPatients = () => {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-lg font-bold text-gray-800">My Patients</h1>
         <div className="text-xs text-gray-500">
-          Total: {filteredPatients.length} {filterType !== 'all' && `(${assignedPatients.length} total)`}
+          Total: {filteredPatients.length} {filterType !== 'all' && `(${normalizedPatients.length} total)`}
         </div>
       </div>
 

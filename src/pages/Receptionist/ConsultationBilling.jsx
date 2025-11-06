@@ -64,6 +64,58 @@ export default function ConsultationBilling() {
   // Invoice creation time state
   const [invoiceCreationTime, setInvoiceCreationTime] = useState(null);
 
+  const isDateToday = (dateStr) => {
+    if (!dateStr) return false;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return false;
+    const today = new Date();
+    return (
+      today.getFullYear() === year &&
+      today.getMonth() === month - 1 &&
+      today.getDate() === day
+    );
+  };
+
+  const combineDateAndTime = (dateStr, timeStr) => {
+    if (!dateStr || !timeStr) return null;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return null;
+
+    let hours = 0;
+    let minutes = 0;
+    const trimmedTime = timeStr.trim();
+
+    if (trimmedTime.toUpperCase().includes('AM') || trimmedTime.toUpperCase().includes('PM')) {
+      const [timePart, periodRaw] = trimmedTime.split(' ');
+      const period = periodRaw?.toUpperCase();
+      const [h = '0', m = '0'] = timePart.split(':');
+      hours = parseInt(h, 10);
+      minutes = parseInt(m, 10) || 0;
+      if (period === 'PM' && hours !== 12) {
+        hours += 12;
+      }
+      if (period === 'AM' && hours === 12) {
+        hours = 0;
+      }
+    } else {
+      const [h = '0', m = '0'] = trimmedTime.split(':');
+      hours = parseInt(h, 10) || 0;
+      minutes = parseInt(m, 10) || 0;
+    }
+
+    return new Date(year, month - 1, day, hours, minutes, 0, 0);
+  };
+
+  const filterFutureSlots = (slots, dateStr) => {
+    if (!Array.isArray(slots) || slots.length === 0) return [];
+    const now = new Date();
+    return slots.filter((slot) => {
+      const slotDateTime = combineDateAndTime(dateStr, slot.startTime);
+      if (!slotDateTime) return false;
+      return slotDateTime > now;
+    });
+  };
+
   // Function to fetch appointment data for a patient
   const fetchPatientAppointmentData = async (patient) => {
     if (!patient.fromAppointment || !patient.appointmentId) return null;
@@ -570,7 +622,11 @@ export default function ConsultationBilling() {
               endTime: slot.endTime,
               slotId: slot._id
             }));
-          setAvailableSlots(available);
+          const futureSlots = filterFutureSlots(available, date);
+          if (available.length > 0 && futureSlots.length === 0) {
+            toast.info('No future time slots available for this date. Please select another date.');
+          }
+          setAvailableSlots(futureSlots);
           setSelectedSlotId(null);
           setPaymentData(prev => ({...prev, appointmentTime: ''}));
           return;
@@ -605,7 +661,11 @@ export default function ConsultationBilling() {
           endTime: slot.endTime,
           slotId: slot._id
         }));
-      setAvailableSlots(available);
+      const futureSlots = filterFutureSlots(available, date);
+      if (available.length > 0 && futureSlots.length === 0) {
+        toast.info('No future time slots available for this date. Please select another date.');
+      }
+      setAvailableSlots(futureSlots);
       // Reset selected slot when fetching new slots
       setSelectedSlotId(null);
       setPaymentData(prev => ({...prev, appointmentTime: ''}));
@@ -2564,6 +2624,13 @@ export default function ConsultationBilling() {
                         const hasBilling = consultationBilling.length > 0;
                         const totalAmount = hasBilling ? consultationBilling.reduce((sum, bill) => sum + (bill.amount || 0), 0) : 0;
                         const totalPaid = hasBilling ? consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0) : 0;
+                        const appointmentDisplayData = getAppointmentDisplayData(patient);
+                        const appointmentStatusLower = appointmentDisplayData?.status?.toLowerCase?.();
+                        const hasDoctorViewedConsultation =
+                          appointmentStatusLower === 'viewed' ||
+                          patient.consultationStatus?.toLowerCase?.() === 'viewed' ||
+                          patient.appointmentStatus?.toLowerCase?.() === 'viewed' ||
+                          (Array.isArray(patient.appointments) && patient.appointments.some((apt) => apt.status?.toLowerCase?.() === 'viewed'));
                         
                         return (
                           <tr key={patient._id} className="hover:bg-slate-50">
@@ -2595,7 +2662,7 @@ export default function ConsultationBilling() {
                             <td className="px-4 py-4 whitespace-nowrap">
                               <div className="text-xs text-slate-600 space-y-1">
                                 {(() => {
-                                  const appointmentData = getAppointmentDisplayData(patient);
+                                  const appointmentData = appointmentDisplayData;
                                   
                                   if (!appointmentData) {
                                     return (
@@ -2796,7 +2863,7 @@ export default function ConsultationBilling() {
                                 )}
 
                                 {/* Cancel Bill - for any patient with billing */}
-                                {hasBilling && statusInfo.status !== 'Bill Cancelled' && statusInfo.status !== 'Refunded' && (
+                                {hasBilling && statusInfo.status !== 'Bill Cancelled' && statusInfo.status !== 'Refunded' && !hasDoctorViewedConsultation && (
                                   <button
                                     onClick={() => handleCancelBill(patient)}
                                     className="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-medium flex items-center gap-1"
@@ -4417,6 +4484,13 @@ export default function ConsultationBilling() {
                             // Find the selected slot and set appointmentTime
                             const selectedSlot = availableSlots.find(slot => slot.slotId === slotId);
                             if (selectedSlot && selectedAppointmentDate) {
+              const slotDateTime = combineDateAndTime(selectedAppointmentDate, selectedSlot.startTime);
+              if (!slotDateTime || slotDateTime <= new Date()) {
+                toast.error('Please choose a future time slot');
+                setSelectedSlotId(null);
+                setPaymentData(prev => ({...prev, appointmentTime: ''}));
+                return;
+              }
                               // Combine date and time into datetime format (local time, no timezone conversion)
                               const [hours, minutes] = selectedSlot.startTime.split(':');
                               // Parse date string (YYYY-MM-DD) and create date in local timezone

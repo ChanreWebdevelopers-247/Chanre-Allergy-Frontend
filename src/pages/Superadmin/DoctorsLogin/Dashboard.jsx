@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSuperAdminDoctorWorkingStats, fetchSuperAdminDoctorAssignedPatients } from '../../../features/superadmin/superAdminDoctorSlice';
+import { normalizePatientsArray } from '../../../utils/normalizePatientsArray';
 import { User, FileText, MessageSquare, Clock, Eye, Building, Users, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -11,6 +12,8 @@ const Dashboard = () => {
     (state) => state.superAdminDoctors
   );
 
+  const normalizedPatients = useMemo(() => normalizePatientsArray(assignedPatients), [assignedPatients]);
+
   useEffect(() => {
     dispatch(fetchSuperAdminDoctorWorkingStats());
     dispatch(fetchSuperAdminDoctorAssignedPatients());
@@ -18,18 +21,18 @@ const Dashboard = () => {
 
   // Calculate today's appointments
   const todaysAppointments = useMemo(() => {
-    if (!assignedPatients || assignedPatients.length === 0) return [];
+    if (normalizedPatients.length === 0) return [];
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    return assignedPatients.filter(patient => {
+    return normalizedPatients.filter(patient => {
       if (!patient.appointmentTime) return false;
       const appointmentDate = new Date(patient.appointmentTime);
       appointmentDate.setHours(0, 0, 0, 0);
       return appointmentDate.getTime() === today.getTime();
     });
-  }, [assignedPatients]);
+  }, [normalizedPatients]);
 
 
 
@@ -78,7 +81,7 @@ const Dashboard = () => {
             <div className="ml-4">
               <p className="text-xs font-medium text-gray-600">Total Patients</p>
               <p className="text-xl font-semibold text-gray-900">
-                {workingStats?.totalPatients || assignedPatients?.length || 0}
+                {workingStats?.totalPatients || normalizedPatients.length || 0}
               </p>
             </div>
           </div>
@@ -284,7 +287,7 @@ const Dashboard = () => {
           </button>
         </div>
         <div className="p-6">
-          {assignedPatients.length === 0 ? (
+          {normalizedPatients.length === 0 ? (
             <p className="text-gray-500 text-center py-4 text-xs">No assigned patients found.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -309,7 +312,7 @@ const Dashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {assignedPatients.slice(0, 5).map((patient) => {
+                {normalizedPatients.slice(0, 5).map((patient) => {
                     const isToday = patient.appointmentTime ? (() => {
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);

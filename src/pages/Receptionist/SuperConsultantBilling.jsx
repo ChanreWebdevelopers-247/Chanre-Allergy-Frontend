@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { fetchReceptionistPatients } from '../../features/receptionist/receptionistThunks';
@@ -46,6 +46,7 @@ export default function SuperConsultantBilling() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [pageInput, setPageInput] = useState('1');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'Pending Payment', 'Paid', 'Partial Payment', 'No Invoice', etc.
   const [appointmentDateFilter, setAppointmentDateFilter] = useState('all'); // 'all', 'past', 'upcoming', 'today'
   
@@ -74,6 +75,11 @@ export default function SuperConsultantBilling() {
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [loadingPaymentHistory, setLoadingPaymentHistory] = useState(false);
 
+  // Doctor assignment state
+  const [doctors, setDoctors] = useState([]);
+  const [loadingDoctors, setLoadingDoctors] = useState(false);
+  const [selectedDoctorId, setSelectedDoctorId] = useState('');
+
   // Cancel and Refund state
   const [showCancelBillModal, setShowCancelBillModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
@@ -83,6 +89,24 @@ export default function SuperConsultantBilling() {
     refundMethod: 'cash',
     refundType: 'withPenalty' // 'withPenalty' or 'full'
   });
+
+  const isDateToday = (dateStr) => {
+    if (!dateStr) return false;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return false;
+    const today = new Date();
+    return (
+      today.getFullYear() === year &&
+      today.getMonth() === month - 1 &&
+      today.getDate() === day
+    );
+  };
+
+  const parseDateTime = (dateTimeStr) => {
+    if (!dateTimeStr) return null;
+    const parsed = new Date(dateTimeStr);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
 
   // Function to fetch payment history for a patient
   const fetchPaymentHistory = async (patientId) => {
@@ -101,6 +125,59 @@ export default function SuperConsultantBilling() {
       setLoadingPaymentHistory(false);
     }
   };
+
+  const fetchDoctorsList = useCallback(async () => {
+    setLoadingDoctors(true);
+    try {
+      const response = await API.get('/superadmin/doctors/available', {
+        params: {
+          search: ''
+        }
+      });
+
+      if (Array.isArray(response.data?.doctors)) {
+        setDoctors(response.data.doctors);
+      } else {
+        setDoctors([]);
+      }
+    } catch (error) {
+      console.error('Error fetching superconsultants:', error);
+      toast.error('Failed to load superconsultants. Please try again.');
+    } finally {
+      setLoadingDoctors(false);
+    }
+  }, []);
+
+  const getConsultationTypeLabel = (type) => {
+    if (!type) return 'Superconsultant Consultation';
+    const map = {
+      superconsultant_normal: 'Normal Consultation',
+      superconsultant_audio: 'Audio Consultation',
+      superconsultant_video: 'Video Consultation',
+      superconsultant_review_reports: 'Review Reports'
+    };
+
+    if (map[type]) {
+      return map[type];
+    }
+
+    return type
+      .replace('superconsultant_', '')
+      .split('_')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
+  useEffect(() => {
+    if (showPaymentModal && !loadingDoctors && doctors.length > 0) {
+      setSelectedDoctorId((prev) => {
+        if (prev && doctors.some((doc) => doc._id === prev)) {
+          return prev;
+        }
+        return doctors[0]._id;
+      });
+    }
+  }, [showPaymentModal, loadingDoctors, doctors]);
 
   // Convert number to words
   const numberToWords = (num) => {
@@ -220,13 +297,14 @@ export default function SuperConsultantBilling() {
   // Fetch test requests for all patients
   useEffect(() => {
     const fetchTestRequests = async () => {
-      if (patients.length === 0) return;
-      
+      const patientList = Array.isArray(patients) ? patients : [];
+      if (patientList.length === 0) return;
+
       try {
         const testRequestsMap = {};
         
         // Fetch test requests for each patient
-        const promises = patients.map(async (patient) => {
+        const promises = patientList.map(async (patient) => {
           try {
             const response = await API.get(`/test-requests/patient/${patient._id}`);
             if (response.data && Array.isArray(response.data)) {
@@ -320,19 +398,30 @@ export default function SuperConsultantBilling() {
     return { status: 'Pending Payment', color: 'text-orange-600 bg-orange-100', icon: <Clock className="h-4 w-4" /> };
   };
 
-  // Filter patients - show all patients to allow creating superconsultant consultations for any patient
+  // Filter patients - show all patients to allow creating superconsultant consultations for any patient.
+  // (⚠️ Do NOT filter by lab tests – patients without lab reports must still appear.)
   useEffect(() => {
-    let filtered = patients;
+    const patientList = Array.isArray(patients) ? patients : [];
+    let filtered = [...patientList];
     
     // Apply search filter
     if (searchTerm.trim()) {
-      filtered = filtered.filter(patient => 
-        patient.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.uhId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.assignedDoctor?.name?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      const normalizedSearch = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter(patient => {
+        const name = patient.name ? patient.name.toLowerCase() : '';
+        const email = patient.email ? patient.email.toLowerCase() : '';
+        const phone = patient.phone ? String(patient.phone).toLowerCase() : '';
+        const uhId = patient.uhId ? String(patient.uhId).toLowerCase() : '';
+        const doctorName = patient.assignedDoctor?.name ? patient.assignedDoctor.name.toLowerCase() : '';
+
+        return (
+          name.includes(normalizedSearch) ||
+          email.includes(normalizedSearch) ||
+          phone.includes(normalizedSearch) ||
+          uhId.includes(normalizedSearch) ||
+          doctorName.includes(normalizedSearch)
+        );
+      });
     }
     
     // Apply status filter
@@ -375,6 +464,7 @@ export default function SuperConsultantBilling() {
     setFilteredPatients(filtered);
     // Reset to first page when filters change
     setCurrentPage(1);
+    setPageInput('1');
   }, [patients, searchTerm, statusFilter, appointmentDateFilter]);
   
   // Calculate paginated patients
@@ -382,68 +472,176 @@ export default function SuperConsultantBilling() {
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-  
-  const totalPages = Math.ceil(filteredPatients.length / itemsPerPage);
+
+  const totalPages = Math.max(1, Math.ceil(filteredPatients.length / itemsPerPage));
+  const startItem = filteredPatients.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(currentPage * itemsPerPage, filteredPatients.length);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+      setPageInput(String(totalPages));
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setPageInput(String(currentPage));
+  }, [currentPage]);
+
+  const handlePageChange = (page) => {
+    if (Number.isNaN(page)) return;
+    const clampedPage = Math.min(Math.max(page, 1), totalPages);
+    setCurrentPage(clampedPage);
+    setPageInput(String(clampedPage));
+  };
+
+  const handleItemsPerPageChange = (value) => {
+    const parsed = parseInt(value, 10);
+    if (!parsed || parsed <= 0) return;
+    setItemsPerPage(parsed);
+    setCurrentPage(1);
+    setPageInput('1');
+  };
+
+  const handleGoToPage = () => {
+    if (!pageInput) return;
+    const parsed = parseInt(pageInput, 10);
+    if (Number.isNaN(parsed)) {
+      toast.error('Please enter a valid page number');
+      return;
+    }
+    handlePageChange(parsed);
+  };
 
   // Get superconsultant appointment display data
-  // For superconsultant billing, we specifically look for appointmentTime set during payment processing
+  // For superconsultant billing we prioritise those appointments, but we also support regular consultation slots
   const getSuperconsultantAppointmentData = (patient) => {
-    // Check if patient has superconsultant billing
-    const superconsultantBill = patient.billing?.find(bill => 
-      bill.type === 'consultation' && 
+    const candidates = [];
+
+    const hasSuperconsultantContext = Boolean(
+      patient.superConsultantAppointmentTime ||
+      patient.superConsultantAppointmentStatus ||
+      (Array.isArray(patient.billing) && patient.billing.some((bill) =>
+        bill?.type === 'consultation' && bill.consultationType?.startsWith('superconsultant_')
+      )) ||
+      patient.consultationType?.startsWith('superconsultant_')
+    );
+
+    const addCandidate = (rawDate, status, notes, priority = 0) => {
+      if (!rawDate) return;
+
+      let parsedDate = null;
+
+      if (rawDate instanceof Date) {
+        parsedDate = rawDate;
+      } else {
+        parsedDate = parseDateTime(rawDate);
+        if (!parsedDate) {
+          try {
+            parsedDate = new Date(rawDate);
+          } catch (e) {
+            parsedDate = null;
+          }
+        }
+      }
+
+      if (!parsedDate || isNaN(parsedDate.getTime())) return;
+
+      candidates.push({
+        date: parsedDate,
+        status: status || 'scheduled',
+        notes,
+        priority
+      });
+    };
+
+    const superconsultantBill = patient.billing?.find(bill =>
+      bill.type === 'consultation' &&
       bill.consultationType?.startsWith('superconsultant_')
     );
 
-    if (!superconsultantBill) {
+    if (superconsultantBill) {
+      addCandidate(
+        superconsultantBill.customData?.appointmentTime || superconsultantBill.appointmentTime,
+        superconsultantBill.appointmentStatus || patient.appointmentStatus,
+        superconsultantBill.paymentNotes,
+        3
+      );
+    }
+
+    if (patient.superConsultantAppointmentTime) {
+      addCandidate(
+        patient.superConsultantAppointmentTime,
+        patient.superConsultantAppointmentStatus || patient.appointmentStatus,
+        patient.superConsultantAppointmentNotes || patient.appointmentNotes,
+        2
+      );
+    }
+
+    if (patient.appointmentTime && hasSuperconsultantContext) {
+      addCandidate(
+        patient.appointmentTime,
+        patient.appointmentStatus,
+        patient.appointmentNotes,
+        patient.consultationType?.startsWith('superconsultant_') ? 2 : 1
+      );
+    }
+
+    if (Array.isArray(patient.appointments) && patient.appointments.length > 0) {
+      patient.appointments.forEach((apt) => {
+        const rawDate = apt.scheduledAt || apt.appointmentTime || apt.confirmedDate || apt.preferredDate || apt.date;
+        if (!rawDate) return;
+
+        const isSuperAppointment =
+          apt.consultationType?.startsWith('superconsultant_') ||
+          apt.type === 'superconsultant_consultation' ||
+          apt.appointmentType === 'superconsultant_consultation';
+
+        if (!isSuperAppointment && !hasSuperconsultantContext) {
+          return;
+        }
+
+        addCandidate(
+          rawDate,
+          apt.status || apt.appointmentStatus || patient.appointmentStatus,
+          apt.notes,
+          isSuperAppointment ? 2 : 1
+        );
+      });
+    }
+
+    if (!candidates.length) {
       return null;
     }
 
-    // Priority: Use appointmentTime from patient (set during superconsultant payment processing)
-    if (patient.appointmentTime) {
-      return {
-        date: patient.appointmentTime,
-        status: patient.appointmentStatus || 'scheduled',
-        notes: patient.appointmentNotes
-      };
-    }
-
-    // Check appointments array for superconsultant appointments
-    if (patient.appointments && patient.appointments.length > 0) {
-      // Find appointments related to superconsultant consultation
-      const superconsultantAppointments = patient.appointments
-        .map(apt => {
-          const dateField = apt.scheduledAt || apt.appointmentTime || apt.date;
-          if (!dateField) return null;
-          
-          try {
-            const aptDate = new Date(dateField);
-            if (!isNaN(aptDate.getTime())) {
-              return {
-                ...apt,
-                _appointmentDate: aptDate
-              };
-            }
-          } catch (e) {
-            // Invalid date
-          }
-          return null;
-        })
-        .filter(apt => apt !== null && apt._appointmentDate);
-      
-      if (superconsultantAppointments.length > 0) {
-        // Sort by date (earliest first)
-        superconsultantAppointments.sort((a, b) => a._appointmentDate.getTime() - b._appointmentDate.getTime());
-        const earliestAppointment = superconsultantAppointments[0];
-        
-        return {
-          date: earliestAppointment._appointmentDate,
-          status: earliestAppointment.status || patient.appointmentStatus || 'scheduled',
-          notes: earliestAppointment.notes
-        };
+    candidates.sort((a, b) => {
+      if (b.priority !== a.priority) {
+        return b.priority - a.priority;
       }
+      return a.date.getTime() - b.date.getTime();
+    });
+
+    const highestPriority = candidates[0].priority;
+    const now = new Date();
+    const samePriority = candidates.filter((candidate) => candidate.priority === highestPriority);
+
+    const upcoming = samePriority
+      .filter((candidate) => candidate.date.getTime() >= now.getTime())
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    if (upcoming.length > 0) {
+      return upcoming[0];
     }
 
-    return null;
+    const past = samePriority
+      .filter((candidate) => candidate.date.getTime() < now.getTime())
+      .sort((a, b) => b.date.getTime() - a.date.getTime());
+
+    if (past.length > 0) {
+      return past[0];
+    }
+
+    return candidates[0];
   };
 
   // Get lab status for a patient based on their test requests
@@ -767,7 +965,7 @@ export default function SuperConsultantBilling() {
   };
 
   // Process payment for superconsultant
-  const handleProcessPayment = (patient) => {
+  const handleProcessPayment = async (patient) => {
     const consultationBill = patient.billing?.find(bill => 
       bill.type === 'consultation' && 
       bill.consultationType?.startsWith('superconsultant_')
@@ -779,6 +977,13 @@ export default function SuperConsultantBilling() {
     }
 
     setSelectedPatient(patient);
+    const assignedDoctor = patient.assignedDoctor;
+    const currentDoctorId = typeof assignedDoctor === 'object' && assignedDoctor?._id
+      ? assignedDoctor._id
+      : assignedDoctor || '';
+    setSelectedDoctorId(currentDoctorId);
+
+    await fetchDoctorsList();
     
     // Calculate total outstanding amount (consultation + all service charges for this invoice)
     const invoiceNumber = consultationBill.invoiceNumber;
@@ -811,19 +1016,35 @@ export default function SuperConsultantBilling() {
     e.preventDefault();
     if (!selectedPatient) return;
 
+    if (!selectedDoctorId) {
+      toast.error('Please assign a doctor before scheduling the appointment');
+      return;
+    }
+
     if (!paymentData.appointmentTime) {
       toast.error('Please schedule an appointment date and time');
       return;
     }
 
-    const appointmentDate = new Date(paymentData.appointmentTime);
+    const appointmentDate = parseDateTime(paymentData.appointmentTime);
     const now = new Date();
-    if (appointmentDate <= now) {
+    if (!appointmentDate || appointmentDate <= now) {
       toast.error('Appointment must be scheduled for a future date and time');
       return;
     }
 
     try {
+      const assignedDoctor = selectedPatient.assignedDoctor;
+      const currentDoctorId = typeof assignedDoctor === 'object' && assignedDoctor?._id
+        ? assignedDoctor._id
+        : assignedDoctor || '';
+
+      if (selectedDoctorId !== currentDoctorId) {
+        await API.put(`/patients/${selectedPatient._id}`, {
+          assignedDoctor: selectedDoctorId
+        });
+      }
+
       const consultationBill = selectedPatient.billing?.find(bill => 
         bill.type === 'consultation' && 
         bill.consultationType?.startsWith('superconsultant_')
@@ -845,13 +1066,20 @@ export default function SuperConsultantBilling() {
       if (response.data.success) {
         toast.success('Payment processed successfully! Report sent to Superconsultant for review.');
         setShowPaymentModal(false);
+        setSelectedDoctorId('');
         await dispatch(fetchReceptionistPatients());
       } else {
         toast.error(response.data.message || 'Failed to process payment');
       }
     } catch (error) {
       console.error('Error processing payment:', error);
-      toast.error(error.response?.data?.message || 'Failed to process payment');
+      if (error.response?.data?.message?.toLowerCase()?.includes('assign doctor')) {
+        toast.error(error.response.data.message);
+      } else if (error.config?.url?.includes('/patients/')) {
+        toast.error(error.response?.data?.message || 'Failed to assign doctor. Please try again.');
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to process payment');
+      }
     }
   };
 
@@ -1145,6 +1373,92 @@ export default function SuperConsultantBilling() {
                   </select>
                 </div>
               </div>
+
+              <div className="mt-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div className="text-xs text-slate-500">
+                  {filteredPatients.length === 0 ? (
+                    'No patients to display'
+                  ) : (
+                    <span>
+                      Showing <span className="font-semibold text-slate-700">{startItem}</span> to{' '}
+                      <span className="font-semibold text-slate-700">{endItem}</span> of{' '}
+                      <span className="font-semibold text-slate-700">{filteredPatients.length}</span> patients
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handlePageChange(1)}
+                      disabled={currentPage === 1}
+                      className="px-2 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      First
+                    </button>
+                    <button
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      className="px-2 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages || filteredPatients.length === 0}
+                      className="px-2 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={() => handlePageChange(totalPages)}
+                      disabled={currentPage === totalPages || filteredPatients.length === 0}
+                      className="px-2 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Last
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">Page</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max={totalPages}
+                      value={pageInput}
+                      onChange={(e) => setPageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleGoToPage();
+                        }
+                      }}
+                      className="w-20 border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    <span className="text-xs text-slate-500">of {totalPages}</span>
+                    <button
+                      onClick={handleGoToPage}
+                      className="px-3 py-1 bg-blue-500 text-white text-xs font-medium rounded hover:bg-blue-600 transition-colors"
+                    >
+                      Go
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">Rows:</span>
+                    <select
+                      value={itemsPerPage}
+                      onChange={(e) => handleItemsPerPageChange(e.target.value)}
+                      className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="10">10</option>
+                      <option value="25">25</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -1220,7 +1534,7 @@ export default function SuperConsultantBilling() {
                                   if (!appointmentData) {
                                     return (
                                       <div className="space-y-1">
-                                        <span className="text-slate-400">No appointment</span>
+                                        <span className="text-slate-400">No superconsultant appointment</span>
                                       </div>
                                     );
                                   }
@@ -1581,7 +1895,10 @@ export default function SuperConsultantBilling() {
                 Process Payment - {selectedPatient.name}
               </h3>
               <button
-                onClick={() => setShowPaymentModal(false)}
+                onClick={() => {
+                  setShowPaymentModal(false);
+                  setSelectedDoctorId('');
+                }}
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="h-5 w-5" />
@@ -1590,18 +1907,17 @@ export default function SuperConsultantBilling() {
             
             <div className="flex-1 overflow-y-auto p-6">
               <form onSubmit={handlePaymentSubmit} className="space-y-4">
-                    <div>
+                <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     Payment Amount (₹) *
-                      </label>
-                      <input
-                        type="number"
-                    value={paymentData.amount}
-                    onChange={(e) => setPaymentData({...paymentData, amount: e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                      />
-                    </div>
+                  </label>
+                  <div className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-100 text-slate-700 text-sm">
+                    ₹{Number(paymentData.amount || 0).toFixed(2)}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Outstanding amount is auto-calculated from the superconsultant invoice.
+                  </p>
+                </div>
 
                     <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -1620,20 +1936,48 @@ export default function SuperConsultantBilling() {
                       </select>
               </div>
 
-              <div>
+                <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Consultation Type *
-                </label>
+                    Assign Superconsultant *
+                  </label>
                   <select
-                    value={paymentData.consultationType}
-                    onChange={(e) => setPaymentData({...paymentData, consultationType: e.target.value})}
+                    value={selectedDoctorId}
+                    onChange={(e) => setSelectedDoctorId(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required
+                    disabled={loadingDoctors}
                   >
-                    <option value="superconsultant_normal">Normal Consultation</option>
-                    <option value="superconsultant_audio">Audio Consultation</option>
-                    <option value="superconsultant_video">Video Consultation</option>
+                    <option value="" disabled>
+                      {loadingDoctors ? 'Loading superconsultants...' : 'Select superconsultant'}
+                    </option>
+                    {doctors.map((doctor) => (
+                      <option key={doctor._id} value={doctor._id}>
+                        {doctor.name}
+                        {doctor.specialization || doctor.specializations
+                          ? ` (${doctor.specialization || doctor.specializations})`
+                          : ''}
+                      </option>
+                    ))}
                   </select>
+                  {!loadingDoctors && doctors.length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      No superconsultants found. Please add superconsultants before scheduling the appointment.
+                    </p>
+                  )}
+                  {selectedPatient?.assignedDoctor && selectedDoctorId && selectedDoctorId === (typeof selectedPatient.assignedDoctor === 'object' ? selectedPatient.assignedDoctor._id : selectedPatient.assignedDoctor) && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Currently assigned superconsultant will be notified about this appointment.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Consultation Type
+                  </label>
+                  <div className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-100 text-slate-700 text-sm">
+                    {getConsultationTypeLabel(paymentData.consultationType)}
+                  </div>
                   <p className="text-xs text-blue-600 mt-1">
                     💡 Report will be sent to Superconsultant for review after payment
                   </p>
@@ -1646,7 +1990,15 @@ export default function SuperConsultantBilling() {
                   <input
                     type="datetime-local"
                     value={paymentData.appointmentTime}
-                    onChange={(e) => setPaymentData({...paymentData, appointmentTime: e.target.value})}
+            onChange={(e) => {
+              const value = e.target.value;
+              const parsed = parseDateTime(value);
+              if (!parsed || parsed <= new Date()) {
+                toast.error('Please choose a future date and time');
+                return;
+              }
+              setPaymentData({...paymentData, appointmentTime: value});
+            }}
                     min={new Date().toISOString().slice(0, 16)}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required
@@ -1672,7 +2024,10 @@ export default function SuperConsultantBilling() {
                 <div className="flex gap-3 pt-4">
                   <button
                     type="button"
-                    onClick={() => setShowPaymentModal(false)}
+                    onClick={() => {
+                      setShowPaymentModal(false);
+                      setSelectedDoctorId('');
+                    }}
                     className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
                   >
                     Cancel

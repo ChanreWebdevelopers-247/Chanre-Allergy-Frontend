@@ -163,6 +163,7 @@ import SuperConsultantBilling from '../pages/Receptionist/SuperConsultantBilling
 import ReassignPatient from '../pages/Receptionist/ReassignPatient';
 import ReceptionistBillingTracker from '../pages/Receptionist/BillingTracker';
 import TransactionView from '../pages/Receptionist/TransactionView';
+import ReceptionistCollectionReport from '../pages/Receptionist/CollectionReport';
 import AddReceptionistPatient from '../pages/Receptionist/AddPatient';
 import ReceptionistEditPatient from '../pages/Receptionist/EditPatient';
 import AppointmentManagement from '../pages/Receptionist/AppointmentManagement';
@@ -261,6 +262,7 @@ export default function AppRoutes() {
 <Route path="/receptionist/edit-patient/:id" element={<PrivateRoute><ReceptionistLayout><ReceptionistEditPatient /></ReceptionistLayout></PrivateRoute>} />
 <Route path="/receptionist/patients" element={<PrivateRoute><ReceptionistLayout><ReceptionistPatientList /></ReceptionistLayout></PrivateRoute>} />
 <Route path="/dashboard/receptionist/edit-patient/:id" element={<PrivateRoute><ReceptionistLayout><ReceptionistEditPatient /></ReceptionistLayout></PrivateRoute>} />
+<Route path="/receptionist/collection-report" element={<PrivateRoute><ReceptionistLayout><ReceptionistCollectionReport /></ReceptionistLayout></PrivateRoute>} />
 
       {/* Superadmin Billing Details Route at Root Level (for direct navigation) */}
       <Route path="/superadmin/billing/:billingId" element={<PrivateRoute><DashboardLayout><ErrorBoundary><BillingDetails /></ErrorBoundary></DashboardLayout></PrivateRoute>} />
@@ -537,6 +539,7 @@ export default function AppRoutes() {
         <Route path="receptionist/reassign-patient" element={<ReceptionistLayout><ReassignPatient /></ReceptionistLayout>} />
         <Route path="receptionist/billing-tracker" element={<ReceptionistLayout><ReceptionistBillingTracker /></ReceptionistLayout>} />
         <Route path="receptionist/transactions" element={<ReceptionistLayout><TransactionView /></ReceptionistLayout>} />
+        <Route path="receptionist/collection-report" element={<ReceptionistLayout><ReceptionistCollectionReport /></ReceptionistLayout>} />
         <Route path="receptionist/appointment-management" element={<ReceptionistLayout><AppointmentManagement /></ReceptionistLayout>} />
         <Route path="receptionist/appointment-approvals" element={<ReceptionistLayout><ReceptionistAppointmentApprovals /></ReceptionistLayout>} />
         <Route path="receptionist/book-slot" element={<BookSlot />} />

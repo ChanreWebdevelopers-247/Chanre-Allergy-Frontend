@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { fetchSuperAdminDoctorAssignedPatients } from '../../../features/superadmin/superAdminDoctorSlice';
 import { markPatientAsViewed } from '../../../services/api';
+import { normalizePatientsArray } from '../../../utils/normalizePatientsArray';
 import { 
   Calendar, 
   Clock, 
@@ -27,6 +28,8 @@ const Appointments = () => {
     (state) => state.superAdminDoctors
   );
 
+  const normalizedPatients = useMemo(() => normalizePatientsArray(assignedPatients), [assignedPatients]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all'); // 'all', 'today', 'upcoming', 'past'
   const [sortBy, setSortBy] = useState('date'); // 'date', 'name', 'type'
@@ -38,7 +41,7 @@ const Appointments = () => {
 
   // Filter and sort appointments
   const appointments = useMemo(() => {
-    let filtered = assignedPatients.filter(patient => patient.appointmentTime) || [];
+    let filtered = normalizedPatients.filter(patient => patient.appointmentTime) || [];
 
     // Apply appointment filter
     const today = new Date();
@@ -102,7 +105,7 @@ const Appointments = () => {
     });
 
     return filtered;
-  }, [assignedPatients, filterType, searchTerm, sortBy]);
+  }, [normalizedPatients, filterType, searchTerm, sortBy]);
 
   // Get appointment type badge info
   const getAppointmentTypeBadge = (patient) => {
@@ -201,7 +204,7 @@ const Appointments = () => {
           </p>
         </div>
         <div className="text-xs text-gray-500">
-          Total: {appointments.length} {filterType !== 'all' && `(${assignedPatients.filter(p => p.appointmentTime).length} total)`}
+          Total: {appointments.length} {filterType !== 'all' && `(${normalizedPatients.filter(p => p.appointmentTime).length} total)`}
         </div>
       </div>
 

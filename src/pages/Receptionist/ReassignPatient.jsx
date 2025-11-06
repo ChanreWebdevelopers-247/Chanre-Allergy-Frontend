@@ -128,6 +128,24 @@ export default function ReassignPatient() {
     notes: ''
   });
 
+  const isDateToday = (dateStr) => {
+    if (!dateStr) return false;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return false;
+    const today = new Date();
+    return (
+      today.getFullYear() === year &&
+      today.getMonth() === month - 1 &&
+      today.getDate() === day
+    );
+  };
+
+  const parseDateTime = (dateTimeStr) => {
+    if (!dateTimeStr) return null;
+    const parsed = new Date(dateTimeStr);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
   // Appointment states
   const [patientAppointment, setPatientAppointment] = useState(null);
   const [appointmentLoading, setAppointmentLoading] = useState(false);
@@ -1694,7 +1712,17 @@ export default function ReassignPatient() {
                                     const hasPayment = latestBill && (latestBill.customData?.totals?.paid || latestBill.paidAmount || 0) > 0;
                                     
                                     // Step 1: Check if consultation is viewed/completed
-                                    const isConsultationViewed = patient.viewedByDoctor === true;
+                                    const appointmentStatusLower =
+                                      scheduledAppointment?.status?.toLowerCase?.() ||
+                                      scheduledAppointment?.appointmentStatus?.toLowerCase?.() ||
+                                      patient.appointmentStatus?.toLowerCase?.() ||
+                                      patient.consultationStatus?.toLowerCase?.() ||
+                                      '';
+                                    const hasDoctorViewedConsultation =
+                                      patient.viewedByDoctor === true ||
+                                      appointmentStatusLower === 'viewed' ||
+                                      (Array.isArray(patient.appointments) && patient.appointments.some((apt) => apt.status?.toLowerCase?.() === 'viewed'));
+                                    const isConsultationViewed = hasDoctorViewedConsultation;
                                     const isWorkingHoursViolation = patient.workingHoursViolation && patient.requiresReassignment;
                                     const buttons = [];
                                     
@@ -1821,7 +1849,7 @@ export default function ReassignPatient() {
                                     }
 
                                     // Step 4: If bill is paid and not cancelled/refunded, show Cancel button
-                                    if (hasReassignmentBilling && hasPayment && !isCancelled && !isFullyRefunded && !isPartiallyRefunded) {
+                                    if (hasReassignmentBilling && hasPayment && !isCancelled && !isFullyRefunded && !isPartiallyRefunded && !hasDoctorViewedConsultation) {
                                       buttons.push(
                                         <button
                                           key="cancel-bill"
@@ -3388,10 +3416,10 @@ export default function ReassignPatient() {
                   }
                   
                   // Validate appointment time is in the future (can be same day if time is in future)
-                  const appointmentDate = new Date(paymentData.appointmentTime);
+                  const appointmentDate = parseDateTime(paymentData.appointmentTime);
                   const now = new Date();
                   
-                  if (appointmentDate <= now) {
+                  if (!appointmentDate || appointmentDate <= now) {
                     toast.error('Appointment must be scheduled for a future date and time.');
                     return;
                   }
@@ -3579,7 +3607,15 @@ export default function ReassignPatient() {
                     type="datetime-local"
                     id="appointmentTime"
                     value={paymentData.appointmentTime}
-                    onChange={(e) => setPaymentData({...paymentData, appointmentTime: e.target.value})}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    const parsed = parseDateTime(value);
+                    if (!parsed || parsed <= new Date()) {
+                      toast.error('Please choose a future date and time');
+                      return;
+                    }
+                    setPaymentData({...paymentData, appointmentTime: value});
+                  }}
                     required
                     min={(() => {
                       const now = new Date();
@@ -4065,6 +4101,12 @@ export default function ReassignPatient() {
                 console.log('Reassign data:', workingHoursReassignData);
                 
                 try {
+                  const consultationDate = parseDateTime(workingHoursReassignData.nextConsultationDate);
+                  if (!consultationDate || consultationDate <= new Date()) {
+                    toast.error('Next consultation date must be in the future');
+                    return;
+                  }
+
                   const requestData = {
                     patientId: selectedPatient._id,
                     newDoctorId: workingHoursReassignData.newDoctorId,
@@ -4144,7 +4186,15 @@ export default function ReassignPatient() {
                     id="nextConsultationDate"
                     type="datetime-local"
                     value={workingHoursReassignData.nextConsultationDate}
-                    onChange={(e) => setWorkingHoursReassignData({...workingHoursReassignData, nextConsultationDate: e.target.value})}
+            onChange={(e) => {
+              const value = e.target.value;
+              const parsed = parseDateTime(value);
+              if (!parsed || parsed <= new Date()) {
+                toast.error('Please choose a future date and time');
+                return;
+              }
+              setWorkingHoursReassignData({...workingHoursReassignData, nextConsultationDate: value});
+            }}
                     required
                     min={(() => {
                       const now = new Date();

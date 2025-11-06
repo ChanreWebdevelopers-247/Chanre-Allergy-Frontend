@@ -30,6 +30,53 @@ const AppointmentApprovals = () => {
     '12:00 PM', '12:30 PM', '02:00 PM', '02:30 PM', '03:00 PM', '03:30 PM',
     '04:00 PM', '04:30 PM', '05:00 PM', '05:30 PM', '06:00 PM', '06:30 PM'
   ];
+
+  const [availableTimeSlots, setAvailableTimeSlots] = useState(timeSlots);
+
+  const isDateToday = (dateStr) => {
+    if (!dateStr) return false;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return false;
+    const today = new Date();
+    return (
+      today.getFullYear() === year &&
+      today.getMonth() === month - 1 &&
+      today.getDate() === day
+    );
+  };
+
+  const combineDateAndTime = (dateStr, slot) => {
+    if (!dateStr || !slot) return null;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return null;
+
+    const [time, meridiem] = slot.split(' ');
+    if (!time || !meridiem) return null;
+
+    let [hours, minutes] = time.split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+
+    if (meridiem === 'PM' && hours !== 12) {
+      hours += 12;
+    }
+
+    if (meridiem === 'AM' && hours === 12) {
+      hours = 0;
+    }
+
+    return new Date(year, month - 1, day, hours, minutes, 0, 0);
+  };
+
+  const getFilteredSlotsForDate = (dateStr) => {
+    if (!dateStr) return timeSlots;
+    if (!isDateToday(dateStr)) return timeSlots;
+
+    const now = new Date();
+    return timeSlots.filter((slot) => {
+      const slotDate = combineDateAndTime(dateStr, slot);
+      return slotDate && slotDate > now;
+    });
+  };
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -145,6 +192,8 @@ const AppointmentApprovals = () => {
       
       if (response.success) {
         toast.success('Appointment approved successfully!');
+        setFilter('confirmed');
+        setCurrentPage(1);
         fetchAppointments();
       }
     } catch (error) {
@@ -161,6 +210,12 @@ const AppointmentApprovals = () => {
       return;
     }
 
+    const appointmentDateTime = combineDateAndTime(editFormData.confirmedDate, editFormData.confirmedTime);
+    if (!appointmentDateTime || appointmentDateTime <= new Date()) {
+      toast.error('Selected appointment date and time must be in the future');
+      return;
+    }
+
     try {
       setEditLoading(true);
       const response = await updateAppointmentDetails(selectedAppointment._id, {
@@ -172,6 +227,8 @@ const AppointmentApprovals = () => {
       
       if (response.success) {
         toast.success('Appointment approved successfully!');
+        setFilter('confirmed');
+        setCurrentPage(1);
         closeEditModal();
         fetchAppointments();
       }
@@ -222,9 +279,13 @@ const AppointmentApprovals = () => {
       defaultDate = new Date(appointment.preferredDate).toISOString().split('T')[0];
     }
     
+    const defaultTime = appointment.confirmedTime || appointment.preferredTime || '';
+    const filteredSlots = getFilteredSlotsForDate(defaultDate);
+    setAvailableTimeSlots(filteredSlots);
+    
     setEditFormData({
       confirmedDate: defaultDate,
-      confirmedTime: appointment.confirmedTime || appointment.preferredTime || '',
+      confirmedTime: filteredSlots.includes(defaultTime) ? defaultTime : '',
       notes: appointment.notes || ''
     });
     setShowEditModal(true);
@@ -234,6 +295,7 @@ const AppointmentApprovals = () => {
   const closeEditModal = () => {
     setShowEditModal(false);
     setSelectedAppointment(null);
+    setAvailableTimeSlots(timeSlots);
     setEditFormData({
       confirmedDate: '',
       confirmedTime: '',
@@ -243,6 +305,29 @@ const AppointmentApprovals = () => {
 
   const handleEditInputChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'confirmedDate') {
+      const filteredSlots = getFilteredSlotsForDate(value);
+      setAvailableTimeSlots(filteredSlots);
+      setEditFormData(prev => ({
+        ...prev,
+        confirmedDate: value,
+        confirmedTime: filteredSlots.includes(prev.confirmedTime) ? prev.confirmedTime : ''
+      }));
+
+      if (isDateToday(value) && filteredSlots.length === 0) {
+        toast.info('No future time slots available for today. Please select another date.');
+      }
+      return;
+    }
+
+    if (name === 'confirmedTime') {
+      const selectedDateTime = combineDateAndTime(editFormData.confirmedDate, value);
+      if (selectedDateTime && selectedDateTime <= new Date()) {
+        toast.error('Please choose a future time');
+        return;
+      }
+    }
+
     setEditFormData(prev => ({
       ...prev,
       [name]: value
@@ -252,6 +337,12 @@ const AppointmentApprovals = () => {
   const handleUpdateAppointment = async () => {
     if (!editFormData.confirmedDate || !editFormData.confirmedTime) {
       toast.error('Please select both date and time');
+      return;
+    }
+
+    const appointmentDateTime = combineDateAndTime(editFormData.confirmedDate, editFormData.confirmedTime);
+    if (!appointmentDateTime || appointmentDateTime <= new Date()) {
+      toast.error('Selected appointment date and time must be in the future');
       return;
     }
 
@@ -1239,13 +1330,21 @@ const AppointmentApprovals = () => {
                           value={editFormData.confirmedTime}
                           onChange={handleEditInputChange}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2490eb] focus:border-[#2490eb] bg-white"
+                          disabled={availableTimeSlots.length === 0}
                           required
                         >
                           <option value="">Select Time</option>
-                          {timeSlots.map(time => (
-                            <option key={time} value={time}>{time}</option>
-                          ))}
+                          {availableTimeSlots.length > 0 ? (
+                            availableTimeSlots.map(time => (
+                              <option key={time} value={time}>{time}</option>
+                            ))
+                          ) : (
+                            <option value="" disabled>No future slots available today</option>
+                          )}
                         </select>
+                        {availableTimeSlots.length === 0 && editFormData.confirmedDate && isDateToday(editFormData.confirmedDate) && (
+                          <p className="text-xs text-amber-600 mt-1">No future time slots available for today. Please select a different date.</p>
+                        )}
                       </div>
                     </div>
                     <div>

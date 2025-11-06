@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
@@ -29,6 +29,7 @@ import {
   fetchSuperAdminDoctorPatientLabReports,
   sendFeedbackToCenterDoctor
 } from '../../../features/superadmin/superAdminDoctorSlice';
+import { normalizePatientsArray } from '../../../utils/normalizePatientsArray';
 
 const PatientDetails = () => {
   const dispatch = useDispatch();
@@ -49,6 +50,8 @@ const PatientDetails = () => {
   } = useSelector((state) => state.superAdminDoctors);
 
   const [selectedPatient, setSelectedPatient] = useState(null);
+
+  const normalizedPatients = useMemo(() => normalizePatientsArray(assignedPatients), [assignedPatients]);
   const [showPatientDetails, setShowPatientDetails] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [feedbackModal, setFeedbackModal] = useState(false);
@@ -72,8 +75,8 @@ const PatientDetails = () => {
           
           // If patient not found or error occurred, redirect to first available patient
           if (result.error || !result.payload) {
-            if (assignedPatients.length > 0) {
-              navigate(`/dashboard/superadmin/doctor/patient/${assignedPatients[0]._id}/profile`);
+            if (normalizedPatients.length > 0) {
+              navigate(`/dashboard/superadmin/doctor/patient/${normalizedPatients[0]._id}/profile`);
             } else {
               navigate('/dashboard/superadmin/doctor/patients');
             }
@@ -86,9 +89,9 @@ const PatientDetails = () => {
 
       checkAndFetchPatient();
     }
-  }, [dispatch, patientId, assignedPatients, navigate]);
+  }, [dispatch, patientId, normalizedPatients, navigate]);
 
-  const filteredPatients = assignedPatients.filter(patient =>
+  const filteredPatients = normalizedPatients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     patient.phone.includes(searchTerm) ||
     patient.email?.toLowerCase().includes(searchTerm.toLowerCase())

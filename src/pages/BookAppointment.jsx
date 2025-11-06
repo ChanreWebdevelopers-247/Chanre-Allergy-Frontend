@@ -49,6 +49,53 @@ const BookAppointment = () => {
     '04:00 PM', '04:30 PM', '05:00 PM', '05:30 PM', '06:00 PM', '06:30 PM'
   ];
 
+  const [availableTimeSlots, setAvailableTimeSlots] = useState(timeSlots);
+
+  const isDateToday = (dateStr) => {
+    if (!dateStr) return false;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return false;
+    const today = new Date();
+    return (
+      today.getFullYear() === year &&
+      today.getMonth() === month - 1 &&
+      today.getDate() === day
+    );
+  };
+
+  const combineDateAndTime = (dateStr, slot) => {
+    if (!dateStr || !slot) return null;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if ([year, month, day].some(Number.isNaN)) return null;
+
+    const [time, meridiem] = slot.split(' ');
+    if (!time || !meridiem) return null;
+
+    let [hours, minutes] = time.split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+
+    if (meridiem === 'PM' && hours !== 12) {
+      hours += 12;
+    }
+
+    if (meridiem === 'AM' && hours === 12) {
+      hours = 0;
+    }
+
+    return new Date(year, month - 1, day, hours, minutes, 0, 0);
+  };
+
+  const getFilteredSlotsForDate = (dateStr) => {
+    if (!dateStr) return timeSlots;
+    if (!isDateToday(dateStr)) return timeSlots;
+
+    const now = new Date();
+    return timeSlots.filter((slot) => {
+      const slotDate = combineDateAndTime(dateStr, slot);
+      return slotDate && slotDate > now;
+    });
+  };
+
   useEffect(() => {
     fetchCenters();
     getUserLocation();
@@ -96,6 +143,29 @@ const BookAppointment = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'preferredDate') {
+      const filteredSlots = getFilteredSlotsForDate(value);
+      setAvailableTimeSlots(filteredSlots);
+      setFormData(prev => ({
+        ...prev,
+        preferredDate: value,
+        preferredTime: filteredSlots.includes(prev.preferredTime) ? prev.preferredTime : ''
+      }));
+
+      if (isDateToday(value) && filteredSlots.length === 0) {
+        toast.info('No future time slots available for today. Please select another date.');
+      }
+      return;
+    }
+
+    if (name === 'preferredTime') {
+      const selectedDateTime = combineDateAndTime(formData.preferredDate, value);
+      if (selectedDateTime && selectedDateTime <= new Date()) {
+        toast.error('Please choose a future time');
+        return;
+      }
+    }
+
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -211,6 +281,12 @@ const BookAppointment = () => {
 
     if (!selectedCenter) {
       toast.error('Please select a center');
+      return;
+    }
+
+    const appointmentDateTime = combineDateAndTime(formData.preferredDate, formData.preferredTime);
+    if (!appointmentDateTime || appointmentDateTime <= new Date()) {
+      toast.error('Selected appointment date and time must be in the future');
       return;
     }
 
@@ -579,13 +655,21 @@ const BookAppointment = () => {
                         value={formData.preferredTime}
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2490eb] focus:border-[#2490eb] bg-white"
+                        disabled={availableTimeSlots.length === 0}
                         required
                       >
                         <option value="">Select Time</option>
-                        {timeSlots.map(time => (
-                          <option key={time} value={time}>{time}</option>
-                        ))}
+                        {availableTimeSlots.length > 0 ? (
+                          availableTimeSlots.map(time => (
+                            <option key={time} value={time}>{time}</option>
+                          ))
+                        ) : (
+                          <option value="" disabled>No future slots available today</option>
+                        )}
                       </select>
+                      {availableTimeSlots.length === 0 && formData.preferredDate && isDateToday(formData.preferredDate) && (
+                        <p className="text-xs text-amber-600 mt-1">No future time slots available for today. Please select a different date.</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Appointment Type</label>
@@ -865,6 +949,7 @@ const BookAppointment = () => {
                 onClick={() => {
                   setStep(1);
                   setSelectedCenter(null);
+                  setAvailableTimeSlots(timeSlots);
                   setFormData({
                     patientName: '',
                     patientEmail: '',

@@ -25,6 +25,7 @@ import {
   FaCalendarAlt,
   FaFileMedical,
   FaStethoscope,
+  FaChartLine,
 } from 'react-icons/fa';
 
 export default function Sidebar(props) {
@@ -378,6 +379,12 @@ export default function Sidebar(props) {
                 label="Transaction History"
                 icon={<FaClipboardList />}
                 isActive={isActive("/dashboard/receptionist/transactions")}
+              />
+              <SidebarLink
+                to="/dashboard/receptionist/collection-report"
+                label="Collection Report"
+                icon={<FaChartLine />}
+                isActive={isActive("/dashboard/receptionist/collection-report")}
               />
               <SidebarLink
                 to="/dashboard/receptionist/appointment-approvals"

@@ -747,6 +747,14 @@ const TestRequestDetails = () => {
                       <label className="block text-xs font-medium text-gray-500">Collection Status</label>
                       <p className="text-gray-900 font-medium">{testRequest.sampleCollectionStatus || 'Not Started'}</p>
                     </div>
+                    {testRequest.sampleCollectionActualDate && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500">Actual Collection Date</label>
+                        <p className="text-gray-900 font-medium">
+                          {new Date(testRequest.sampleCollectionActualDate).toLocaleDateString()}
+                        </p>
+                      </div>
+                    )}
                     {testRequest.sampleCollectionNotes && (
                       <div>
                         <label className="block text-xs font-medium text-gray-500">Collection Notes</label>

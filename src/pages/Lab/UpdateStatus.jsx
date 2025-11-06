@@ -22,6 +22,11 @@ import {
   Play
 } from 'lucide-react';
 
+const toLocalISODate = (date) => {
+  const offsetMillis = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offsetMillis).toISOString().split('T')[0];
+};
+
 const UpdateStatus = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -40,6 +45,8 @@ const UpdateStatus = () => {
     sampleCollectionNotes: ''
   });
 
+  const minActualDate = toLocalISODate(new Date());
+
   useEffect(() => {
     if (id) {
       fetchTestRequestDetails();
@@ -57,7 +64,7 @@ const UpdateStatus = () => {
         setFormData(prev => ({
           ...prev,
           sampleCollectionStatus: response.data.sampleCollectionStatus || 'In_Progress',
-          sampleCollectionActualDate: new Date(response.data.sampleCollectionActualDate).toISOString().split('T')[0],
+          sampleCollectionActualDate: toLocalISODate(new Date(response.data.sampleCollectionActualDate)),
           sampleCollectionNotes: response.data.sampleCollectionNotes || ''
         }));
       }
@@ -88,18 +95,17 @@ const UpdateStatus = () => {
     // Validate date if provided
     if (formData.sampleCollectionActualDate) {
       const selectedDate = new Date(formData.sampleCollectionActualDate);
-      const now = new Date();
-      
-      // Allow past dates but warn if more than 30 days in the past
-      const daysDifference = Math.floor((now - selectedDate) / (1000 * 60 * 60 * 24));
-      
-      if (daysDifference > 30) {
-        setError('Collection date cannot be more than 30 days in the past. Please contact admin if you need to enter an earlier date.');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (Number.isNaN(selectedDate.getTime())) {
+        setError('Invalid collection date. Please select a valid future date.');
         return;
       }
-      
-      if (daysDifference > 0) {
-        console.log(`⚠️ Warning: Setting collection date to ${daysDifference} day(s) in the past`);
+
+      if (selectedDate < today) {
+        setError('Actual collection date cannot be in the past. Please choose today or a future date.');
+        return;
       }
     }
 
@@ -425,10 +431,11 @@ const UpdateStatus = () => {
                   name="sampleCollectionActualDate"
                   value={formData.sampleCollectionActualDate}
                   onChange={handleInputChange}
+                  min={minActualDate}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  You can select past dates if collection happened on a different date than scheduled
+                  Select today or a future date. Past dates are not allowed.
                 </p>
               </div>
 

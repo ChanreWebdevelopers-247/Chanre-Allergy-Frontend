@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { toast } from 'react-toastify';
 import API from '../../services/api';
+import { normalizePatientsArray } from '../../utils/normalizePatientsArray';
 
 // Management thunks (for superadmin to manage superadmin consultants)
 export const fetchSuperAdminDoctors = createAsyncThunk(
@@ -202,6 +203,10 @@ export const fetchSuperAdminDoctorAssignedPatients = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const response = await API.get('/superadmin/doctors/working/patients');
+      if (process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
+        console.log('🔍 SuperAdmin assigned patients raw response:', response.data);
+      }
       return response.data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.message || 'Failed to fetch assigned patients');
@@ -472,7 +477,7 @@ const superAdminDoctorSlice = createSlice({
       })
       .addCase(fetchSuperAdminDoctorAssignedPatients.fulfilled, (state, action) => {
         state.workingLoading = false;
-        state.assignedPatients = action.payload.patients || action.payload;
+        state.assignedPatients = normalizePatientsArray(action.payload);
       })
       .addCase(fetchSuperAdminDoctorAssignedPatients.rejected, (state, action) => {
         state.workingLoading = false;

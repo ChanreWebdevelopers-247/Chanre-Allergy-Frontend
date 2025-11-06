@@ -78,6 +78,32 @@ const ultraSafeRender = (value, fallback = 'N/A') => {
   }
 };
 
+const hasSampleBeenCollected = (request = {}) => {
+  const normalizedStatus = (request.status || '').toLowerCase();
+  if ([
+    'sample_collection_scheduled',
+    'sample_collected',
+    'in_lab_testing',
+    'testing_completed',
+    'report_generated',
+    'report_sent',
+    'completed'
+  ].includes(normalizedStatus)) {
+    return true;
+  }
+
+  const sampleCollectionStatus = (request.sampleCollectionStatus || '').toLowerCase();
+  if (['completed', 'sample_collected'].includes(sampleCollectionStatus)) {
+    return true;
+  }
+
+  if (request.sampleCollectionActualDate) {
+    return true;
+  }
+
+  return false;
+};
+
 function ReceptionistBilling() {
   const dispatch = useDispatch();
   const { billingRequests, loading, error } = useSelector((s) => s.receptionist);
@@ -1554,7 +1580,7 @@ function ReceptionistBilling() {
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
-                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
+                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && !hasSampleBeenCollected(req) && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
                                     className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"
@@ -1629,7 +1655,7 @@ function ReceptionistBilling() {
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
-                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
+                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && !hasSampleBeenCollected(req) && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
                                     className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"
@@ -1704,7 +1730,7 @@ function ReceptionistBilling() {
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
-                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
+                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && !hasSampleBeenCollected(req) && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
                                     className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"
@@ -1779,7 +1805,7 @@ function ReceptionistBilling() {
                                 </button>
                                 
                                 {/* Cancel Bill Button - Only show if not already cancelled or refunded */}
-                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && (
+                                {req.billing?.status !== 'cancelled' && req.billing?.status !== 'refunded' && !hasSampleBeenCollected(req) && (
                                   <button 
                                     onClick={() => openCancelModal(req)} 
                                     className="inline-flex items-center px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700 transition-colors duration-200"

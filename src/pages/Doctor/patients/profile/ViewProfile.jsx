@@ -5,9 +5,159 @@ import { toast } from "react-toastify";
 import { fetchPatientDetails, fetchPatientMedications, fetchPatientHistory, fetchPatientFollowUps, fetchAllergicRhinitis, fetchAllergicConjunctivitis, fetchAllergicBronchitis, fetchAtopicDermatitis, fetchGPE, fetchPrescriptions, fetchTests, fetchPatientTestRequests, updatePatient } from '../../../../features/doctor/doctorThunks';
 import { canDoctorEditPatient, getEditRestrictionMessage } from '../../../../utils/patientPermissions';
 import { 
-  ArrowLeft, User, Phone, Calendar, MapPin, Activity, Pill, FileText, Eye, Edit, Plus, AlertCircle, Mail, UserCheck, Clock
+  ArrowLeft, User, Phone, Calendar, MapPin, Activity, Pill, FileText, Eye, Edit, Plus, AlertCircle, Mail, UserCheck, Clock, Download, X
 } from 'lucide-react';
 import API from '../../../../services/api';
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
+const DEFAULT_CENTER_INFO = {
+  name: "CHANRE RHEUMATOLOGY & IMMUNOLOGY CENTER & RESEARCH",
+  subTitle:
+    "Specialists in Rheumatology, Autoimmune Disease, Allergy, Immune Defiency, Rheumatoid Immunology, Vasculitis and Rare Infections & Infertility",
+  address: "No. 414/5&6, 20th Main, West of Chord Road, 1st Block, Rajajinagar, Bengaluru - 560 010.",
+  email: "info@chanreclinic.com",
+  phone: "080-42516699",
+  fax: "080-42516600",
+  missCallNumber: "080-42516666",
+  mobileNumber: "9532333122",
+  website: "www.chanreicr.com | www.mychanreclinic.com",
+  labWebsite: "www.chanrelabresults.com",
+  code: "",
+};
+
+const PrescriptionPreviewCard = ({ centerInfo = {}, patient, medication }) => {
+  const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
+  const ageGender = [
+    patient?.age ? `${patient.age}` : null,
+    patient?.gender || null,
+  ]
+    .filter(Boolean)
+    .join(" / ");
+
+  const prescribedDate = medication?.prescribedDate
+    ? new Date(medication.prescribedDate).toLocaleDateString()
+    : medication?.createdAt
+    ? new Date(medication.createdAt).toLocaleDateString()
+    : new Date().toLocaleDateString();
+
+  return (
+    <div className="bg-white rounded-2xl border border-blue-100 overflow-hidden shadow-sm">
+      <div className="bg-gradient-to-r from-blue-50 to-white px-6 py-6 text-center border-b border-blue-100">
+        <h2 className="text-sm sm:text-base font-bold text-slate-800 tracking-[0.12em] uppercase">
+          {mergedCenter.name}
+        </h2>
+        <p className="text-[10px] sm:text-[11px] text-slate-600 mt-2 max-w-3xl mx-auto leading-relaxed">
+          {mergedCenter.subTitle}
+        </p>
+        <div className="mt-3 space-y-1 text-[11px] text-slate-700">
+          <p>{mergedCenter.address}</p>
+          <p>
+            <span className="font-medium">Phone:</span> {mergedCenter.phone}
+            {mergedCenter.fax ? ` | Fax: ${mergedCenter.fax}` : ""}
+          </p>
+          <p>
+            <span className="font-medium">Email:</span> {mergedCenter.email}
+            {mergedCenter.website ? ` | ${mergedCenter.website}` : ""}
+          </p>
+          <p>
+            <span className="font-medium">Lab:</span> {mergedCenter.labWebsite}
+            {mergedCenter.missCallNumber ? ` | Missed Call: ${mergedCenter.missCallNumber}` : ""}
+            {mergedCenter.mobileNumber ? ` | Appointment: ${mergedCenter.mobileNumber}` : ""}
+          </p>
+          {mergedCenter.code && (
+            <p className="uppercase tracking-[0.3em] text-slate-500">Center Code: {mergedCenter.code}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/70">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Patient Name</span>
+            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800 font-medium">
+              {patient?.name || "—"}
+            </div>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Patient ID</span>
+            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
+              {patient?.uhId || patient?._id || "—"}
+            </div>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Age / Gender</span>
+            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
+              {ageGender || "—"}
+            </div>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Prescribed Date</span>
+            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
+              {prescribedDate}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-6 py-4 overflow-x-auto">
+        <table className="w-full border border-slate-200 rounded-lg overflow-hidden text-xs">
+          <thead className="bg-slate-100 uppercase tracking-widest text-[10px] text-slate-600">
+            <tr>
+              <th className="border-b border-slate-200 px-3 py-3 text-left">Medicine</th>
+              <th className="border-b border-slate-200 px-3 py-3 text-left">Dose</th>
+              <th className="border-b border-slate-200 px-3 py-3 text-left">Frequency</th>
+              <th className="border-b border-slate-200 px-3 py-3 text-left">Duration</th>
+              <th className="border-b border-slate-200 px-3 py-3 text-left">Instructions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="bg-white">
+              <td className="border-t border-slate-200 px-3 py-3 text-slate-800 font-medium">
+                {medication?.drugName || "—"}
+              </td>
+              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                {medication?.dose || "—"}
+              </td>
+              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                {medication?.frequency || "—"}
+              </td>
+              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                {medication?.duration || "—"}
+              </td>
+              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                {medication?.instructions || "—"}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-6 pb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Prescribed By</span>
+            <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
+              {typeof medication?.prescribedBy === "object"
+                ? medication?.prescribedBy?.name || "—"
+                : medication?.prescribedBy || "—"}
+            </div>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Notes</span>
+            <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
+              Please follow up after the course completion or earlier if symptoms persist.
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 h-px bg-slate-200" />
+        <div className="mt-4 text-[10px] text-slate-500 uppercase tracking-[0.4em] text-right">
+          Doctor Signature
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const TABS = ["Overview", "Follow Up", "Prescription", "Lab Report Status", "History", "Investigation", "Medications"];
 
@@ -19,6 +169,10 @@ const ViewProfile = () => {
   const [activeTab, setActiveTab] = useState("Overview");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [centerInfo, setCenterInfo] = useState(DEFAULT_CENTER_INFO);
+  const [centerLoading, setCenterLoading] = useState(false);
+  const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
+  const [selectedPrescription, setSelectedPrescription] = useState(null);
 
 
 
@@ -91,6 +245,174 @@ const ViewProfile = () => {
   
   // Get current user from auth state
   const { user } = useSelector((state) => state.auth);
+  const resolveCenterId = () => {
+    if (!user) return null;
+
+    if (user.centerId) {
+      if (typeof user.centerId === 'object' && user.centerId._id) {
+        return user.centerId._id;
+      }
+      if (typeof user.centerId === 'string') {
+        return user.centerId;
+      }
+    }
+
+    if (user.centerID) return user.centerID;
+    if (user.center_id) return user.center_id;
+    if (user.center && user.center._id) return user.center._id;
+
+    return null;
+  };
+
+  useEffect(() => {
+    const fetchCenterInfo = async () => {
+      if (!user) return;
+
+      const centerId = resolveCenterId();
+
+      if (!centerId) {
+        if (user.centerCode || user.hospitalName) {
+          setCenterInfo((prev) => ({
+            ...prev,
+            code: user.centerCode || prev.code,
+            name: user.hospitalName || prev.name,
+          }));
+        }
+        return;
+      }
+
+      setCenterLoading(true);
+      try {
+        const response = await API.get(`/centers/${centerId}`);
+        const center = response.data || {};
+        const formattedAddress = [center.address, center.location]
+          .filter(Boolean)
+          .join(', ');
+
+        setCenterInfo((prev) => ({
+          ...prev,
+          name: center.name || prev.name,
+          address: formattedAddress || prev.address,
+          email: center.email || prev.email,
+          phone: center.phone || prev.phone,
+          fax: center.fax || prev.fax,
+          missCallNumber: center.missCallNumber || prev.missCallNumber,
+          mobileNumber: center.mobileNumber || prev.mobileNumber,
+          website: center.website || prev.website,
+          labWebsite: center.labWebsite || prev.labWebsite,
+          code: center.code || prev.code,
+        }));
+      } catch (centerError) {
+        console.error('Failed to fetch center info', centerError);
+      } finally {
+        setCenterLoading(false);
+      }
+    };
+
+    fetchCenterInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const handleViewPrescription = (medication) => {
+    setSelectedPrescription(medication);
+    setShowPrescriptionModal(true);
+  };
+
+  const handleClosePrescriptionPreview = () => {
+    setShowPrescriptionModal(false);
+    setSelectedPrescription(null);
+  };
+
+  const handleDownloadPrescription = (medication) => {
+    if (!medication) return;
+    if (!patient) {
+      toast.warn('Patient details are still loading. Please try again.');
+      return;
+    }
+
+    const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    let cursorY = 60;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(mergedCenter.name, 40, cursorY);
+    cursorY += 18;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const subTitleLines = doc.splitTextToSize(mergedCenter.subTitle, 520);
+    subTitleLines.forEach((line) => {
+      doc.text(line, 40, cursorY);
+      cursorY += 14;
+    });
+    cursorY += 6;
+
+    const contactLines = [
+      mergedCenter.address,
+      `Phone: ${mergedCenter.phone || '-'}${mergedCenter.fax ? ` | Fax: ${mergedCenter.fax}` : ''}`,
+      `Email: ${mergedCenter.email || '-'}${mergedCenter.website ? ` | ${mergedCenter.website}` : ''}`,
+      `Lab: ${mergedCenter.labWebsite || '-'}${mergedCenter.missCallNumber ? ` | Missed Call: ${mergedCenter.missCallNumber}` : ''}${mergedCenter.mobileNumber ? ` | Appointment: ${mergedCenter.mobileNumber}` : ''}`,
+    ];
+
+    contactLines.forEach((line) => {
+      if (!line) return;
+      const wrapped = doc.splitTextToSize(line, 520);
+      wrapped.forEach((wrappedLine) => {
+        doc.text(wrappedLine, 40, cursorY);
+        cursorY += 14;
+      });
+    });
+    cursorY += 10;
+
+    doc.setFont('helvetica', 'bold');
+    const prescribedDate = medication.prescribedDate
+      ? new Date(medication.prescribedDate).toLocaleDateString()
+      : medication.createdAt
+      ? new Date(medication.createdAt).toLocaleDateString()
+      : new Date().toLocaleDateString();
+    doc.text(`Patient: ${patient?.name || 'N/A'}`, 40, cursorY);
+    doc.text(`Date: ${prescribedDate}`, 360, cursorY);
+    cursorY += 16;
+
+    doc.setFont('helvetica', 'normal');
+    const uhid = patient?.uhId || patient?._id || 'N/A';
+    const ageGender = [
+      patient?.age ? `${patient.age}` : null,
+      patient?.gender || null,
+    ]
+      .filter(Boolean)
+      .join(' / ') || 'N/A';
+    doc.text(`UHID: ${uhid}`, 40, cursorY);
+    doc.text(`Age/Gender: ${ageGender}`, 360, cursorY);
+    cursorY += 20;
+
+    autoTable(doc, {
+      startY: cursorY,
+      head: [['Medicine', 'Dose', 'Frequency', 'Duration', 'Instructions']],
+      body: [[
+        medication.drugName || '',
+        medication.dose || '',
+        medication.frequency || '',
+        medication.duration || '',
+        medication.instructions || '',
+      ]],
+      styles: { fontSize: 10, cellPadding: 6, halign: 'left' },
+      headStyles: { fillColor: [59, 130, 246], textColor: 255, halign: 'left' },
+      columnStyles: {
+        4: { cellWidth: 180 },
+      },
+    });
+
+    const finalY = doc.lastAutoTable?.finalY || cursorY + 60;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'italic');
+    doc.text(`For ${mergedCenter.name}`, 40, finalY + 30);
+    doc.text('Doctor Signature', 420, finalY + 30);
+
+    const fileName = `${(patient?.name || 'patient').replace(/\s+/g, '_')}_prescription.pdf`;
+    doc.save(fileName);
+  };
   
   // Check if doctor can edit this patient
   const editPermission = canDoctorEditPatient(patient, user);
@@ -229,8 +551,9 @@ const ViewProfile = () => {
   }
 
   return (
+    <>
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-2 sm:p-3 md:p-6">
-      <div className="max-w-6xl mx-auto">
+        <div className="max-w-6xl mx-auto">
         {/* Header */}
           <div className="mb-6 sm:mb-8">
               <button
@@ -760,6 +1083,7 @@ const ViewProfile = () => {
                           <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date Prescribed</th>
                           <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Adverse Effect</th>
                           <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Instructions</th>
+                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
@@ -778,6 +1102,24 @@ const ViewProfile = () => {
                             </td>
                             <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.adverseEvent || 'None'}</td>
                             <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.instructions || 'N/A'}</td>
+                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  onClick={() => handleViewPrescription(med)}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50 transition-colors"
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                  View
+                                </button>
+                                <button
+                                  onClick={() => handleDownloadPrescription(med)}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                  Download
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1170,6 +1512,43 @@ const ViewProfile = () => {
           )}
         </div>
       </div>
+
+      {showPrescriptionModal && selectedPrescription && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Prescription Preview</h3>
+                <p className="text-xs text-slate-500">
+                  {patient?.name ? `Patient: ${patient.name}` : 'Patient details'}
+                </p>
+              </div>
+              <button
+                onClick={handleClosePrescriptionPreview}
+                className="rounded-full p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                aria-label="Close prescription preview"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="bg-slate-100/80 px-6 py-3 text-xs text-slate-600 border-b border-slate-200 flex items-center gap-2">
+              {centerLoading ? (
+                <span>Refreshing center information…</span>
+              ) : (
+                <span>Center information auto-filled from registered profile.</span>
+              )}
+            </div>
+            <div className="p-6 bg-slate-50">
+              <PrescriptionPreviewCard
+                centerInfo={centerInfo}
+                patient={patient}
+                medication={selectedPrescription}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
