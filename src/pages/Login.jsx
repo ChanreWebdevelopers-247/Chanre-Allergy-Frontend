@@ -46,6 +46,9 @@ export default function Login() {
       else if (role === 'accountant') {
         navigate('/dashboard/accountant/dashboard');
       }
+      else if (role === 'slitlab') {
+        navigate('/dashboard/slit-lab/slit-therapy');
+      }
       else if (role === 'lab technician' || role === 'lab assistant' || role === 'lab manager') {
         navigate('/dashboard/lab/dashboard');
       }

@@ -2356,9 +2356,7 @@ function ReceptionistBilling() {
                         <option value="Card">Card (Credit/Debit)</option>
                         <option value="UPI">UPI</option>
                         <option value="Net Banking">Net Banking</option>
-                        <option value="Cheque">Cheque</option>
-                        <option value="Insurance">Insurance</option>
-                        <option value="Other">Other</option>
+                        <option value="NEFT">NEFT</option>
                       </select>
                     </div>
                     

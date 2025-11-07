@@ -494,6 +494,72 @@ export const createLabStaff = createAsyncThunk(
   }
 );
 
+// SLIT Lab staff management
+export const fetchSlitLabStaff = createAsyncThunk(
+  'superadmin/fetchSlitLabStaff',
+  async (_, { rejectWithValue }) => {
+    try {
+      const res = await API.get('/slit-lab-staff');
+      return res.data;
+    } catch (error) {
+      console.error('Fetch SLIT lab staff error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.message || 'Failed to fetch SLIT lab staff');
+    }
+  }
+);
+
+export const fetchSlitLabStaffById = createAsyncThunk(
+  'superadmin/fetchSlitLabStaffById',
+  async (id, { rejectWithValue }) => {
+    try {
+      const res = await API.get(`/slit-lab-staff/${id}`);
+      return res.data;
+    } catch (error) {
+      console.error('Fetch SLIT lab staff by ID error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.message || 'Failed to fetch SLIT lab staff member');
+    }
+  }
+);
+
+export const createSlitLabStaff = createAsyncThunk(
+  'superadmin/createSlitLabStaff',
+  async (payload, { rejectWithValue }) => {
+    try {
+      const res = await API.post('/slit-lab-staff', payload);
+      return res.data;
+    } catch (error) {
+      console.error('Create SLIT lab staff error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.message || 'Failed to create SLIT lab staff member');
+    }
+  }
+);
+
+export const updateSlitLabStaff = createAsyncThunk(
+  'superadmin/updateSlitLabStaff',
+  async ({ id, payload }, { rejectWithValue }) => {
+    try {
+      const res = await API.put(`/slit-lab-staff/${id}`, payload);
+      return res.data;
+    } catch (error) {
+      console.error('Update SLIT lab staff error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.message || 'Failed to update SLIT lab staff member');
+    }
+  }
+);
+
+export const deleteSlitLabStaff = createAsyncThunk(
+  'superadmin/deleteSlitLabStaff',
+  async (id, { rejectWithValue }) => {
+    try {
+      const res = await API.delete(`/slit-lab-staff/${id}`);
+      return { id, message: res.data?.message };
+    } catch (error) {
+      console.error('Delete SLIT lab staff error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.message || 'Failed to delete SLIT lab staff member');
+    }
+  }
+);
+
 // Update lab staff
 export const updateLabStaff = createAsyncThunk(
   'superadmin/updateLabStaff',

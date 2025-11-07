@@ -417,4 +417,136 @@ export const getPaymentLogsForCenter = async (params = {}) => {
   }
 };
 
+// SLIT therapy APIs
+export const getReceptionistSlitTherapyRequests = async (params = {}) => {
+  try {
+    const response = await API.get('/slit-therapy/receptionist', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching SLIT therapy requests for reception:', error);
+    throw error;
+  }
+};
+
+export const createSlitTherapyRequest = async (payload) => {
+  try {
+    const response = await API.post('/slit-therapy', payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating SLIT therapy request:', error);
+    throw error;
+  }
+};
+
+export const markSlitTherapyPayment = async (id, payload) => {
+  try {
+    const response = await API.put(`/slit-therapy/${id}/mark-paid`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error marking SLIT therapy payment:', error);
+    throw error;
+  }
+};
+
+export const getLabSlitTherapyRequests = async (params = {}) => {
+  try {
+    const response = await API.get('/slit-therapy/lab', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching SLIT therapy requests for lab:', error);
+    throw error;
+  }
+};
+
+export const updateSlitTherapyRequestStatus = async (id, payload) => {
+  try {
+    const response = await API.put(`/slit-therapy/${id}/status`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error updating SLIT therapy status:', error);
+    throw error;
+  }
+};
+
+export const closeSlitTherapyRequest = async (id, payload = {}) => {
+  try {
+    const response = await API.put(`/slit-therapy/${id}/close`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error closing SLIT therapy request:', error);
+    throw error;
+  }
+};
+
+export const cancelSlitTherapyRequest = async (id, payload = {}) => {
+  try {
+    const response = await API.put(`/slit-therapy/${id}/cancel`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error cancelling SLIT therapy request:', error);
+    throw error;
+  }
+};
+
+export const refundSlitTherapyRequest = async (id, payload) => {
+  try {
+    const response = await API.put(`/slit-therapy/${id}/refund`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error refunding SLIT therapy request:', error);
+    throw error;
+  }
+};
+
+// SLIT Lab staff management APIs
+export const getSlitLabStaff = async () => {
+  try {
+    const response = await API.get('/slit-lab-staff');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching SLIT lab staff:', error);
+    throw error;
+  }
+};
+
+export const getSlitLabStaffById = async (id) => {
+  try {
+    const response = await API.get(`/slit-lab-staff/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching SLIT lab staff member:', error);
+    throw error;
+  }
+};
+
+export const createSlitLabStaff = async (payload) => {
+  try {
+    const response = await API.post('/slit-lab-staff', payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating SLIT lab staff member:', error);
+    throw error;
+  }
+};
+
+export const updateSlitLabStaff = async (id, payload) => {
+  try {
+    const response = await API.put(`/slit-lab-staff/${id}`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error updating SLIT lab staff member:', error);
+    throw error;
+  }
+};
+
+export const deleteSlitLabStaff = async (id) => {
+  try {
+    const response = await API.delete(`/slit-lab-staff/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting SLIT lab staff member:', error);
+    throw error;
+  }
+};
+
 export default API;

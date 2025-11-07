@@ -71,7 +71,7 @@ export default function ManagePatients() {
                         onClick={() => navigate(`/dashboard/CenterAdmin/patients/profile/AddMedications/${patient?._id}`)}
                         className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow-md"
                       >
-                        Add Medications
+                        Create / Print Prescription
                       </button>
                     </td>
                   </tr>
@@ -134,7 +134,7 @@ export default function ManagePatients() {
                     onClick={() => navigate(`/dashboard/CenterAdmin/patients/profile/AddMedications/${patient?._id}`)}
                     className="w-full px-4 py-3 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow-md"
                   >
-                    Add Medications
+                    Create / Print Prescription
                   </button>
                 </div>
               </div>

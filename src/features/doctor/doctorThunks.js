@@ -810,12 +810,45 @@ export const fetchGPE = createAsyncThunk(
   }
 );
 
+// ✅ Create prescription (for doctors)
+export const createPrescription = createAsyncThunk(
+  'doctor/createPrescription',
+  async (prescriptionData, { rejectWithValue }) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await API.post('/prescriptions', prescriptionData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const payload = response.data?.prescription || response.data;
+      if (!payload || typeof payload !== 'object') {
+        return rejectWithValue('Invalid response while creating prescription');
+      }
+
+      toast.success('Prescription created successfully!');
+      return payload;
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Failed to create prescription';
+      toast.error(errorMsg);
+      return rejectWithValue(errorMsg);
+    }
+  }
+);
+
+const normalizePrescriptionsResponse = (data) => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.prescriptions)) return data.prescriptions;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.results)) return data.results;
+  return [];
+};
+
 // ✅ Fetch prescriptions (for doctors)
 export const fetchPrescriptions = createAsyncThunk(
   'doctor/fetchPrescriptions',
   async (patientId, { rejectWithValue }) => {
     try {
-      // Validate patient ID
       if (!patientId || patientId === 'undefined' || patientId === 'null') {
         return [];
       }
@@ -823,29 +856,24 @@ export const fetchPrescriptions = createAsyncThunk(
       const id = typeof patientId === 'object' && patientId !== null
         ? patientId._id || patientId.id || String(patientId)
         : String(patientId);
-      
 
-      
       const token = localStorage.getItem('token');
-      
-      // Try the new RESTful endpoint first, fallback to query parameter
-      let response;
+
+      let data;
       try {
-
-        response = await API.get(`/prescriptions/patient/${id}`, {
+        const response = await API.get(`/prescriptions/patient/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        data = response.data;
       } catch (restError) {
-
-        response = await API.get(`/prescriptions?patientId=${id}`, {
+        const fallbackResponse = await API.get(`/prescriptions?patientId=${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        data = fallbackResponse.data;
       }
-      
-      
-      return response.data;
+
+      return normalizePrescriptionsResponse(data);
     } catch (error) {
-      
       return rejectWithValue(error.response?.data?.message || 'Failed to fetch prescriptions');
     }
   }
@@ -879,22 +907,24 @@ export const fetchSinglePrescription = createAsyncThunk(
           const patientPrescriptions = await API.get(`/prescriptions/patient/${prescriptionId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (patientPrescriptions.data && patientPrescriptions.data.length > 0) {
-            // Return the most recent prescription
-            const sortedPrescriptions = patientPrescriptions.data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+          const normalized = normalizePrescriptionsResponse(patientPrescriptions.data);
+          if (normalized.length > 0) {
+            const sortedPrescriptions = normalized.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             return sortedPrescriptions[0];
-          } else {
-            return rejectWithValue('No prescriptions found for this patient');
           }
+          return rejectWithValue('No prescriptions found for this patient');
         } catch (fallbackError) {
           return rejectWithValue('Prescription not found');
         }
       }
-      
-      
-      return response.data;
+
+      const payload = response.data?.prescription || response.data;
+      if (!payload || typeof payload !== 'object') {
+        return rejectWithValue('Invalid prescription response');
+      }
+
+      return payload;
     } catch (error) {
-      
       return rejectWithValue(error.response?.data?.message || 'Failed to fetch prescription');
     }
   }

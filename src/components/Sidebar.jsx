@@ -109,6 +109,8 @@ export default function Sidebar(props) {
                 links={[
                   { to: "/dashboard/superadmin/lab/labstafflist", label: "Lab Staff List" },
                   { to: "/dashboard/superadmin/lab/addlabstaff", label: "Add Lab Staff" },
+                  { to: "/dashboard/superadmin/lab/slitlabstafflist", label: "SLIT Lab Staff" },
+                  { to: "/dashboard/superadmin/lab/addslitlabstaff", label: "Add SLIT Lab Staff" },
                 
                 ]}
                 currentPath={location.pathname}
@@ -346,7 +348,7 @@ export default function Sidebar(props) {
               />
               <SidebarLink
                 to="/dashboard/receptionist/billing"
-                label="Billing"
+                label="Investigations Billing"
                 icon={<FaClipboardList />}
                 isActive={isActive("/dashboard/receptionist/billing")}
               />
@@ -361,6 +363,12 @@ export default function Sidebar(props) {
                 label="Superconsultant Billing"
                 icon={<FaUserCheck />}
                 isActive={isActive("/dashboard/receptionist/superconsultant-billing")}
+              />
+              <SidebarLink
+                to="/dashboard/receptionist/slit-therapy-billing"
+                label="SLIT Therapy Billing"
+                icon={<FaVials />}
+                isActive={isActive("/dashboard/receptionist/slit-therapy-billing") || isActive("/receptionist/slit-therapy-billing")}
               />
               <SidebarLink
                 to="/dashboard/receptionist/reassign-patient"
@@ -422,12 +430,12 @@ export default function Sidebar(props) {
                 icon={<FaClock />}
                 isActive={isActive("/dashboard/doctor/recently-assigned-patients")}
               />
-              <SidebarLink
+              {/* <SidebarLink
                 to="/dashboard/doctor/add-patient"
                 label="Add Patient"
                 icon={<FaUserPlus />}
                 isActive={isActive("/dashboard/doctor/add-patient")}
-              />
+              /> */}
               <SidebarLink
                 to="/dashboard/doctor/test-requests"
                 label="Test Requests"
@@ -478,6 +486,17 @@ export default function Sidebar(props) {
                 label="Completed Tests"
                 icon={<FaCheckCircle />}
                 isActive={isActive("/dashboard/lab/completed-requests")}
+              />
+            </>
+          )}
+
+          {role === 'slitlab' && (
+            <>
+              <SidebarLink
+                to="/dashboard/slit-lab/slit-therapy"
+                label="SLIT Therapy Requests"
+                icon={<FaStethoscope />}
+                isActive={isActive("/dashboard/slit-lab/slit-therapy") || isActive("/slit-lab/slit-therapy")}
               />
             </>
           )}

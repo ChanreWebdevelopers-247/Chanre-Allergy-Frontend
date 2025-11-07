@@ -14,6 +14,8 @@ const BookAppointment = () => {
   const [selectedCenter, setSelectedCenter] = useState(null);
   const [loading, setLoading] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
+  const [userLocationAddress, setUserLocationAddress] = useState('');
+  const [resolvingAddress, setResolvingAddress] = useState(false);
   
   // Form data
   const [formData, setFormData] = useState({
@@ -50,6 +52,208 @@ const BookAppointment = () => {
   ];
 
   const [availableTimeSlots, setAvailableTimeSlots] = useState(timeSlots);
+
+  const toRadians = (value) => (value * Math.PI) / 180;
+
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (
+      [lat1, lon1, lat2, lon2].some(
+        (coordinate) => typeof coordinate !== 'number' || Number.isNaN(coordinate)
+      )
+    ) {
+      return null;
+    }
+
+    const earthRadiusKm = 6371;
+    const dLat = toRadians(lat2 - lat1);
+    const dLon = toRadians(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRadians(lat1)) *
+        Math.cos(toRadians(lat2)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  };
+
+  const parseDistanceValue = (value) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const numeric = parseFloat(value.replace(/[^0-9.]/g, ''));
+      return Number.isNaN(numeric) ? null : numeric;
+    }
+    return null;
+  };
+
+  const getCenterCoordinates = (center) => {
+    if (!center || typeof center !== 'object') return null;
+
+    const possibleCoordinates = [
+      { lat: center.latitude, lng: center.longitude },
+      { lat: center.lat, lng: center.lng },
+      center.location,
+      center.locationDetails,
+      center.geoLocation,
+      center.geoCoordinates,
+      center.coordinates,
+      center.geolocation,
+    ];
+
+    for (const entry of possibleCoordinates) {
+      if (!entry) continue;
+
+      if (Array.isArray(entry.coordinates) && entry.coordinates.length >= 2) {
+        const [lng, lat] = entry.coordinates;
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          return { latitude: lat, longitude: lng };
+        }
+      }
+
+      if (Array.isArray(entry) && entry.length >= 2) {
+        const [lng, lat] = entry;
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          return { latitude: lat, longitude: lng };
+        }
+      }
+
+      const { latitude, longitude, lat, lng } = entry;
+      if (
+        typeof latitude === 'number' &&
+        typeof longitude === 'number' &&
+        !Number.isNaN(latitude) &&
+        !Number.isNaN(longitude)
+      ) {
+        return { latitude, longitude };
+      }
+
+      if (
+        typeof lat === 'number' &&
+        typeof lng === 'number' &&
+        !Number.isNaN(lat) &&
+        !Number.isNaN(lng)
+      ) {
+        return { latitude: lat, longitude: lng };
+      }
+    }
+
+    return null;
+  };
+
+  const sortCentersByDistance = (centersList, location) => {
+    if (!Array.isArray(centersList)) return [];
+    if (!location || typeof location !== 'object') return [...centersList];
+
+    const { latitude: userLat, longitude: userLng } = location;
+
+    if (
+      typeof userLat !== 'number' ||
+      typeof userLng !== 'number' ||
+      Number.isNaN(userLat) ||
+      Number.isNaN(userLng)
+    ) {
+      return [...centersList];
+    }
+
+    return [...centersList].sort((a, b) => {
+      const distanceA =
+        parseDistanceValue(a?.distance) ??
+        parseDistanceValue(a?.distanceInKm) ??
+        parseDistanceValue(a?.distanceKm) ??
+        parseDistanceValue(a?.dist);
+      const distanceB =
+        parseDistanceValue(b?.distance) ??
+        parseDistanceValue(b?.distanceInKm) ??
+        parseDistanceValue(b?.distanceKm) ??
+        parseDistanceValue(b?.dist);
+
+      if (distanceA !== null && distanceB !== null) return distanceA - distanceB;
+      if (distanceA !== null) return -1;
+      if (distanceB !== null) return 1;
+
+      const coordsA = getCenterCoordinates(a);
+      const coordsB = getCenterCoordinates(b);
+
+      const computedA = coordsA
+        ? calculateDistance(userLat, userLng, coordsA.latitude, coordsA.longitude)
+        : null;
+      const computedB = coordsB
+        ? calculateDistance(userLat, userLng, coordsB.latitude, coordsB.longitude)
+        : null;
+
+      if (computedA !== null && computedB !== null) return computedA - computedB;
+      if (computedA !== null) return -1;
+      if (computedB !== null) return 1;
+
+      return (a?.name || '').localeCompare(b?.name || '');
+    });
+  };
+
+  const fetchLocationDetails = async (latitude, longitude) => {
+    if (
+      typeof latitude !== 'number' ||
+      typeof longitude !== 'number' ||
+      Number.isNaN(latitude) ||
+      Number.isNaN(longitude)
+    ) {
+      return;
+    }
+
+    setResolvingAddress(true);
+
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${latitude}&lon=${longitude}`,
+        {
+          headers: {
+            Accept: 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to resolve address');
+      }
+
+      const data = await response.json();
+      const address = data.address || {};
+
+      const locality =
+        address.neighbourhood ||
+        address.suburb ||
+        address.village ||
+        address.town ||
+        address.city ||
+        address.state_district;
+
+      const formattedAddress =
+        data.display_name ||
+        [locality, address.state, address.country]
+          .filter(Boolean)
+          .join(', ');
+
+      if (formattedAddress) {
+        setUserLocationAddress(formattedAddress);
+      }
+
+      setFormData((prev) => ({
+        ...prev,
+        patientLocation: {
+          ...prev.patientLocation,
+          latitude,
+          longitude,
+          city: locality || prev.patientLocation.city,
+          state: address.state || prev.patientLocation.state,
+          pincode: address.postcode || prev.patientLocation.pincode
+        },
+        patientAddress: prev.patientAddress || formattedAddress || prev.patientAddress
+      }));
+    } catch (error) {
+      console.error('Error resolving user address:', error);
+    } finally {
+      setResolvingAddress(false);
+    }
+  };
 
   const isDateToday = (dateStr) => {
     if (!dateStr) return false;
@@ -125,6 +329,7 @@ const BookAppointment = () => {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude
           });
+          fetchLocationDetails(position.coords.latitude, position.coords.longitude);
           setFormData(prev => ({
             ...prev,
             patientLocation: {
@@ -222,7 +427,8 @@ const BookAppointment = () => {
         userLocation.longitude
       );
       if (response.success) {
-        setFilteredCenters(response.data);
+        const sortedCenters = sortCentersByDistance(response.data, userLocation);
+        setFilteredCenters(sortedCenters);
         toast.success('Found nearby centers');
       }
     } catch (error) {
@@ -396,7 +602,11 @@ const BookAppointment = () => {
             {userLocation && (
               <div className="bg-[#e0f2fe] p-2 sm:p-3 rounded-lg">
                 <p className="text-[#2490eb] font-medium text-xs sm:text-sm">
-                  📍 Location detected: {userLocation.latitude.toFixed(4)}, {userLocation.longitude.toFixed(4)}
+                  📍 Location detected:{' '}
+                  {resolvingAddress
+                    ? 'Detecting area...'
+                    : userLocationAddress ||
+                      `${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)}`}
                 </p>
               </div>
             )}

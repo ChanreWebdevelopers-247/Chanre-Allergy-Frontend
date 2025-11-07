@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { 
   Eye, 
@@ -26,6 +26,7 @@ const ReviewLabReports = () => {
   const { labReports, workingLoading, workingError, success, message } = useSelector(
     (state) => state.superAdminDoctors
   );
+  const { user } = useSelector((state) => state.auth);
 
   const [selectedReport, setSelectedReport] = useState(null);
   const [feedback, setFeedback] = useState({
@@ -277,15 +278,82 @@ const ReviewLabReports = () => {
     }
   };
 
+  const matchesDoctorReference = (candidate, docId, docName) => {
+    if (!candidate) return false;
+
+    if (typeof candidate === 'string') {
+      if (docId && candidate === docId) return true;
+      if (docName && candidate.toLowerCase() === docName) return true;
+      return false;
+    }
+
+    if (candidate?._id) {
+      if (docId && candidate._id.toString() === docId) return true;
+    }
+
+    if (candidate?.id) {
+      if (docId && candidate.id.toString() === docId) return true;
+    }
+
+    if (candidate?.name && docName) {
+      return candidate.name.toLowerCase() === docName;
+    }
+
+    return false;
+  };
+
+  const reportBelongsToDoctor = (report, currentUser) => {
+    if (!currentUser) return false;
+    const docId = currentUser._id || currentUser.id || null;
+    const docName = currentUser.name ? currentUser.name.toLowerCase() : null;
+
+    const patient = report.patientId || {};
+
+    if (matchesDoctorReference(patient.superConsultantDoctor, docId, docName)) return true;
+    if (matchesDoctorReference(patient.superConsultantDoctorName, docId, docName)) return true;
+    if (matchesDoctorReference(patient.superconsultantDoctor, docId, docName)) return true;
+    if (matchesDoctorReference(patient.superconsultantDoctorName, docId, docName)) return true;
+
+    if (Array.isArray(patient.appointments)) {
+      for (const appointment of patient.appointments) {
+        if (
+          matchesDoctorReference(appointment?.doctorId, docId, docName) ||
+          matchesDoctorReference(appointment?.doctorName, docId, docName)
+        ) {
+          return true;
+        }
+      }
+    }
+
+    if (matchesDoctorReference(report.doctorId, docId, docName)) return true;
+
+    if (report.billing) {
+      if (matchesDoctorReference(report.billing.superConsultantDoctor, docId, docName)) return true;
+      if (matchesDoctorReference(report.billing.superConsultantDoctorName, docId, docName)) return true;
+      if (matchesDoctorReference(report.billing.superconsultantDoctor, docId, docName)) return true;
+      if (matchesDoctorReference(report.billing.superconsultantDoctorName, docId, docName)) return true;
+      if (matchesDoctorReference(report.billing.doctorId, docId, docName)) return true;
+      if (matchesDoctorReference(report.billing.assignedDoctor, docId, docName)) return true;
+    }
+
+    return false;
+  };
+
+  const filteredLabReports = useMemo(() => {
+    if (!Array.isArray(labReports) || labReports.length === 0) return [];
+    if (!user) return labReports;
+    return labReports.filter((report) => reportBelongsToDoctor(report, user));
+  }, [labReports, user]);
+
   // Pagination functions
   const getTotalPages = () => {
-    return Math.ceil(labReports.length / recordsPerPage);
+    return Math.ceil(filteredLabReports.length / recordsPerPage) || 1;
   };
 
   const getCurrentData = () => {
     const startIndex = (currentPage - 1) * recordsPerPage;
     const endIndex = startIndex + recordsPerPage;
-    return labReports.slice(startIndex, endIndex);
+    return filteredLabReports.slice(startIndex, endIndex);
   };
 
   const handlePageChange = (page) => {
@@ -343,7 +411,7 @@ const ReviewLabReports = () => {
           <h2 className="text-sm font-semibold text-gray-800">Lab Reports</h2>
         </div>
         <div className="p-4 sm:p-6">
-          {labReports.length === 0 ? (
+          {filteredLabReports.length === 0 ? (
             <div className="text-center py-8">
               <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-500 text-xs">No lab reports available for review.</p>
@@ -617,12 +685,12 @@ const ReviewLabReports = () => {
         </div>
         
         {/* Pagination Controls */}
-        {labReports.length > 0 && (
+        {filteredLabReports.length > 0 && (
           <div className="px-8 py-6 bg-gradient-to-r from-gray-50 to-gray-100 border-t border-gray-200">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <div className="text-sm text-gray-600">
-                  Showing {((currentPage - 1) * recordsPerPage) + 1} to {Math.min(currentPage * recordsPerPage, labReports.length)} of {labReports.length} results
+                  Showing {((currentPage - 1) * recordsPerPage) + 1} to {Math.min(currentPage * recordsPerPage, filteredLabReports.length)} of {filteredLabReports.length} results
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className="text-sm text-gray-600">Show:</span>

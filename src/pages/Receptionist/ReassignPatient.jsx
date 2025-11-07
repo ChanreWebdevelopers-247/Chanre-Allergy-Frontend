@@ -3489,7 +3489,8 @@ export default function ReassignPatient() {
                     <option value="cash">Cash</option>
                     <option value="card">Card</option>
                     <option value="upi">UPI/Online Transfer</option>
-                    <option value="other">Other</option>
+                    <option value="neft">NEFT</option>
+                    <option value="netbanking">Net Banking</option>
                   </select>
                 </div>
 

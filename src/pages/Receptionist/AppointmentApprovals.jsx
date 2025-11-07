@@ -81,7 +81,7 @@ const AppointmentApprovals = () => {
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [sortField, setSortField] = useState('preferredDate');
+  const [sortField, setSortField] = useState('bookedAt');
   const [sortDirection, setSortDirection] = useState('asc');
   
   // Search states
@@ -133,10 +133,14 @@ const AppointmentApprovals = () => {
     let aValue = a[sortField];
     let bValue = b[sortField];
     
-    // Handle date sorting
+    if (sortField === 'bookedAt') {
+      aValue = a.bookedAt || a.createdAt || a.preferredDate;
+      bValue = b.bookedAt || b.createdAt || b.preferredDate;
+    }
+    
     if (sortField === 'preferredDate' || sortField === 'createdAt' || sortField === 'bookedAt') {
-      aValue = new Date(aValue);
-      bValue = new Date(bValue);
+      aValue = aValue ? new Date(aValue).getTime() : 0;
+      bValue = bValue ? new Date(bValue).getTime() : 0;
     }
     
     // Handle string sorting
@@ -146,8 +150,10 @@ const AppointmentApprovals = () => {
     }
     
     if (sortDirection === 'asc') {
+      if (aValue === bValue) return 0;
       return aValue > bValue ? 1 : -1;
     } else {
+      if (aValue === bValue) return 0;
       return aValue < bValue ? 1 : -1;
     }
   });

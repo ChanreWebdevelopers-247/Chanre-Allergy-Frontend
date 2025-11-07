@@ -31,6 +31,7 @@ import {
   fetchAllergicBronchitis,
   fetchAtopicDermatitis,
   fetchGPE,
+  createPrescription,
   fetchPrescriptions,
   fetchSinglePrescription,
   fetchDoctorNotifications,
@@ -77,6 +78,7 @@ const initialState = {
   addGPESuccess: false,
   addHistorySuccess: false,
   addMedicationSuccess: false,
+  createPrescriptionSuccess: false,
   testSubmitting: false,
   testSubmitSuccess: false,
   testSubmitError: null,
@@ -96,6 +98,9 @@ const initialState = {
   patientMedicationsError: null,
   patientFollowUpsError: null,
   testsError: null,
+  prescriptionsLoading: false,
+  prescriptionsError: null,
+  createPrescriptionLoading: false,
   
   // Notification and Feedback state
   notifications: [],
@@ -640,19 +645,38 @@ const doctorSlice = createSlice({
         state.error = action.payload || 'Failed to fetch GPE';
       })
 
+      // Create prescription
+      .addCase(createPrescription.pending, (state) => {
+        state.createPrescriptionLoading = true;
+        state.error = null;
+        state.createPrescriptionSuccess = false;
+      })
+      .addCase(createPrescription.fulfilled, (state, action) => {
+        state.createPrescriptionLoading = false;
+        state.createPrescriptionSuccess = true;
+        state.addMedicationSuccess = true;
+        const existing = Array.isArray(state.prescriptions) ? state.prescriptions : [];
+        state.prescriptions = [action.payload, ...existing];
+      })
+      .addCase(createPrescription.rejected, (state, action) => {
+        state.createPrescriptionLoading = false;
+        state.error = action.payload || 'Failed to create prescription';
+        state.createPrescriptionSuccess = false;
+      })
+
       // Fetch prescriptions
       .addCase(fetchPrescriptions.pending, (state) => {
-        state.loading = true;
-        state.error = null;
+        state.prescriptionsLoading = true;
+        state.prescriptionsError = null;
       })
       .addCase(fetchPrescriptions.fulfilled, (state, action) => {
-        state.loading = false;
-        state.prescriptions = action.payload;
-        state.error = null;
+        state.prescriptionsLoading = false;
+        state.prescriptions = Array.isArray(action.payload) ? action.payload : [];
+        state.prescriptionsError = null;
       })
       .addCase(fetchPrescriptions.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload || 'Failed to fetch prescriptions';
+        state.prescriptionsLoading = false;
+        state.prescriptionsError = action.payload || 'Failed to fetch prescriptions';
       })
 
       // Fetch single prescription

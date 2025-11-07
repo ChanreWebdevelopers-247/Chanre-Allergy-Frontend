@@ -27,9 +27,11 @@ import {
   fetchSuperAdminDoctorPatientMedications,
   fetchSuperAdminDoctorPatientFollowups,
   fetchSuperAdminDoctorPatientLabReports,
-  sendFeedbackToCenterDoctor
+  sendFeedbackToCenterDoctor,
+  fetchSuperAdminDoctorPatients
 } from '../../../features/superadmin/superAdminDoctorSlice';
 import { normalizePatientsArray } from '../../../utils/normalizePatientsArray';
+import { getSuperConsultantAppointmentsWithMeta } from '../../../utils/superConsultantAppointments';
 
 const PatientDetails = () => {
   const dispatch = useDispatch();
@@ -38,6 +40,7 @@ const PatientDetails = () => {
   
   const { 
     assignedPatients,
+    patients: allPatients,
     singlePatient: patient,
     patientHistory,
     patientMedications,
@@ -48,10 +51,23 @@ const PatientDetails = () => {
     dataLoading,
     dataError
   } = useSelector((state) => state.superAdminDoctors);
-
   const [selectedPatient, setSelectedPatient] = useState(null);
 
-  const normalizedPatients = useMemo(() => normalizePatientsArray(assignedPatients), [assignedPatients]);
+  const normalizedAssignedPatients = useMemo(
+    () => normalizePatientsArray(assignedPatients),
+    [assignedPatients]
+  );
+
+  const normalizedAllPatients = useMemo(
+    () => normalizePatientsArray(allPatients),
+    [allPatients]
+  );
+
+  const myPatients = normalizedAssignedPatients.length > 0 ? normalizedAssignedPatients : normalizedAllPatients;
+  const patientsWithAppointments = useMemo(
+    () => getSuperConsultantAppointmentsWithMeta(myPatients),
+    [myPatients]
+  );
   const [showPatientDetails, setShowPatientDetails] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [feedbackModal, setFeedbackModal] = useState(false);
@@ -64,6 +80,7 @@ const PatientDetails = () => {
 
   useEffect(() => {
     dispatch(fetchSuperAdminDoctorAssignedPatients());
+    dispatch(fetchSuperAdminDoctorPatients());
   }, [dispatch]);
 
   useEffect(() => {
@@ -75,8 +92,8 @@ const PatientDetails = () => {
           
           // If patient not found or error occurred, redirect to first available patient
           if (result.error || !result.payload) {
-            if (normalizedPatients.length > 0) {
-              navigate(`/dashboard/superadmin/doctor/patient/${normalizedPatients[0]._id}/profile`);
+            if (myPatients.length > 0) {
+              navigate(`/dashboard/superadmin/doctor/patient/${myPatients[0]._id}/profile`);
             } else {
               navigate('/dashboard/superadmin/doctor/patients');
             }
@@ -89,23 +106,36 @@ const PatientDetails = () => {
 
       checkAndFetchPatient();
     }
-  }, [dispatch, patientId, normalizedPatients, navigate]);
+  }, [dispatch, patientId, myPatients, navigate]);
 
-  const filteredPatients = normalizedPatients.filter(patient =>
-    patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.phone.includes(searchTerm) ||
-    patient.email?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredEntries = useMemo(
+    () =>
+      patientsWithAppointments.filter(({ patient }) => {
+        if (!searchTerm) return true;
+
+        const query = searchTerm.toLowerCase();
+        const name = typeof patient.name === 'string' ? patient.name.toLowerCase() : '';
+        const phone = String(patient.phone || '');
+        const email = typeof patient.email === 'string' ? patient.email.toLowerCase() : '';
+
+        return (
+          name.includes(query) ||
+          phone.includes(searchTerm) ||
+          email.includes(query)
+        );
+      }),
+    [patientsWithAppointments, searchTerm]
   );
 
   // Pagination functions
   const getTotalPages = () => {
-    return Math.ceil(filteredPatients.length / recordsPerPage);
+    return Math.ceil(filteredEntries.length / recordsPerPage);
   };
 
   const getCurrentData = () => {
     const startIndex = (currentPage - 1) * recordsPerPage;
     const endIndex = startIndex + recordsPerPage;
-    return filteredPatients.slice(startIndex, endIndex);
+    return filteredEntries.slice(startIndex, endIndex);
   };
 
   const handlePageChange = (page) => {
@@ -245,14 +275,14 @@ const PatientDetails = () => {
               </div>
               <div className="flex items-center space-x-2">
                 <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-medium">
-                  {filteredPatients.length} Patients
+                  {filteredEntries.length} Patients
                 </div>
               </div>
             </div>
           </div>
 
           <div className="p-8">
-            {filteredPatients.length === 0 ? (
+            {filteredEntries.length === 0 ? (
               <div className="text-center py-12">
                 <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
                   <User className="w-12 h-12 text-gray-400" />
@@ -288,75 +318,75 @@ const PatientDetails = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {getCurrentData().map((patient, index) => {
+                    {getCurrentData().map(({ patient, appointment }, index) => {
                       const globalIndex = (currentPage - 1) * recordsPerPage + index;
+                      const appointmentDate = appointment?.date ? new Date(appointment.date) : null;
+                      const isToday = appointmentDate ? (() => {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const compareDate = new Date(appointmentDate);
+                        compareDate.setHours(0, 0, 0, 0);
+                        return compareDate.getTime() === today.getTime();
+                      })() : false;
                       return (
-                      <tr key={patient._id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                              <span className="text-blue-600 font-semibold text-xs">
-                                {patient.name.charAt(0).toUpperCase()}
-                              </span>
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-xs font-medium text-gray-900">{patient.name}</div>
-                              <div className="text-xs text-gray-500">{patient.age} years, {patient.gender}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-xs text-gray-900">{patient.phone}</div>
-                          <div className="text-xs text-gray-500">{patient.email || 'N/A'}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {patient.appointmentTime ? (
-                            <div className="text-xs">
-                              <div className="text-gray-900 font-medium">
-                                {new Date(patient.appointmentTime).toLocaleDateString('en-GB')}
+                        <tr key={`${patient._id}-${globalIndex}`} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                                <span className="text-blue-600 font-semibold text-xs">
+                                  {patient.name.charAt(0).toUpperCase()}
+                                </span>
                               </div>
-                              <div className="text-blue-600 flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {new Date(patient.appointmentTime).toLocaleTimeString('en-GB', {
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
+                              <div className="ml-4">
+                                <div className="text-xs font-medium text-gray-900">{patient.name}</div>
+                                <div className="text-xs text-gray-500">{patient.age} years, {patient.gender}</div>
                               </div>
-                              {(() => {
-                                const today = new Date();
-                                today.setHours(0, 0, 0, 0);
-                                const appointmentDate = new Date(patient.appointmentTime);
-                                appointmentDate.setHours(0, 0, 0, 0);
-                                if (appointmentDate.getTime() === today.getTime()) {
-                                  return <span className="text-blue-600 text-xs font-semibold">Today</span>;
-                                }
-                                return null;
-                              })()}
                             </div>
-                          ) : (
-                            <span className="text-xs text-gray-400 italic">Not scheduled</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-xs text-gray-900">{patient.centerId?.name || 'N/A'}</div>
-                          <div className="text-xs text-gray-500">{patient.centerId?.code || 'N/A'}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-xs text-gray-900">{patient.assignedDoctor?.name || 'Not assigned'}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-xs font-medium">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleViewProfile(patient._id)}
-                              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center text-xs"
-                            >
-                              <User className="w-4 h-4 mr-1" />
-                              Profile
-                            </button>
-                           
-                          </div>
-                        </td>
-                      </tr>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-xs text-gray-900">{patient.phone}</div>
+                            <div className="text-xs text-gray-500">{patient.email || 'N/A'}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {appointmentDate ? (
+                              <div className="text-xs">
+                                <div className="text-gray-900 font-medium">
+                                  {appointmentDate.toLocaleDateString('en-GB')}
+                                </div>
+                                <div className="text-blue-600 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {appointmentDate.toLocaleTimeString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </div>
+                                {isToday && (
+                                  <span className="text-blue-600 text-xs font-semibold">Today</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400 italic">Not scheduled</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-xs text-gray-900">{patient.centerId?.name || 'N/A'}</div>
+                            <div className="text-xs text-gray-500">{patient.centerId?.code || 'N/A'}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-xs text-gray-900">{patient.assignedDoctor?.name || 'Not assigned'}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-xs font-medium">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleViewProfile(patient._id)}
+                                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center text-xs"
+                              >
+                                <User className="w-4 h-4 mr-1" />
+                                Profile
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -366,12 +396,12 @@ const PatientDetails = () => {
           </div>
           
           {/* Pagination Controls */}
-          {filteredPatients.length > 0 && (
+          {filteredEntries.length > 0 && (
             <div className="px-8 py-6 bg-gradient-to-r from-gray-50 to-gray-100 border-t border-gray-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                   <div className="text-sm text-gray-600">
-                    Showing {((currentPage - 1) * recordsPerPage) + 1} to {Math.min(currentPage * recordsPerPage, filteredPatients.length)} of {filteredPatients.length} results
+                    Showing {((currentPage - 1) * recordsPerPage) + 1} to {Math.min(currentPage * recordsPerPage, filteredEntries.length)} of {filteredEntries.length} results
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className="text-sm text-gray-600">Show:</span>

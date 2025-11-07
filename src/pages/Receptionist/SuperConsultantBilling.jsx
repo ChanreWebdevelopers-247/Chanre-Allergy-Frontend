@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { fetchReceptionistPatients } from '../../features/receptionist/receptionistThunks';
 import ReceptionistLayout from './ReceptionistLayout';
 import { 
-  Users, 
+  Users,
+  User,
   Search, 
   DollarSign, 
   CheckCircle, 
@@ -644,6 +645,86 @@ export default function SuperConsultantBilling() {
     return candidates[0];
   };
 
+  const getAssignedDoctorName = (patient) => {
+    if (!patient) return null;
+
+    const extractName = (candidate) => {
+      if (!candidate) return null;
+      if (typeof candidate === 'string') return candidate;
+      if (typeof candidate === 'object') {
+        if (candidate.name) return candidate.name;
+        if (candidate.fullName) return candidate.fullName;
+        if (candidate.firstName || candidate.lastName) {
+          return [candidate.firstName, candidate.lastName].filter(Boolean).join(' ');
+        }
+      }
+      return null;
+    };
+
+    const candidates = [
+      patient.assignedDoctor,
+      patient.assignedDoctorId,
+      patient.assignedDoctorInfo,
+      patient.superConsultantDoctor,
+      patient.superconsultantDoctor,
+      patient.superConsultant,
+      patient.superconsultant,
+      patient.doctor,
+      patient.doctorDetails,
+    ];
+
+    for (const candidate of candidates) {
+      const name = extractName(candidate);
+      if (name) return name;
+    }
+
+    return null;
+  };
+
+  const getAssignedDoctorNameFromBilling = (patient) => {
+    if (!patient?.billing) return null;
+
+    const extractName = (candidate) => {
+      if (!candidate) return null;
+      if (typeof candidate === 'string') return candidate;
+      if (typeof candidate === 'object') {
+        if (candidate.name) return candidate.name;
+        if (candidate.fullName) return candidate.fullName;
+        if (candidate.firstName || candidate.lastName) {
+          return [candidate.firstName, candidate.lastName].filter(Boolean).join(' ');
+        }
+      }
+      return null;
+    };
+
+    const superconsultantBills = patient.billing.filter(
+      (bill) => bill?.type === 'consultation' && bill?.consultationType?.startsWith('superconsultant_')
+    );
+
+    for (const bill of superconsultantBills) {
+      const billCandidates = [
+        bill.superConsultantName,
+        bill.superconsultantName,
+        bill.consultantName,
+        bill.doctorName,
+        bill.assignedDoctorName,
+        bill.customData?.doctorName,
+        bill.customData?.consultantName,
+        bill.assignedDoctor,
+        bill.doctor,
+        bill.superConsultantDoctor,
+        bill.superconsultantDoctor,
+      ];
+
+      for (const candidate of billCandidates) {
+        const name = extractName(candidate);
+        if (name) return name;
+      }
+    }
+
+    return null;
+  };
+
   // Get lab status for a patient based on their test requests
   const getLabStatus = (patient) => {
     const testRequests = patientTestRequests[patient._id] || [];
@@ -1058,7 +1139,8 @@ export default function SuperConsultantBilling() {
         paymentType: 'full',
         notes: paymentData.notes,
         appointmentTime: paymentData.appointmentTime,
-        consultationType: paymentData.consultationType
+        consultationType: paymentData.consultationType,
+        superConsultantId: selectedDoctorId || null
       };
 
       const response = await API.post('/billing/process-payment', paymentPayload);
@@ -1499,6 +1581,8 @@ export default function SuperConsultantBilling() {
                       const paidAmount = consultationBill?.paidAmount || 0;
                       const hasBilling = consultationBill !== undefined;
                       const appointmentData = getSuperconsultantAppointmentData(patient);
+                      const assignedDoctorName =
+                        getAssignedDoctorName(patient) || getAssignedDoctorNameFromBilling(patient);
                       const isAppointmentViewed = appointmentData?.status === 'viewed';
                       const isAppointmentCompleted = appointmentData?.status === 'viewed' || appointmentData?.status === 'completed';
                       const isBillCancelled = statusInfo.status === 'Bill Cancelled';
@@ -1565,6 +1649,12 @@ export default function SuperConsultantBilling() {
                                       {appointmentData.notes && (
                                         <div className="text-slate-400 text-xs mt-1 max-w-32 truncate" title={appointmentData.notes}>
                                           📝 {appointmentData.notes}
+                                        </div>
+                                      )}
+                                      {assignedDoctorName && (
+                                        <div className="flex items-center gap-1 text-slate-500 text-xs mt-1">
+                                          <User className="w-3 h-3 text-blue-400" />
+                                          <span>Doctor: {assignedDoctorName}</span>
                                         </div>
                                       )}
                                     </>
@@ -1933,6 +2023,7 @@ export default function SuperConsultantBilling() {
                     <option value="card">Card</option>
                     <option value="upi">UPI</option>
                     <option value="netbanking">Net Banking</option>
+                    <option value="neft">NEFT</option>
                       </select>
               </div>
 
@@ -2246,569 +2337,66 @@ export default function SuperConsultantBilling() {
                                 <td className="border border-slate-300 px-3 py-2 text-right text-xs">₹{servicePaid.toFixed(2)}</td>
                                 <td className="border border-slate-300 px-3 py-2 text-right text-xs">₹{serviceBalance.toFixed(2)}</td>
                                 <td className="border border-slate-300 px-3 py-2 text-center text-xs">
-                                  <span className={`font-medium ${serviceStatusColor}`}>{serviceStatus}</span>
+                                  <span className={`font-medium ${serviceStatusColor}`}>
+                                    {serviceStatus}
+                                  </span>
                                 </td>
                               </tr>
                             );
                           });
-                          
+
                           return rows;
                         })()}
                       </tbody>
                     </table>
                   </div>
 
-                  {/* Summary and Amount in Words */}
-                  <div className="grid grid-cols-2 gap-6 mb-4">
-                    {/* Left Column - Amount in Words */}
-                    <div>
-                      {(() => {
-                        // CRITICAL: Only calculate refunds from THIS invoice (not all bills)
-                        const invoiceNumber = invoiceData.invoiceNumber;
-                        const invoiceBills = selectedPatient.billing?.filter(bill => 
-                          bill.invoiceNumber === invoiceNumber
-                        ) || [];
-                        
-                        const totalRefunded = invoiceBills.reduce((sum, bill) => {
-                          // Sum refundAmount and also check refunds array
-                          let refundTotal = bill.refundAmount || 0;
-                          if (bill.refunds && Array.isArray(bill.refunds)) {
-                            refundTotal += bill.refunds.reduce((sum, refund) => sum + (refund.amount || 0), 0);
-                          }
-                          return sum + refundTotal;
-                        }, 0);
-                        
-                        const hasCancelledBills = invoiceBills.some(bill => bill.status === 'cancelled');
-                        
-                        return (
-                          <div className="text-xs">
-                            {hasCancelledBills && (() => {
-                              // Get cancellation reason from the cancelled bill in THIS invoice
-                              const cancelledBill = invoiceBills.find(bill => bill.status === 'cancelled');
-                              const cancellationReason = cancelledBill?.cancellationReason || 'No reason provided';
-                              
-                              return (
-                                <div className="mb-2">
-                                  <div className="font-medium text-red-600 mb-1">Bill Status: CANCELLED</div>
-                                  {cancellationReason && (
-                                    <div className="text-red-700 mt-1">
-                                      <span className="font-medium">Cancellation Reason:</span> {cancellationReason}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                            {invoiceData.totalPaid > 0 && (
-                              <div className="mb-1">
-                                <span className="font-medium">Amount Paid:</span> (Rs.) {numberToWords(Math.round(invoiceData.totalPaid))} Only
-                              </div>
-                            )}
-                            {totalRefunded > 0 && (
-                              <div className="mb-1">
-                                <span className="font-medium">Amount Refunded:</span> (Rs.) {numberToWords(Math.round(totalRefunded))} Only
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                    
-                    {/* Right Column - Summary */}
-                    <div className="flex justify-end">
-                      <div className="w-72">
-                        <div className="space-y-1 text-xs">
-                        <div className="flex justify-between">
-                          <span>Total Amount:</span>
-                          <span>₹{invoiceData.totals.subtotal.toFixed(2)}</span>
-                        </div>
-                          {invoiceData.totals.discount > 0 && (
-                        <div className="flex justify-between">
-                          <span>Discount(-):</span>
-                          <span>₹{invoiceData.totals.discount.toFixed(2)}</span>
-                        </div>
-                          )}
-                        <div className="flex justify-between">
-                          <span>Tax Amount:</span>
-                          <span>₹{invoiceData.totals.tax.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between border-t border-slate-300 pt-1">
-                          <span>Grand Total:</span>
-                          <span>₹{invoiceData.totals.total.toFixed(2)}</span>
-                        </div>
-                          <div className="flex justify-between border-t border-slate-300 pt-1">
-                            <span>Amount Paid:</span>
-                            <span className="text-green-600 font-medium">₹{invoiceData.totalPaid.toFixed(2)}</span>
-                          </div>
-                        {(() => {
-                          // CRITICAL: Only calculate refunds from THIS invoice (not all bills)
-                          const invoiceNumber = invoiceData.invoiceNumber;
-                          const invoiceBills = selectedPatient.billing?.filter(bill => 
-                            bill.invoiceNumber === invoiceNumber
-                          ) || [];
-                          
-                          const totalRefunded = invoiceBills.reduce((sum, bill) => {
-                            // Sum refundAmount and also check refunds array
-                            let refundTotal = bill.refundAmount || 0;
-                            if (bill.refunds && Array.isArray(bill.refunds)) {
-                              refundTotal += bill.refunds.reduce((sum, refund) => sum + (refund.amount || 0), 0);
-                            }
-                            return sum + refundTotal;
-                          }, 0);
-                          
-                          const hasCancelledBills = invoiceBills.some(bill => bill.status === 'cancelled');
-                          const outstandingAmount = invoiceData.totals.total - invoiceData.totalPaid;
-                          
-                          return (
-                            <>
-                                {totalRefunded > 0 && (
-                                  <>
-                                    <div className="flex justify-between">
-                                      <span>Amount Refunded:</span>
-                                      <span className="text-orange-600 font-medium">₹{totalRefunded.toFixed(2)}</span>
-                                    </div>
-                                    {hasCancelledBills && (() => {
-                                      const penalty = invoiceData.totalPaid - totalRefunded;
-                                      if (penalty > 0) {
-                                        return (
-                                      <>
-                                        <div className="flex justify-between">
-                                          <span>Penalty Deducted:</span>
-                                          <span className="text-red-600 font-medium">₹{penalty.toFixed(2)}</span>
-                                        </div>
-                                        <div className="flex justify-between text-xs text-slate-600 mt-1">
-                                          <span>Penalty Reason:</span>
-                                          <span>Registration Fee (₹150) held as penalty</span>
-                                        </div>
-                                      </>
-                                        );
-                                      }
-                                      return null;
-                                    })()}
-                                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                                      <span>Payment Method:</span>
-                                      <span className="capitalize">{invoiceBills.find(bill => bill.paidAmount > 0)?.paymentMethod || 'cash'}</span>
-                                    </div>
-                                    {totalRefunded > 0 && (
-                                      <div className="flex justify-between text-xs text-slate-500 mt-1">
-                                        <span>Refund Method:</span>
-                                        <span className="capitalize">{invoiceBills.find(bill => {
-                                          if (bill.refundAmount > 0) return true;
-                                          if (bill.refunds && Array.isArray(bill.refunds) && bill.refunds.length > 0) return true;
-                                          return false;
-                                        })?.refundMethod || invoiceBills.find(bill => bill.refunds?.[0]?.method)?.refunds?.[0]?.method || 'cash'}</span>
-                                      </div>
-                                    )}
-                                  </>
-                                )}
-                              {outstandingAmount > 0 && !hasCancelledBills && (
-                                <div className="flex justify-between">
-                                  <span>Outstanding:</span>
-                                  <span className="text-orange-600 font-medium">₹{outstandingAmount.toFixed(2)}</span>
-                                </div>
-                              )}
-                              {hasCancelledBills && (() => {
-                                // Get cancellation reason from the cancelled bill in THIS invoice
-                                const cancelledBill = invoiceBills.find(bill => bill.status === 'cancelled');
-                                const cancellationReason = cancelledBill?.cancellationReason || 'No reason provided';
-                                
-                                return (
-                                  <>
-                                    <div className="flex justify-between">
-                                      <span>Status:</span>
-                                      <span className="text-red-600 font-bold">BILL CANCELLED</span>
-                                    </div>
-                                    {cancellationReason && (
-                                      <div className="flex justify-between text-xs text-slate-600 mt-1">
-                                        <span>Reason:</span>
-                                        <span className="text-red-700">{cancellationReason}</span>
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                                {!hasCancelledBills && outstandingAmount === 0 && invoiceData.totalPaid > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Status:</span>
-                                  <span className="text-green-600 font-bold">FULLY PAID</span>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                  </div>
-
-                  {/* Transaction History */}
+                  {/* Invoice Summary */}
                   {(() => {
-                    const transactions = [];
-                    const invoiceNumber = invoiceData.invoiceNumber;
-                    
-                    // Get all bills related to this invoice
-                    const relatedBills = selectedPatient.billing?.filter(bill => 
-                      bill.invoiceNumber === invoiceNumber
-                    ) || [];
-                    
-                    // Collect transactions from billing records
-                    relatedBills.forEach(bill => {
-                      // Add payment transactions
-                      if (bill.paidAmount > 0) {
-                        transactions.push({
-                          type: 'payment',
-                          amount: bill.paidAmount,
-                          method: bill.paymentMethod || 'cash',
-                          date: bill.paidAt || bill.createdAt || bill.updatedAt,
-                          description: bill.description || `${bill.type === 'consultation' ? 'Consultation' : 'Service'} Payment`,
-                          source: 'billing'
-                        });
-                      }
-                      
-                      // Add refund transactions
-                      if (bill.refundAmount > 0) {
-                        transactions.push({
-                          type: 'refund',
-                          amount: bill.refundAmount,
-                          method: bill.refundMethod || 'cash',
-                          date: bill.refundAt || bill.updatedAt || bill.createdAt,
-                          description: bill.refundReason || bill.description || 'Refund',
-                          source: 'billing'
-                        });
-                      }
-                      
-                      // Also check refunds array if it exists
-                      if (bill.refunds && Array.isArray(bill.refunds) && bill.refunds.length > 0) {
-                        bill.refunds.forEach(refund => {
-                          transactions.push({
-                            type: 'refund',
-                            amount: refund.amount || 0,
-                            method: refund.method || bill.refundMethod || 'cash',
-                            date: refund.date || refund.createdAt || bill.updatedAt || bill.createdAt,
-                            description: refund.reason || refund.description || 'Refund',
-                            source: 'billing_refunds'
-                          });
-                        });
-                      }
-                    });
-                    
-                    // Include payment history from payment logs
-                    if (paymentHistory && Array.isArray(paymentHistory)) {
-                      paymentHistory.forEach(log => {
-                        // Match by invoice number or billing ID
-                        const matchesInvoice = log.invoiceNumber === invoiceNumber;
-                        const matchesBillingId = log.billingId && relatedBills.some(b => 
-                          b._id?.toString() === log.billingId?.toString()
-                        );
-                        
-                        if (matchesInvoice || matchesBillingId) {
-                          // Avoid duplicates by checking if we already have this transaction
-                          const isDuplicate = transactions.some(t => 
-                            t.source === 'payment_log' &&
-                            t.date === (log.createdAt || log.date) &&
-                            t.amount === log.amount
-                          );
-                          
-                          if (!isDuplicate) {
-                            transactions.push({
-                              type: 'payment',
-                              amount: log.amount || 0,
-                              method: log.paymentMethod || 'cash',
-                              date: log.createdAt || log.date || new Date(),
-                              description: log.description || log.notes || 'Payment',
-                              source: 'payment_log'
-                            });
-                          }
-                        }
-                      });
-                    }
-                    
-                    // Sort by date (most recent first)
-                    transactions.sort((a, b) => {
-                      const dateA = new Date(a.date || 0);
-                      const dateB = new Date(b.date || 0);
-                      return dateB.getTime() - dateA.getTime();
-                    });
-                    
-                    // Always show transaction history section, even if empty
+                    const billingRecords = invoiceData.billing || [];
+                    const totals = billingRecords.reduce(
+                      (acc, bill) => {
+                        const amount = bill.amount || 0;
+                        const paid = bill.paidAmount || 0;
+                        return {
+                          amount: acc.amount + amount,
+                          paid: acc.paid + paid
+                        };
+                      },
+                      { amount: 0, paid: 0 }
+                    );
+
+                    const balance = Math.max(0, totals.amount - totals.paid);
+
                     return (
-                      <div className="mb-6">
-                        <h4 className="text-sm font-semibold text-slate-800 mb-3">Transaction History</h4>
-                        {transactions.length > 0 ? (
-                          <table className="min-w-full border-collapse border border-slate-300">
-                            <thead>
-                              <tr className="bg-slate-100">
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Date & Time</th>
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Type</th>
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Description</th>
-                                <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Amount</th>
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Method</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {transactions.map((transaction, index) => (
-                                <tr key={`${transaction.source}-${index}-${transaction.date}`} className={transaction.type === 'refund' ? 'bg-orange-50' : 'bg-white'}>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    {transaction.date ? (
-                                      <>
-                                        {new Date(transaction.date).toLocaleDateString('en-GB')} {new Date(transaction.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                                      </>
-                                    ) : (
-                                      'N/A'
-                                    )}
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    <span className={`px-2 py-1 rounded-full font-medium ${
-                                      transaction.type === 'payment' 
-                                        ? 'bg-green-100 text-green-700' 
-                                        : 'bg-orange-100 text-orange-700'
-                                    }`}>
-                                      {transaction.type === 'payment' ? 'Payment' : 'Refund'}
-                                    </span>
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    <div className="font-medium">{transaction.description || 'Transaction'}</div>
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs font-medium">
-                                    <span className={transaction.type === 'payment' ? 'text-green-600' : 'text-orange-600'}>
-                                      {transaction.type === 'payment' ? '+' : '-'}₹{transaction.amount.toFixed(2)}
-                                    </span>
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs capitalize">
-                                    {transaction.method || 'N/A'}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        ) : (
-                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
-                            <p className="text-slate-500 text-sm">No transaction history available for this invoice.</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-slate-100 rounded-lg p-4 text-xs text-slate-700 space-y-2">
+                          <div className="font-semibold text-slate-900 text-sm">Notes</div>
+                          <p className="whitespace-pre-wrap text-slate-600">
+                            {invoiceData.notes?.trim() || 'No additional notes provided.'}
+                          </p>
+                        </div>
+                        <div className="bg-slate-100 rounded-lg p-4 text-xs text-slate-700 space-y-2">
+                          <div className="flex justify-between">
+                            <span className="font-medium">Total Charges</span>
+                            <span>₹{totals.amount.toFixed(2)}</span>
                           </div>
-                        )}
+                          <div className="flex justify-between">
+                            <span className="font-medium">Total Paid</span>
+                            <span className="text-green-600 font-semibold">₹{totals.paid.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between border-t border-slate-300 pt-2">
+                            <span className="font-semibold">Outstanding Balance</span>
+                            <span className={balance === 0 ? 'text-green-600 font-semibold' : 'text-orange-600 font-semibold'}>
+                              ₹{balance.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
-
-                  {/* Generation Details */}
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    {/* Left - Generation Info */}
-                    <div className="text-xs">
-                      <div><span className="font-medium">Generated By:</span> {invoiceData.generatedBy}</div>
-                      <div><span className="font-medium">Date:</span> {new Date(invoiceData.date).toLocaleDateString('en-GB')}</div>
-                      <div><span className="font-medium">Time:</span> {new Date(invoiceData.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
-                    </div>
-                    
-                    {/* Right - Invoice Terms & Signature */}
-                    <div className="text-xs bg-slate-50 border border-slate-200 rounded p-2">
-                      <div className="font-semibold text-slate-800 mb-1 text-center">Invoice Terms</div>
-                      <div className="space-y-1 text-slate-700 mb-2">
-                        <div>• Original invoice document</div>
-                        <div>• Payment due upon receipt</div>
-                        <div>• Keep for your records</div>
-                        <div>• No refunds after 7 days</div>
-                      </div>
-                      <div className="border-t border-slate-200 pt-1">
-                        <div className="font-medium">Signature:</div>
-                        <div className="text-center mt-2">For {centerInfo.name}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="text-center text-xs text-slate-600">
-                    <div className="mb-1">
-                      <strong>"For Home Sample Collection"</strong>
-                    </div>
-                    <div>
-                      <span className="font-medium">Miss Call:</span> {centerInfo.missCallNumber} 
-                      <span className="mx-2">|</span>
-                      <span className="font-medium">Mobile:</span> {centerInfo.mobileNumber}
-                    </div>
-                  </div>
                 </div>
               )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex gap-3 p-4 border-t border-gray-200 flex-shrink-0">
-              <button
-                onClick={() => setShowInvoicePreviewModal(false)}
-                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-              </div>
-                    </div>
-                  )}
-
-      {/* Cancel Bill Modal */}
-      {showCancelBillModal && selectedPatient && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
-              <h3 className="text-lg font-semibold text-slate-800">
-                Cancel Bill - {selectedPatient.name}
-              </h3>
-              <button
-                onClick={() => setShowCancelBillModal(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-6">
-              <form onSubmit={handleCancelBillSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Cancellation Reason *
-                  </label>
-                  <textarea
-                    value={cancelReason}
-                    onChange={(e) => setCancelReason(e.target.value)}
-                    rows={4}
-                    required
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent text-sm"
-                    placeholder="Please provide a reason for cancelling this bill..."
-                  />
-                </div>
-
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                  <div className="flex items-start">
-                    <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 mr-2 flex-shrink-0" />
-                    <div className="text-xs text-red-700">
-                      <p className="font-medium mb-1">Warning:</p>
-                      <p>This action will cancel the bill and cancel the superconsultant appointment. This action cannot be undone.</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setShowCancelBillModal(false)}
-                    className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium"
-                  >
-                    Cancel Bill
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Process Refund Modal */}
-      {showRefundModal && selectedPatient && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
-              <h3 className="text-lg font-semibold text-slate-800">
-                Process Refund - {selectedPatient.name}
-              </h3>
-              <button
-                onClick={() => setShowRefundModal(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-6">
-              <form onSubmit={handleRefundSubmit} className="space-y-4">
-                {/* Payment Summary */}
-                {(() => {
-                  const superconsultantBill = selectedPatient.billing?.find(bill => 
-                    bill.type === 'consultation' && 
-                    bill.consultationType?.startsWith('superconsultant_')
-                  );
-                  
-                  if (!superconsultantBill) return null;
-                  
-                  const invoiceNumber = superconsultantBill.invoiceNumber;
-                  const relatedBills = selectedPatient.billing?.filter(bill => 
-                    bill.invoiceNumber === invoiceNumber
-                  ) || [];
-                  
-                  const totalPaid = relatedBills.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
-                  const totalRefunded = relatedBills.reduce((sum, bill) => sum + (bill.refundAmount || 0), 0);
-                  const availableForRefund = totalPaid - totalRefunded;
-                  
-                  return (
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
-                      <h4 className="text-sm font-semibold text-orange-800 mb-2">Refund Summary</h4>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-orange-700">Total Paid:</span>
-                          <span className="font-semibold">₹{totalPaid.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-orange-700">Already Refunded:</span>
-                          <span className="font-semibold text-red-600">₹{totalRefunded.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between border-t border-orange-300 pt-1">
-                          <span className="text-orange-700 font-semibold">Available for Refund:</span>
-                          <span className="font-bold text-green-600">₹{availableForRefund.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Refund Method *
-                  </label>
-                  <select
-                    value={refundData.refundMethod}
-                    onChange={(e) => setRefundData({...refundData, refundMethod: e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="card">Card</option>
-                    <option value="upi">UPI</option>
-                    <option value="netbanking">Net Banking</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Refund Reason *
-                  </label>
-                  <textarea
-                    value={refundData.reason}
-                    onChange={(e) => setRefundData({...refundData, reason: e.target.value})}
-                    rows={4}
-                    required
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
-                    placeholder="Please provide a reason for this refund..."
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setShowRefundModal(false)}
-                    className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium"
-                  >
-                    Process Refund
-                  </button>
-                </div>
-              </form>
             </div>
           </div>
         </div>
@@ -2816,5 +2404,3 @@ export default function SuperConsultantBilling() {
     </ReceptionistLayout>
   );
 }
-
-

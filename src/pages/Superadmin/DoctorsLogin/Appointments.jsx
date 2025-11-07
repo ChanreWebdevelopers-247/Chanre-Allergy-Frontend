@@ -2,9 +2,10 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { fetchSuperAdminDoctorAssignedPatients } from '../../../features/superadmin/superAdminDoctorSlice';
+import { fetchSuperAdminDoctorAssignedPatients, fetchSuperAdminDoctorPatients } from '../../../features/superadmin/superAdminDoctorSlice';
 import { markPatientAsViewed } from '../../../services/api';
 import { normalizePatientsArray } from '../../../utils/normalizePatientsArray';
+import { getSuperConsultantAppointmentsWithMeta } from '../../../utils/superConsultantAppointments';
 import { 
   Calendar, 
   Clock, 
@@ -24,136 +25,246 @@ import {
 const Appointments = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { assignedPatients, workingLoading, workingError } = useSelector(
-    (state) => state.superAdminDoctors
+  const {
+    assignedPatients,
+    patients: allPatients,
+    workingLoading,
+    workingError,
+    patientsLoading,
+  } = useSelector((state) => state.superAdminDoctors);
+  const normalizedPatients = useMemo(
+    () => normalizePatientsArray(assignedPatients),
+    [assignedPatients]
+  );
+  const normalizedPatientFallback = useMemo(
+    () => normalizePatientsArray(allPatients),
+    [allPatients]
   );
 
-  const normalizedPatients = useMemo(() => normalizePatientsArray(assignedPatients), [assignedPatients]);
+  const myPatients = normalizedPatients.length > 0 ? normalizedPatients : normalizedPatientFallback;
+
+  const getConsultationTypeValue = (patient) => {
+    if (!patient) return 'other';
+
+    const superconsultantBill = patient.billing?.find(
+      (bill) => bill?.type === 'consultation' && bill?.consultationType?.startsWith('superconsultant_')
+    );
+
+    const rawType = (
+      superconsultantBill?.consultationType ||
+      patient.consultationType ||
+      ''
+    ).toLowerCase();
+
+    if (rawType.includes('video')) return 'video';
+    if (rawType.includes('audio')) return 'audio';
+    if (rawType.includes('review')) return 'review_reports';
+    if (rawType.includes('normal') || rawType.includes('consultation')) return 'normal';
+
+    return 'other';
+  };
+
+  const appointmentEntries = useMemo(
+    () => getSuperConsultantAppointmentsWithMeta(myPatients),
+    [myPatients]
+  );
+
+  const totalWithAppointmentDates = useMemo(
+    () =>
+      appointmentEntries.filter(({ appointment }) => Boolean(appointment?.date)).length,
+    [appointmentEntries]
+  );
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all'); // 'all', 'today', 'upcoming', 'past'
+  const [consultFilter, setConsultFilter] = useState('all');
   const [sortBy, setSortBy] = useState('date'); // 'date', 'name', 'type'
   const [markingAsViewed, setMarkingAsViewed] = useState({}); // Track which patients are being marked as viewed
 
   useEffect(() => {
     dispatch(fetchSuperAdminDoctorAssignedPatients());
+    dispatch(fetchSuperAdminDoctorPatients());
   }, [dispatch]);
 
   // Filter and sort appointments
   const appointments = useMemo(() => {
-    let filtered = normalizedPatients.filter(patient => patient.appointmentTime) || [];
+    let entries = appointmentEntries;
 
-    // Apply appointment filter
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    if (filterType !== 'all') {
+      entries = entries.filter(({ appointment }) => Boolean(appointment?.date));
+    }
+
     if (filterType === 'today') {
-      filtered = filtered.filter(patient => {
-        if (!patient.appointmentTime) return false;
-        const appointmentDate = new Date(patient.appointmentTime);
+      entries = entries.filter(({ appointment }) => {
+        if (!appointment?.date) return false;
+        const appointmentDate = new Date(appointment.date);
         appointmentDate.setHours(0, 0, 0, 0);
         return appointmentDate.getTime() === today.getTime();
       });
     } else if (filterType === 'upcoming') {
-      filtered = filtered.filter(patient => {
-        if (!patient.appointmentTime) return false;
-        const appointmentDate = new Date(patient.appointmentTime);
+      entries = entries.filter(({ appointment }) => {
+        if (!appointment?.date) return false;
+        const appointmentDate = new Date(appointment.date);
         appointmentDate.setHours(0, 0, 0, 0);
         return appointmentDate.getTime() > today.getTime();
       });
     } else if (filterType === 'past') {
-      filtered = filtered.filter(patient => {
-        if (!patient.appointmentTime) return false;
-        const appointmentDate = new Date(patient.appointmentTime);
+      entries = entries.filter(({ appointment }) => {
+        if (!appointment?.date) return false;
+        const appointmentDate = new Date(appointment.date);
         appointmentDate.setHours(0, 0, 0, 0);
         return appointmentDate.getTime() < today.getTime();
       });
     }
 
-    // Apply search filter
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(patient =>
+      entries = entries.filter(({ patient }) =>
         patient.name?.toLowerCase().includes(searchLower) ||
-        patient.phone?.toLowerCase().includes(searchLower) ||
+        String(patient.phone || '').toLowerCase().includes(searchLower) ||
         patient.email?.toLowerCase().includes(searchLower) ||
         patient.uhId?.toLowerCase().includes(searchLower)
       );
     }
 
-    // Sort appointments
-    filtered.sort((a, b) => {
+    if (consultFilter !== 'all') {
+      entries = entries.filter(({ patient }) => getConsultationTypeValue(patient) === consultFilter);
+    }
+
+    const sorted = [...entries];
+    sorted.sort((aEntry, bEntry) => {
+      const { patient: a, appointment: aptA } = aEntry;
+      const { patient: b, appointment: aptB } = bEntry;
+
       if (sortBy === 'date') {
-        return new Date(a.appointmentTime) - new Date(b.appointmentTime);
-      } else if (sortBy === 'name') {
+        const timeA = aptA?.date ? new Date(aptA.date).getTime() : Number.POSITIVE_INFINITY;
+        const timeB = aptB?.date ? new Date(aptB.date).getTime() : Number.POSITIVE_INFINITY;
+        return timeA - timeB;
+      }
+
+      if (sortBy === 'name') {
         return (a.name || '').localeCompare(b.name || '');
-      } else if (sortBy === 'type') {
+      }
+
+      if (sortBy === 'type') {
         const getTypeOrder = (patient) => {
-          const bill = patient.billing?.find(b => 
-            b.type === 'consultation' && 
-            b.consultationType?.startsWith('superconsultant_')
-          );
-          const type = bill?.consultationType || '';
-          if (type.includes('video')) return 1;
-          if (type.includes('audio')) return 2;
-          if (type.includes('review_reports')) return 3;
-          return 4; // normal
+          const type = getConsultationTypeValue(patient);
+          switch (type) {
+            case 'video':
+              return 1;
+            case 'audio':
+              return 2;
+            case 'review_reports':
+              return 3;
+            case 'normal':
+              return 4;
+            default:
+              return 5;
+          }
         };
         return getTypeOrder(a) - getTypeOrder(b);
       }
+
       return 0;
     });
 
-    return filtered;
-  }, [normalizedPatients, filterType, searchTerm, sortBy]);
+    return sorted;
+  }, [appointmentEntries, filterType, consultFilter, searchTerm, sortBy]);
 
-  // Get appointment type badge info
   const getAppointmentTypeBadge = (patient) => {
-    if (!patient.billing || patient.billing.length === 0) {
-      return { label: 'Normal Consultation', icon: <Stethoscope className="w-3 h-3" />, color: 'bg-blue-100 text-blue-800' };
-    }
+    const typeValue = getConsultationTypeValue(patient);
 
-    const superconsultantBill = patient.billing.find(bill => 
-      bill.type === 'consultation' && 
-      bill.consultationType?.startsWith('superconsultant_')
-    );
-
-    if (!superconsultantBill) {
-      return { label: 'Normal Consultation', icon: <Stethoscope className="w-3 h-3" />, color: 'bg-blue-100 text-blue-800' };
-    }
-
-    const consultationType = superconsultantBill.consultationType || '';
-
-    if (consultationType.includes('video')) {
-      return { label: 'Video Consultation', icon: <Video className="w-3 h-3" />, color: 'bg-purple-100 text-purple-800' };
-    } else if (consultationType.includes('audio')) {
-      return { label: 'Audio Consultation', icon: <PhoneCall className="w-3 h-3" />, color: 'bg-green-100 text-green-800' };
-    } else if (consultationType.includes('review_reports')) {
-      return { label: 'Review Reports', icon: <FileText className="w-3 h-3" />, color: 'bg-orange-100 text-orange-800' };
-    } else {
-      return { label: 'Normal Consultation', icon: <Stethoscope className="w-3 h-3" />, color: 'bg-blue-100 text-blue-800' };
+    switch (typeValue) {
+      case 'video':
+        return { label: 'Video Consultation', icon: <Video className="w-3 h-3" />, color: 'bg-purple-100 text-purple-800' };
+      case 'audio':
+        return { label: 'Audio Consultation', icon: <PhoneCall className="w-3 h-3" />, color: 'bg-green-100 text-green-800' };
+      case 'review_reports':
+        return { label: 'Review Reports', icon: <FileText className="w-3 h-3" />, color: 'bg-orange-100 text-orange-800' };
+      case 'normal':
+        return { label: 'Normal Consultation', icon: <Stethoscope className="w-3 h-3" />, color: 'bg-blue-100 text-blue-800' };
+      default:
+        return { label: 'Consultation', icon: <Stethoscope className="w-3 h-3" />, color: 'bg-slate-100 text-slate-800' };
     }
   };
 
   // Get appointment status badge
-  const getAppointmentStatus = (appointmentTime, patient) => {
-    // Check if appointment has been viewed
-    if (patient.appointmentStatus === 'viewed' || patient.viewedByDoctor) {
-      return { label: 'Viewed', color: 'bg-purple-100 text-purple-800 border border-purple-300' };
+  const getAppointmentStatus = (appointmentInfo, patient) => {
+    const statusRaw = (
+      appointmentInfo?.status ||
+      patient.superConsultantAppointmentStatus ||
+      patient.appointmentStatus ||
+      ''
+    ).toLowerCase();
+
+    if (patient.viewedByDoctor || statusRaw === 'viewed') {
+      return {
+        label: 'Viewed',
+        color: 'bg-purple-100 text-purple-800 border border-purple-300',
+      };
     }
-    
+
+    if (['completed', 'done', 'finished'].includes(statusRaw)) {
+      return {
+        label: 'Completed',
+        color: 'bg-green-100 text-green-700 border border-green-200',
+      };
+    }
+
+    if (['cancelled', 'canceled'].includes(statusRaw)) {
+      return {
+        label: 'Cancelled',
+        color: 'bg-red-100 text-red-700 border border-red-200',
+      };
+    }
+
+    if (['missed', 'no_show', 'no-show'].includes(statusRaw)) {
+      return {
+        label: 'Missed',
+        color: 'bg-orange-100 text-orange-700 border border-orange-200',
+      };
+    }
+
+    if (['confirmed', 'scheduled', 'approved'].includes(statusRaw)) {
+      return {
+        label: 'Scheduled',
+        color: 'bg-blue-100 text-blue-700 border border-blue-200',
+      };
+    }
+
+    if (!appointmentInfo?.date) {
+      return {
+        label: 'Not Scheduled',
+        color: 'bg-gray-100 text-gray-600 border border-gray-200',
+      };
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const appointmentDate = new Date(appointmentTime);
+    const appointmentDate = new Date(appointmentInfo.date);
     appointmentDate.setHours(0, 0, 0, 0);
-    
+
     if (appointmentDate.getTime() === today.getTime()) {
-      return { label: 'Today', color: 'bg-blue-100 text-blue-800 border border-blue-300' };
-    } else if (appointmentDate.getTime() < today.getTime()) {
-      return { label: 'Past', color: 'bg-gray-100 text-gray-800' };
-    } else {
-      return { label: 'Upcoming', color: 'bg-green-100 text-green-800' };
+      return {
+        label: 'Today',
+        color: 'bg-blue-100 text-blue-800 border border-blue-300',
+      };
     }
+
+    if (appointmentDate.getTime() < today.getTime()) {
+      return {
+        label: 'Past',
+        color: 'bg-gray-100 text-gray-800 border border-gray-200',
+      };
+    }
+
+    return {
+      label: 'Upcoming',
+      color: 'bg-green-100 text-green-800 border border-green-200',
+    };
   };
 
   // Handle mark as viewed
@@ -178,7 +289,7 @@ const Appointments = () => {
     }
   };
 
-  if (workingLoading) {
+  if (workingLoading || patientsLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -204,13 +315,14 @@ const Appointments = () => {
           </p>
         </div>
         <div className="text-xs text-gray-500">
-          Total: {appointments.length} {filterType !== 'all' && `(${normalizedPatients.filter(p => p.appointmentTime).length} total)`}
+          Total: {appointments.length}{' '}
+          {(filterType !== 'all' || consultFilter !== 'all') && `(${totalWithAppointmentDates} total)`}
         </div>
       </div>
 
       {/* Search and Filter Section */}
       <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -249,6 +361,23 @@ const Appointments = () => {
               <option value="date">Date & Time</option>
               <option value="name">Patient Name</option>
               <option value="type">Appointment Type</option>
+            </select>
+          </div>
+
+          {/* Consultation Type Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 whitespace-nowrap">Consultation</span>
+            <select
+              value={consultFilter}
+              onChange={(e) => setConsultFilter(e.target.value)}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            >
+              <option value="all">All Types</option>
+              <option value="normal">Normal</option>
+              <option value="audio">Audio</option>
+              <option value="video">Video</option>
+              <option value="review_reports">Review Reports</option>
+              <option value="other">Other</option>
             </select>
           </div>
         </div>
@@ -293,13 +422,16 @@ const Appointments = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {appointments.map((patient) => {
+                {appointments.map(({ patient, appointment }) => {
                   const typeBadge = getAppointmentTypeBadge(patient);
-                  const statusBadge = getAppointmentStatus(patient.appointmentTime, patient);
-                  const appointmentDate = new Date(patient.appointmentTime);
-                  const isViewed = patient.appointmentStatus === 'viewed' || patient.viewedByDoctor;
+                  const statusBadge = getAppointmentStatus(appointment, patient);
+                  const appointmentDate = appointment?.date ? new Date(appointment.date) : null;
+                  const isViewed =
+                    patient.viewedByDoctor ||
+                    patient.appointmentStatus === 'viewed' ||
+                    appointment?.status === 'viewed';
                   const isMarking = markingAsViewed[patient._id];
-                  
+
                   return (
                     <tr key={patient._id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -316,24 +448,28 @@ const Appointments = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-xs">
-                          <div className="text-gray-900 font-medium">
-                            {appointmentDate.toLocaleDateString('en-GB', {
-                              weekday: 'short',
-                              day: 'numeric',
-                              month: 'short',
-                              year: 'numeric'
-                            })}
+                        {appointmentDate ? (
+                          <div className="text-xs">
+                            <div className="text-gray-900 font-medium">
+                              {appointmentDate.toLocaleDateString('en-GB', {
+                                weekday: 'short',
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </div>
+                            <div className="text-blue-600 flex items-center gap-1 mt-1">
+                              <Clock className="w-3 h-3" />
+                              {appointmentDate.toLocaleTimeString('en-GB', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: true,
+                              })}
+                            </div>
                           </div>
-                          <div className="text-blue-600 flex items-center gap-1 mt-1">
-                            <Clock className="w-3 h-3" />
-                            {appointmentDate.toLocaleTimeString('en-GB', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              hour12: true
-                            })}
-                          </div>
-                        </div>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">Not scheduled</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 text-xs font-semibold rounded-full flex items-center gap-1 w-fit ${typeBadge.color}`}>

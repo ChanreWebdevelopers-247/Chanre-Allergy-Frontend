@@ -972,7 +972,7 @@ const ViewProfile = () => {
                   className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg font-medium transition-colors text-xs w-full sm:w-auto flex items-center justify-center gap-2"
                 >
                   <Plus className="h-3 w-3 sm:h-4 sm:w-4" />
-                  Add Medication
+                  Create / Print Prescription
                 </button>
               </div>
               <div className="p-4 sm:p-6">
@@ -993,7 +993,7 @@ const ViewProfile = () => {
                       onClick={() => navigate(`/dashboard/CenterAdmin/patients/profile/AddMedications/${patient._id}`)}
                       className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors text-xs"
                     >
-                      Add First Medication
+                      Create / Print Prescription
                     </button>
                   </div>
                 ) : (

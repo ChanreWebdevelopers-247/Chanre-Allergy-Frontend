@@ -46,6 +46,9 @@ import LabStaffList from '../pages/Superadmin/Lab/LabStaffList';
 import AddLabStaff from '../pages/Superadmin/Lab/AddLabStaff';
 import EditLabStaff from '../pages/Superadmin/Lab/EditLabStaff';
 import LabReports from '../pages/Superadmin/Lab/LabReports';
+import SlitLabStaffList from '../pages/Superadmin/Lab/SlitLabStaffList';
+import AddSlitLabStaff from '../pages/Superadmin/Lab/AddSlitLabStaff';
+import EditSlitLabStaff from '../pages/Superadmin/Lab/EditSlitLabStaff';
 import SuperAdminDoctorList from '../pages/Superadmin/Docters/SuperadminDoctorList';
 import AddSuperAdminDoctor from '../pages/Superadmin/Docters/AddSuperadminDoctor';
 import ViewSuperadminDoctor from '../pages/Superadmin/Docters/ViewSuperadminDoctor';
@@ -93,6 +96,8 @@ import LabCompleteTesting from '../pages/Lab/CompleteTesting';
 import LabGenerateReport from '../pages/Lab/GenerateReport';
 import LabSendReport from '../pages/Lab/SendReport';
 import LabRouteProtection from '../components/LabRouteProtection';
+import SlitLabRouteProtection from '../components/SlitLabRouteProtection';
+import LabSlitTherapyRequests from '../pages/Lab/SlitTherapyRequests';
 
 // Center Admin Pages
 import CenterAdminDashboard from '../pages/CenterAdmin/Dashboard';
@@ -160,6 +165,7 @@ import ReceptionistLayout from '../pages/Receptionist/ReceptionistLayout';
 import ReceptionistBilling from '../pages/Receptionist/Billing';
 import ConsultationBilling from '../pages/Receptionist/ConsultationBilling';
 import SuperConsultantBilling from '../pages/Receptionist/SuperConsultantBilling';
+import SlitTherapyBilling from '../pages/Receptionist/SlitTherapyBilling';
 import ReassignPatient from '../pages/Receptionist/ReassignPatient';
 import ReceptionistBillingTracker from '../pages/Receptionist/BillingTracker';
 import TransactionView from '../pages/Receptionist/TransactionView';
@@ -262,6 +268,7 @@ export default function AppRoutes() {
 <Route path="/receptionist/edit-patient/:id" element={<PrivateRoute><ReceptionistLayout><ReceptionistEditPatient /></ReceptionistLayout></PrivateRoute>} />
 <Route path="/receptionist/patients" element={<PrivateRoute><ReceptionistLayout><ReceptionistPatientList /></ReceptionistLayout></PrivateRoute>} />
 <Route path="/dashboard/receptionist/edit-patient/:id" element={<PrivateRoute><ReceptionistLayout><ReceptionistEditPatient /></ReceptionistLayout></PrivateRoute>} />
+<Route path="/receptionist/slit-therapy-billing" element={<PrivateRoute><ReceptionistLayout><SlitTherapyBilling /></ReceptionistLayout></PrivateRoute>} />
 <Route path="/receptionist/collection-report" element={<PrivateRoute><ReceptionistLayout><ReceptionistCollectionReport /></ReceptionistLayout></PrivateRoute>} />
 
       {/* Superadmin Billing Details Route at Root Level (for direct navigation) */}
@@ -335,6 +342,9 @@ export default function AppRoutes() {
         <Route path="Superadmin/Lab/AddLabStaff" element={<AddLabStaff />} />
         <Route path="Superadmin/Lab/EditLabStaff/:id" element={<EditLabStaff />} />
         <Route path="Superadmin/Lab/LabReports" element={<LabReports />} />
+        <Route path="Superadmin/Lab/SlitLabStaffList" element={<SlitLabStaffList />} />
+        <Route path="Superadmin/Lab/AddSlitLabStaff" element={<AddSlitLabStaff />} />
+        <Route path="Superadmin/Lab/EditSlitLabStaff/:id" element={<EditSlitLabStaff />} />
         
         {/* Superadmin Followups Routes with capital S */}
         <Route path="Superadmin/Followups/ManageFollowUp" element={<ManageFollowUp />} />
@@ -387,6 +397,9 @@ export default function AppRoutes() {
         <Route path="superadmin/lab/addlabstaff" element={<AddLabStaff />} />
         <Route path="superadmin/lab/editlabstaff/:id" element={<EditLabStaff />} />
         <Route path="superadmin/lab/labreports" element={<LabReports />} />
+        <Route path="superadmin/lab/slitlabstafflist" element={<SlitLabStaffList />} />
+        <Route path="superadmin/lab/addslitlabstaff" element={<AddSlitLabStaff />} />
+        <Route path="superadmin/lab/editslitlabstaff/:id" element={<EditSlitLabStaff />} />
         
         {/* Test Request Routes */}
         <Route path="superadmin/test-requests" element={<TestRequestsList />} />
@@ -536,6 +549,7 @@ export default function AppRoutes() {
         <Route path="receptionist/billing" element={<ReceptionistLayout><ReceptionistBilling /></ReceptionistLayout>} />
         <Route path="receptionist/consultation-billing" element={<ReceptionistLayout><ConsultationBilling /></ReceptionistLayout>} />
         <Route path="receptionist/superconsultant-billing" element={<ReceptionistLayout><SuperConsultantBilling /></ReceptionistLayout>} />
+        <Route path="receptionist/slit-therapy-billing" element={<ReceptionistLayout><SlitTherapyBilling /></ReceptionistLayout>} />
         <Route path="receptionist/reassign-patient" element={<ReceptionistLayout><ReassignPatient /></ReceptionistLayout>} />
         <Route path="receptionist/billing-tracker" element={<ReceptionistLayout><ReceptionistBillingTracker /></ReceptionistLayout>} />
         <Route path="receptionist/transactions" element={<ReceptionistLayout><TransactionView /></ReceptionistLayout>} />
@@ -650,6 +664,7 @@ export default function AppRoutes() {
         <Route path="lab/complete-testing/:id" element={<LabRouteProtection><LabCompleteTesting /></LabRouteProtection>} />
         <Route path="lab/generate-report/:id" element={<LabRouteProtection><LabGenerateReport /></LabRouteProtection>} />
         <Route path="lab/send-report/:id" element={<LabRouteProtection><LabSendReport /></LabRouteProtection>} />
+        <Route path="slit-lab/slit-therapy" element={<SlitLabRouteProtection><LabSlitTherapyRequests /></SlitLabRouteProtection>} />
 
         {/* Accountant Routes */}
         <Route path="accountant/dashboard" element={<AccountantRouteProtection><AccountantDashboard /></AccountantRouteProtection>} />

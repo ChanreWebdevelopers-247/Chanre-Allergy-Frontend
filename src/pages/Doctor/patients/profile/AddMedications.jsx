@@ -1,8 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
-import { addPatientMedication, fetchPatientDetails } from "../../../../features/doctor/doctorThunks";
-import { resetDoctorState } from "../../../../features/doctor/doctorSlice";
+import { createPrescription, fetchPatientDetails, fetchPrescriptions } from "../../../../features/doctor/doctorThunks";
 import { Pill, Save, ArrowLeft, CheckCircle, Loader2, Plus, Trash2, ClipboardList } from "lucide-react";
 import API from "../../../../services/api";
 
@@ -27,7 +26,11 @@ export default function AddMedications() {
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
-  const { loading, addMedicationSuccess, patientDetails, patientDetailsLoading } = useSelector(
+  const {
+    createPrescriptionLoading,
+    patientDetails,
+    patientDetailsLoading,
+  } = useSelector(
     (state) => state.doctor
   );
   const { user } = useSelector((state) => state.auth);
@@ -74,6 +77,8 @@ export default function AddMedications() {
 
   const [submissionState, setSubmissionState] = useState({ status: "idle", message: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const prescriptionRef = useRef(null);
 
   const [centerInfo, setCenterInfo] = useState(DEFAULT_CENTER_INFO);
   const [centerLoading, setCenterLoading] = useState(false);
@@ -154,12 +159,6 @@ export default function AddMedications() {
     fetchCenterInfo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
-
-  React.useEffect(() => {
-    if (addMedicationSuccess) {
-      dispatch(resetDoctorState());
-    }
-  }, [addMedicationSuccess, dispatch]);
 
   React.useEffect(() => {
     setFormData((prev) => ({ ...prev, patientId: id }));
@@ -246,14 +245,24 @@ export default function AddMedications() {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    const trimmedMedications = medications.map((med) => ({
-      ...med,
-      drugName: med.drugName.trim(),
-      dose: med.dose.trim(),
-      frequency: med.frequency.trim(),
-      duration: med.duration.trim(),
-      instructions: med.instructions.trim(),
-    }));
+    const trimmedMedications = medications
+      .map((med) => ({
+        ...med,
+        drugName: med.drugName.trim(),
+        dose: med.dose.trim(),
+        frequency: med.frequency.trim(),
+        duration: med.duration.trim(),
+        instructions: med.instructions.trim(),
+      }))
+      .filter((med) => med.drugName || med.dose || med.duration || med.instructions);
+
+    if (trimmedMedications.length === 0) {
+      setSubmissionState({
+        status: "error",
+        message: "Add at least one medication before saving the prescription.",
+      });
+      return;
+    }
 
     const invalidMedication = trimmedMedications.find(
       (med) => !med.drugName || !med.dose || !med.duration
@@ -267,27 +276,39 @@ export default function AddMedications() {
       return;
     }
 
-    const payloads = trimmedMedications.map((medication) => ({
-      ...medication,
+    const trimmedTests = tests
+      .map((test) => ({
+        name: test.name.trim(),
+        instruction: test.instruction.trim(),
+      }))
+      .filter((test) => test.name || test.instruction);
+
+    const prescriptionPayload = {
       patientId: formData.patientId,
+      doctorId: user?._id || null,
       prescribedBy: formData.prescribedBy,
       prescribedDate: formData.prescribedDate,
-    }));
+      medications: trimmedMedications,
+      tests: trimmedTests,
+      diagnosis: diagnosis.trim(),
+      followUpInstruction: testFollowupInstruction.trim(),
+      reportGeneratedAt,
+      preparedBy: preparedBy.trim(),
+      preparedByCredentials: preparedByCredentials.trim(),
+      medicalCouncilNumber: medicalCouncilNumber.trim(),
+      printedBy: printedBy.trim(),
+    };
 
     setIsSubmitting(true);
     setSubmissionState({ status: "idle", message: "" });
 
     try {
-      await Promise.all(
-        payloads.map((payload) => dispatch(addPatientMedication(payload)).unwrap())
-      );
+      await dispatch(createPrescription(prescriptionPayload)).unwrap();
+      await dispatch(fetchPrescriptions(formData.patientId));
 
       setSubmissionState({
         status: "success",
-        message:
-          payloads.length > 1
-            ? `${payloads.length} medications added successfully!`
-            : "Medication added successfully!",
+        message: "Prescription created successfully!",
       });
 
       setMedications([
@@ -296,20 +317,190 @@ export default function AddMedications() {
 
       setTests([{ name: "", instruction: "" }]);
 
+      setDiagnosis("");
+      setTestFollowupInstruction("R/W with reports after 12 weeks");
+      setReportGeneratedAt(new Date().toISOString().slice(0, 16));
+      setPreparedBy(user?.name || "");
+      setPreparedByCredentials("MD, DNB, DM");
+      setMedicalCouncilNumber("");
+      setPrintedBy(user?.name || "");
+
       setTimeout(() => {
-        dispatch(resetDoctorState());
-        navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${id}`);
+        navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${id}?tab=Prescription`);
       }, 1500);
     } catch (submitError) {
       const errorMessage =
         typeof submitError === "string"
           ? submitError
-          : submitError?.message || "Failed to add medications. Please try again.";
+          : submitError?.message || "Failed to create prescription. Please try again.";
 
       setSubmissionState({ status: "error", message: errorMessage });
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const buildPrintableHTML = () => {
+    const formatDate = (value, withTime = false) => {
+      if (!value) return "—";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return withTime
+        ? date.toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : date.toLocaleDateString("en-GB");
+    };
+
+    const printableMedications = medications.filter(
+      (med) => med.drugName?.trim() || med.dose?.trim() || med.duration?.trim() || med.instructions?.trim()
+    );
+
+    const printableTests = tests.filter((test) => test.name?.trim() || test.instruction?.trim());
+
+    const patientName = patient?.name || "—";
+    const patientIdValue = patient?.uhId || patient?._id || formData.patientId || "—";
+    const patientAgeGender = [patient?.age ? `${patient.age}Y` : "", patient?.gender || ""].filter(Boolean).join(" ");
+
+    const medicationsRows = printableMedications
+      .map((med, index) => `
+        <tr>
+          <td>${index + 1}. ${med.drugName || ""}</td>
+          <td>${med.dose || ""}${med.frequency ? ` ${med.frequency}` : ""}</td>
+          <td>${med.duration || ""}</td>
+          <td>${med.instructions || ""}</td>
+        </tr>
+      `)
+      .join("");
+
+    const testsRows = printableTests
+      .map((test, index) => `
+        <tr>
+          <td>${index + 1}. ${test.name || ""}</td>
+          <td>${test.instruction || ""}</td>
+        </tr>
+      `)
+      .join("");
+
+    return `<!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Prescription - ${patientName}</title>
+          <style>
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 32px; color: #1f2933; }
+            h1, h2, h3 { margin: 0; }
+            .header { text-align: center; margin-bottom: 16px; }
+            .header h1 { font-size: 18px; letter-spacing: 3px; }
+            .header p { font-size: 11px; margin: 2px 0; }
+            .section { margin-top: 16px; font-size: 12px; }
+            .section strong { text-transform: uppercase; letter-spacing: 2px; font-size: 10px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11px; }
+            table thead { background: #f1f5f9; text-transform: uppercase; letter-spacing: 1px; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
+            .footer { margin-top: 24px; font-size: 11px; display: flex; justify-content: space-between; }
+            .signature { text-align: right; margin-top: 40px; font-size: 10px; letter-spacing: 3px; }
+            .meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; font-size: 11px; }
+            .meta div { padding: 8px 10px; border: 1px dashed #cbd5e1; border-radius: 8px; }
+            .tests-table th:nth-child(1) { width: 60%; }
+            .tests-table th:nth-child(2) { width: 40%; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${centerInfo.name || "CHANRE RHEUMATOLOGY & IMMUNOLOGY CENTER & RESEARCH"}</h1>
+            <p>${centerInfo.subTitle || ""}</p>
+            <p>${centerInfo.address || ""}</p>
+            <p>
+              ${centerInfo.phone ? `Phone: ${centerInfo.phone}` : ""}
+              ${centerInfo.fax ? ` | Fax: ${centerInfo.fax}` : ""}
+            </p>
+            <p>
+              ${centerInfo.email ? `Email: ${centerInfo.email}` : ""}
+              ${centerInfo.website ? ` | ${centerInfo.website}` : ""}
+            </p>
+          </div>
+
+          <div class="section">
+            <div class="meta">
+              <div><strong>Patient Name</strong><br/>${patientName}</div>
+              <div><strong>Patient ID</strong><br/>${patientIdValue}</div>
+              <div><strong>Age / Gender</strong><br/>${patientAgeGender || "—"}</div>
+              <div><strong>Diagnosis</strong><br/>${diagnosis || "—"}</div>
+              <div><strong>Date</strong><br/>${formatDate(formData.prescribedDate)}</div>
+              <div><strong>Report Generated</strong><br/>${formatDate(reportGeneratedAt, true)}</div>
+            </div>
+          </div>
+
+          <div class="section">
+            <strong>Medicines</strong>
+            <table>
+              <thead>
+                <tr>
+                  <th>Medicine Name</th>
+                  <th>Dosage</th>
+                  <th>Duration</th>
+                  <th>Instruction</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${medicationsRows || '<tr><td colspan="4">No medicines added.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <strong>Tests</strong>
+            <table class="tests-table">
+              <thead>
+                <tr>
+                  <th>Test Name</th>
+                  <th>Instruction</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${testsRows || '<tr><td colspan="2">No tests prescribed.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <strong>Follow-up Instruction</strong>
+            <p>${testFollowupInstruction || "—"}</p>
+          </div>
+
+          <div class="footer">
+            <div>
+              <div><strong>Prescription Prepared By</strong><br/>${preparedBy || ""}</div>
+              <div>${preparedByCredentials || ""}</div>
+              <div>${medicalCouncilNumber ? `Medical Council Reg. No.: ${medicalCouncilNumber}` : ""}</div>
+            </div>
+            <div>
+              <div><strong>Printed By</strong><br/>${printedBy || ""}</div>
+            </div>
+          </div>
+
+          <div class="signature">DOCTOR SIGNATURE</div>
+        </body>
+      </html>`;
+  };
+
+  const handlePrint = () => {
+    const printableHTML = buildPrintableHTML();
+    const printWindow = window.open("", "_blank", "width=900,height=650");
+    if (!printWindow) {
+      alert("Pop-up blocked. Please allow pop-ups to print the prescription.");
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(printableHTML);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   return (
@@ -371,7 +562,7 @@ export default function AddMedications() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
+          <div ref={prescriptionRef} className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
             <div className="bg-gradient-to-r from-blue-50 to-white px-6 py-6 text-center border-b border-blue-100">
               <h2 className="text-sm sm:text-base font-bold text-slate-800 tracking-[0.12em] uppercase">
                 {centerInfo.name}
@@ -471,8 +662,7 @@ export default function AddMedications() {
                 <thead className="bg-slate-100 uppercase tracking-widest text-[10px] text-slate-600">
                   <tr>
                     <th className="border-b border-slate-200 px-3 py-3 text-left">Medicine</th>
-                    <th className="border-b border-slate-200 px-3 py-3 text-left">Dose</th>
-                    <th className="border-b border-slate-200 px-3 py-3 text-left">Frequency</th>
+                    <th className="border-b border-slate-200 px-3 py-3 text-left">Dosage</th>
                     <th className="border-b border-slate-200 px-3 py-3 text-left">Duration</th>
                     <th className="border-b border-slate-200 px-3 py-3 text-left">Instructions</th>
                     <th className="border-b border-slate-200 px-3 py-3 text-left">Actions</th>
@@ -503,19 +693,7 @@ export default function AddMedications() {
                             handleMedicationChange(index, "dose", event.target.value)
                           }
                           required
-                          placeholder="1 tab / week"
-                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder:text-slate-400"
-                        />
-                      </td>
-                      <td className="border-t border-slate-200 px-3 py-2 align-top">
-                        <input
-                          type="text"
-                          name="frequency"
-                          value={medication.frequency}
-                          onChange={(event) =>
-                            handleMedicationChange(index, "frequency", event.target.value)
-                          }
-                          placeholder="Every Monday"
+                          placeholder="1 TAB/WEEK (MONDAY)"
                           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder:text-slate-400"
                         />
                       </td>
@@ -670,6 +848,98 @@ export default function AddMedications() {
             </div>
           </div>
 
+          <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden text-xs text-slate-700">
+            <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/70">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <span className="font-semibold uppercase tracking-[0.3em] text-slate-500 block mb-1">
+                    Prescription Prepared By
+                  </span>
+                  <input
+                    type="text"
+                    value={preparedBy}
+                    onChange={(event) => setPreparedBy(event.target.value)}
+                    placeholder="Enter doctor's name"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={preparedByCredentials}
+                    onChange={(event) => setPreparedByCredentials(event.target.value)}
+                    placeholder="Credentials"
+                    className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={medicalCouncilNumber}
+                    onChange={(event) => setMedicalCouncilNumber(event.target.value)}
+                    placeholder="Medical Council Reg. No."
+                    className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold uppercase tracking-[0.3em] text-slate-500 block mb-1">
+                    Printed By
+                  </span>
+                  <input
+                    type="text"
+                    value={printedBy}
+                    onChange={(event) => setPrintedBy(event.target.value)}
+                    placeholder="Enter name"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                  />
+                  <div className="mt-4 text-[10px] uppercase tracking-[0.4em] text-right text-slate-500">
+                    Doctor Signature
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-white text-[11px] text-slate-600 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+                <div>
+                  <span className="font-semibold">Diagnosis:</span> {diagnosis || "—"}
+                </div>
+                <div>
+                  <span className="font-semibold">Report Generated:</span>{" "}
+                  {reportGeneratedAt ? new Date(reportGeneratedAt).toLocaleString() : "—"}
+                </div>
+              </div>
+              <div>
+                <span className="font-semibold">Follow-up Instruction:</span> {testFollowupInstruction || "—"}
+              </div>
+              <div>
+                <span className="font-semibold">Tests:</span>
+                {tests.filter((test) => test.name || test.instruction).length === 0 ? (
+                  " —"
+                ) : (
+                  <ul className="list-disc list-inside mt-1 space-y-1">
+                    {tests
+                      .filter((test) => test.name || test.instruction)
+                      .map((test, index) => (
+                        <li key={`summary-test-${index}`}>
+                          <span className="font-semibold text-slate-700">{test.name || "—"}</span>
+                          {test.instruction ? ` — ${test.instruction}` : ""}
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 text-center sm:text-left">
+                  Lifestyle • Nutrition • Physiotherapy • Allergy Care
+                </div>
+                <button
+                  type="button"
+                  onClick={handlePrint}
+                  className="inline-flex items-center gap-2 px-3 py-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors text-xs self-center sm:self-end"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  View & Print Prescription
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-col sm:flex-row sm:justify-end gap-3 pt-4">
             <button
               type="button"
@@ -681,10 +951,10 @@ export default function AddMedications() {
             </button>
             <button
               type="submit"
-              disabled={loading || isSubmitting}
+              disabled={createPrescriptionLoading || isSubmitting}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-xs"
             >
-              {loading || isSubmitting ? (
+              {createPrescriptionLoading || isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Saving Prescription…
@@ -698,71 +968,6 @@ export default function AddMedications() {
             </button>
           </div>
         </form>
-
-        <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden text-xs text-slate-700">
-          <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/70">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <span className="font-semibold uppercase tracking-[0.3em] text-slate-500 block mb-1">
-                  Prescription Prepared By
-                </span>
-                <input
-                  type="text"
-                  value={preparedBy}
-                  onChange={(event) => setPreparedBy(event.target.value)}
-                  placeholder="Enter doctor's name"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-                />
-                <input
-                  type="text"
-                  value={preparedByCredentials}
-                  onChange={(event) => setPreparedByCredentials(event.target.value)}
-                  placeholder="Credentials"
-                  className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-                />
-                <input
-                  type="text"
-                  value={medicalCouncilNumber}
-                  onChange={(event) => setMedicalCouncilNumber(event.target.value)}
-                  placeholder="Medical Council Reg. No."
-                  className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <span className="font-semibold uppercase tracking-[0.3em] text-slate-500 block mb-1">
-                  Printed By
-                </span>
-                <input
-                  type="text"
-                  value={printedBy}
-                  onChange={(event) => setPrintedBy(event.target.value)}
-                  placeholder="Enter name"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-                />
-                <div className="mt-4 text-[10px] uppercase tracking-[0.4em] text-right text-slate-500">
-                  Doctor Signature
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="px-6 py-4 bg-white text-[11px] text-slate-600 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
-              <div>
-                <span className="font-semibold">Diagnosis:</span> {diagnosis || "—"}
-              </div>
-              <div>
-                <span className="font-semibold">Report Generated:</span>{" "}
-                {reportGeneratedAt ? new Date(reportGeneratedAt).toLocaleString() : "—"}
-              </div>
-            </div>
-            <div>
-              <span className="font-semibold">Follow-up Instruction:</span> {testFollowupInstruction || "—"}
-            </div>
-            <div className="text-[10px] text-slate-500 uppercase tracking-[0.25em] text-center">
-              Lifestyle • Nutrition • Physiotherapy • Allergy Care
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

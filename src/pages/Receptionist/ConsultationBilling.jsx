@@ -4982,6 +4982,7 @@ export default function ConsultationBilling() {
                   <option value="card">Card</option>
                   <option value="upi">UPI</option>
                   <option value="netbanking">Net Banking</option>
+                  <option value="neft">NEFT</option>
                 </select>
               </div>
 

@@ -577,6 +577,13 @@ const superAdminDoctorSlice = createSlice({
         state.labReports = action.payload.reports || action.payload;
         if (action.payload.pagination) {
           state.labReportsPagination = action.payload.pagination;
+        } else {
+          state.labReportsPagination = {
+            currentPage: action.payload.page || 1,
+            totalPages: action.payload.pages || 1,
+            total: action.payload.total || (Array.isArray(state.labReports) ? state.labReports.length : 0),
+            limit: state.labReportsPagination.limit || 10
+          };
         }
       })
       .addCase(fetchSuperAdminDoctorLabReports.rejected, (state, action) => {

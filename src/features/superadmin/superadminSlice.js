@@ -25,6 +25,11 @@ import {
   createLabStaff,
   updateLabStaff,
   deleteLabStaff,
+  fetchSlitLabStaff,
+  fetchSlitLabStaffById,
+  createSlitLabStaff,
+  updateSlitLabStaff,
+  deleteSlitLabStaff,
   fetchPatientComprehensiveData,
   fetchPatientTestHistory,
   fetchPatientMedications,
@@ -64,6 +69,8 @@ const initialState = {
   centers: [],
   centerAdmins: [],
   labStaff: [],
+  slitLabStaff: [],
+  slitLabStaffMember: null,
   loading: false,
   error: null,
   success: false, // Added for general success state
@@ -71,6 +78,9 @@ const initialState = {
   updateSuccess: false,
   deleteSuccess: false,
   addLabStaffSuccess: false,
+  addSlitLabStaffSuccess: false,
+  updateSlitLabStaffSuccess: false,
+  deleteSlitLabStaffSuccess: false,
   // New patient data state
   patientData: {
     patient: null,
@@ -107,6 +117,10 @@ const superadminSlice = createSlice({
       state.centerAdmin = null;
       state.isNewAdmin = false;
       state.addLabStaffSuccess = false;
+      state.addSlitLabStaffSuccess = false;
+      state.updateSlitLabStaffSuccess = false;
+      state.deleteSlitLabStaffSuccess = false;
+      state.slitLabStaffMember = null;
     },
     clearError: (state) => {
       state.error = null;
@@ -515,6 +529,100 @@ const superadminSlice = createSlice({
         state.error = null;
       })
       .addCase(deleteLabStaff.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // Fetch SLIT lab staff
+      .addCase(fetchSlitLabStaff.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchSlitLabStaff.fulfilled, (state, action) => {
+        state.loading = false;
+        state.slitLabStaff = action.payload;
+        state.error = null;
+      })
+      .addCase(fetchSlitLabStaff.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // Fetch SLIT lab staff by ID
+      .addCase(fetchSlitLabStaffById.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchSlitLabStaffById.fulfilled, (state, action) => {
+        state.loading = false;
+        state.slitLabStaffMember = action.payload;
+        state.error = null;
+      })
+      .addCase(fetchSlitLabStaffById.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // Create SLIT lab staff
+      .addCase(createSlitLabStaff.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(createSlitLabStaff.fulfilled, (state, action) => {
+        state.loading = false;
+        const newStaff = action.payload?.staff || null;
+        if (newStaff) {
+          state.slitLabStaff = [newStaff, ...state.slitLabStaff];
+          state.slitLabStaffMember = newStaff;
+        }
+        state.addSlitLabStaffSuccess = true;
+        state.success = true;
+        state.error = null;
+      })
+      .addCase(createSlitLabStaff.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // Update SLIT lab staff
+      .addCase(updateSlitLabStaff.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(updateSlitLabStaff.fulfilled, (state, action) => {
+        state.loading = false;
+        const updatedStaff = action.payload?.staff || null;
+        if (updatedStaff) {
+          state.slitLabStaff = state.slitLabStaff.map((staff) =>
+            staff._id === updatedStaff._id ? updatedStaff : staff
+          );
+          state.slitLabStaffMember = updatedStaff;
+        }
+        state.updateSlitLabStaffSuccess = true;
+        state.success = true;
+        state.error = null;
+      })
+      .addCase(updateSlitLabStaff.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // Delete SLIT lab staff
+      .addCase(deleteSlitLabStaff.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(deleteSlitLabStaff.fulfilled, (state, action) => {
+        state.loading = false;
+        const deletedId = action.payload?.id;
+        if (deletedId) {
+          state.slitLabStaff = state.slitLabStaff.filter((staff) => staff._id !== deletedId);
+        }
+        state.deleteSlitLabStaffSuccess = true;
+        state.success = true;
+        state.error = null;
+      })
+      .addCase(deleteSlitLabStaff.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })

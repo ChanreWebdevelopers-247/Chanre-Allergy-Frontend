@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSuperAdminDoctorWorkingStats, fetchSuperAdminDoctorAssignedPatients } from '../../../features/superadmin/superAdminDoctorSlice';
 import { normalizePatientsArray } from '../../../utils/normalizePatientsArray';
+import { getSuperConsultantAppointmentsWithMeta } from '../../../utils/superConsultantAppointments';
 import { User, FileText, MessageSquare, Clock, Eye, Building, Users, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -12,7 +13,15 @@ const Dashboard = () => {
     (state) => state.superAdminDoctors
   );
 
-  const normalizedPatients = useMemo(() => normalizePatientsArray(assignedPatients), [assignedPatients]);
+  const normalizedPatients = useMemo(
+    () => normalizePatientsArray(assignedPatients),
+    [assignedPatients]
+  );
+  const myPatients = normalizedPatients;
+  const patientsWithAppointments = useMemo(
+    () => getSuperConsultantAppointmentsWithMeta(myPatients),
+    [myPatients]
+  );
 
   useEffect(() => {
     dispatch(fetchSuperAdminDoctorWorkingStats());
@@ -21,18 +30,18 @@ const Dashboard = () => {
 
   // Calculate today's appointments
   const todaysAppointments = useMemo(() => {
-    if (normalizedPatients.length === 0) return [];
-    
+    if (patientsWithAppointments.length === 0) return [];
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    return normalizedPatients.filter(patient => {
-      if (!patient.appointmentTime) return false;
-      const appointmentDate = new Date(patient.appointmentTime);
+
+    return patientsWithAppointments.filter(({ appointment }) => {
+      if (!appointment?.date) return false;
+      const appointmentDate = new Date(appointment.date);
       appointmentDate.setHours(0, 0, 0, 0);
       return appointmentDate.getTime() === today.getTime();
     });
-  }, [normalizedPatients]);
+  }, [patientsWithAppointments]);
 
 
 
@@ -81,7 +90,7 @@ const Dashboard = () => {
             <div className="ml-4">
               <p className="text-xs font-medium text-gray-600">Total Patients</p>
               <p className="text-xl font-semibold text-gray-900">
-                {workingStats?.totalPatients || normalizedPatients.length || 0}
+                {workingStats?.totalPatients || myPatients.length || 0}
               </p>
             </div>
           </div>
@@ -178,8 +187,11 @@ const Dashboard = () => {
           </div>
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {todaysAppointments.slice(0, 6).map((patient) => (
-                <div key={patient._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+              {todaysAppointments.slice(0, 6).map(({ patient, appointment }) => {
+                const appointmentDate = appointment?.date ? new Date(appointment.date) : null;
+
+                return (
+                  <div key={patient._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-semibold text-gray-800">{patient.name}</h3>
                     <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
@@ -189,15 +201,15 @@ const Dashboard = () => {
                   <div className="space-y-1 text-xs text-gray-600 mb-3">
                     <p><span className="font-medium">Age:</span> {patient.age} years, {patient.gender}</p>
                     <p><span className="font-medium">Phone:</span> {patient.phone}</p>
-                    {patient.appointmentTime && (
-                      <p className="flex items-center text-blue-600">
-                        <Clock className="w-3 h-3 mr-1" />
-                        {new Date(patient.appointmentTime).toLocaleTimeString('en-GB', { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
-                      </p>
-                    )}
+                      {appointmentDate && (
+                        <p className="flex items-center text-blue-600">
+                          <Clock className="w-3 h-3 mr-1" />
+                          {appointmentDate.toLocaleTimeString('en-GB', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      )}
                   </div>
                   <button
                     onClick={() => navigate(`/dashboard/superadmin/doctor/patient/${patient._id}`)}
@@ -205,8 +217,9 @@ const Dashboard = () => {
                   >
                     View Patient Details
                   </button>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -287,7 +300,7 @@ const Dashboard = () => {
           </button>
         </div>
         <div className="p-6">
-          {normalizedPatients.length === 0 ? (
+          {myPatients.length === 0 ? (
             <p className="text-gray-500 text-center py-4 text-xs">No assigned patients found.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -312,13 +325,14 @@ const Dashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                {normalizedPatients.slice(0, 5).map((patient) => {
-                    const isToday = patient.appointmentTime ? (() => {
+                {patientsWithAppointments.slice(0, 5).map(({ patient, appointment }) => {
+                    const appointmentDate = appointment?.date ? new Date(appointment.date) : null;
+                    const isToday = appointmentDate ? (() => {
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
-                      const appointmentDate = new Date(patient.appointmentTime);
-                      appointmentDate.setHours(0, 0, 0, 0);
-                      return appointmentDate.getTime() === today.getTime();
+                      const compareDate = new Date(appointmentDate);
+                      compareDate.setHours(0, 0, 0, 0);
+                      return compareDate.getTime() === today.getTime();
                     })() : false;
                     
                     return (
@@ -341,13 +355,13 @@ const Dashboard = () => {
                           <div className="text-xs text-gray-500">{patient.email || 'N/A'}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          {patient.appointmentTime ? (
+                          {appointmentDate ? (
                             <div className="text-xs">
                               <div className="text-gray-900">
-                                {new Date(patient.appointmentTime).toLocaleDateString('en-GB')}
+                                {appointmentDate.toLocaleDateString('en-GB')}
                               </div>
                               <div className="text-gray-500">
-                                {new Date(patient.appointmentTime).toLocaleTimeString('en-GB', { 
+                                {appointmentDate.toLocaleTimeString('en-GB', { 
                                   hour: '2-digit', 
                                   minute: '2-digit' 
                                 })}

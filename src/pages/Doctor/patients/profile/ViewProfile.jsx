@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { toast } from "react-toastify";
@@ -26,7 +26,7 @@ const DEFAULT_CENTER_INFO = {
   code: "",
 };
 
-const PrescriptionPreviewCard = ({ centerInfo = {}, patient, medication }) => {
+const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => {
   const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
   const ageGender = [
     patient?.age ? `${patient.age}` : null,
@@ -35,11 +35,32 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, medication }) => {
     .filter(Boolean)
     .join(" / ");
 
-  const prescribedDate = medication?.prescribedDate
-    ? new Date(medication.prescribedDate).toLocaleDateString()
-    : medication?.createdAt
-    ? new Date(medication.createdAt).toLocaleDateString()
-    : new Date().toLocaleDateString();
+  const toDate = (value) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const formatDate = (value, withTime = false) => {
+    const date = toDate(value);
+    if (!date) return "—";
+    return withTime
+      ? date.toLocaleString("en-GB", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : date.toLocaleDateString("en-GB");
+  };
+
+  const prescribedDate = formatDate(prescription?.prescribedDate);
+  const reportGenerated = formatDate(prescription?.reportGeneratedAt, true);
+  const medications = Array.isArray(prescription?.medications)
+    ? prescription.medications
+    : [];
+  const tests = Array.isArray(prescription?.tests) ? prescription.tests : [];
 
   return (
     <div className="bg-white rounded-2xl border border-blue-100 overflow-hidden shadow-sm">
@@ -97,6 +118,18 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, medication }) => {
               {prescribedDate}
             </div>
           </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Diagnosis</span>
+            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
+              {prescription?.diagnosis || "—"}
+            </div>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Report Generated</span>
+            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
+              {reportGenerated}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -112,25 +145,79 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, medication }) => {
             </tr>
           </thead>
           <tbody>
-            <tr className="bg-white">
-              <td className="border-t border-slate-200 px-3 py-3 text-slate-800 font-medium">
-                {medication?.drugName || "—"}
-              </td>
-              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                {medication?.dose || "—"}
-              </td>
-              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                {medication?.frequency || "—"}
-              </td>
-              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                {medication?.duration || "—"}
-              </td>
-              <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                {medication?.instructions || "—"}
-              </td>
-            </tr>
+            {medications.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="border-t border-slate-200 px-3 py-3 text-center text-slate-500">
+                  No medicines added.
+                </td>
+              </tr>
+            ) : medications.map((med, idx) => {
+              const name = med.drugName || med.name || med.medicine || "—";
+              const dose = med.dose || med.dosage || "—";
+              const frequency = med.frequency || med.frequncy || med.freq || "—";
+              const duration = med.duration || med.course || "—";
+              const instruction = med.instructions || med.instruction || "—";
+              return (
+              <tr key={`preview-med-${idx}`} className="bg-white">
+                <td className="border-t border-slate-200 px-3 py-3 text-slate-800 font-medium">
+                    {name}
+                </td>
+                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                    {dose}
+                </td>
+                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                    {frequency}
+                </td>
+                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                    {duration}
+                </td>
+                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                    {instruction}
+                </td>
+              </tr>
+              );
+            })}
           </tbody>
         </table>
+      </div>
+
+      <div className="px-6 py-4 border-t border-slate-200 bg-white">
+        <div className="flex items-center gap-2 text-slate-700 text-xs font-semibold uppercase tracking-[0.2em] mb-3">
+          Tests & Follow-up
+        </div>
+        {tests.length === 0 ? (
+          <div className="text-xs text-slate-500">No tests prescribed.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border border-slate-200 rounded-lg overflow-hidden text-xs">
+              <thead className="bg-slate-100 uppercase tracking-widest text-[10px] text-slate-600">
+                <tr>
+                  <th className="border-b border-slate-200 px-3 py-3 text-left">Test Name</th>
+                  <th className="border-b border-slate-200 px-3 py-3 text-left">Instruction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tests.map((test, idx) => (
+                  <tr key={`preview-test-${idx}`} className="bg-white">
+                    <td className="border-t border-slate-200 px-3 py-3 text-slate-800 font-medium">
+                      {test.name || "—"}
+                    </td>
+                    <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
+                      {test.instruction || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Follow-up Instruction</span>
+          <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
+            {prescription?.followUpInstruction || "—"}
+          </div>
+        </div>
       </div>
 
       <div className="px-6 pb-6">
@@ -138,15 +225,29 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, medication }) => {
           <div>
             <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Prescribed By</span>
             <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
-              {typeof medication?.prescribedBy === "object"
-                ? medication?.prescribedBy?.name || "—"
-                : medication?.prescribedBy || "—"}
+              {prescription?.prescribedBy || "—"}
             </div>
+            {(prescription?.preparedByCredentials || prescription?.medicalCouncilNumber) && (
+              <div className="mt-2 px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600 space-y-1">
+                {prescription?.preparedByCredentials && (
+                  <div>Credentials: {prescription.preparedByCredentials}</div>
+                )}
+                {prescription?.medicalCouncilNumber && (
+                  <div>Medical Council Reg. No.: {prescription.medicalCouncilNumber}</div>
+                )}
+              </div>
+            )}
           </div>
           <div>
             <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Notes</span>
             <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
-              Please follow up after the course completion or earlier if symptoms persist.
+              {prescription?.notes || prescription?.followUpInstruction || "—"}
+            </div>
+            <div className="mt-2">
+              <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Printed By</span>
+              <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
+                {prescription?.printedBy || prescription?.preparedBy || "—"}
+              </div>
             </div>
           </div>
         </div>
@@ -154,12 +255,15 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, medication }) => {
         <div className="mt-4 text-[10px] text-slate-500 uppercase tracking-[0.4em] text-right">
           Doctor Signature
         </div>
+        <div className="mt-4 text-center text-[10px] uppercase tracking-[0.2em] text-slate-400">
+          Lifestyle • Nutrition • Physiotherapy • Allergy Care
+        </div>
       </div>
     </div>
   );
 };
 
-const TABS = ["Overview", "Follow Up", "Prescription", "Lab Report Status", "History", "Investigation", "Medications"];
+const TABS = ["Overview", "Follow Up", "Prescription", "History", "Medications"];
 
 const ViewProfile = () => {
   const { id } = useParams();
@@ -178,7 +282,6 @@ const ViewProfile = () => {
 
     const { 
     patientDetails, 
-    patientMedications: medications, 
     patientHistory: history, 
     tests,
     patientTestRequests: testRequests,
@@ -189,11 +292,40 @@ const ViewProfile = () => {
     allergicBronchitis,
     gpe,
     prescriptions,
-    loading, error, patientMedicationsLoading: medLoading, patientMedicationsError: medError, patientHistoryLoading: historyLoading, patientHistoryError: historyError, testsLoading, testsError
+    prescriptionsLoading,
+    prescriptionsError,
+    loading,
+    error,
+    patientHistoryLoading: historyLoading,
+    patientHistoryError: historyError,
+    testsLoading,
+    testsError
   } = useSelector(state => state.doctor);
 
   // Extract patient data from the new structure
   const patient = patientDetails?.patient || patientDetails;
+
+  const prescriptionList = useMemo(
+    () => (Array.isArray(prescriptions) ? prescriptions : []),
+    [prescriptions]
+  );
+
+  const resolvedCenterInfo = useMemo(() => {
+    const center = patient?.centerId;
+    if (!center) return DEFAULT_CENTER_INFO;
+    return {
+      name: center.name || DEFAULT_CENTER_INFO.name,
+      subTitle: DEFAULT_CENTER_INFO.subTitle,
+      address:
+        [center.address, center.location]
+          .filter(Boolean)
+          .join(", ") || DEFAULT_CENTER_INFO.address,
+      phone: center.phone || DEFAULT_CENTER_INFO.phone,
+      fax: center.fax || DEFAULT_CENTER_INFO.fax,
+      email: center.email || DEFAULT_CENTER_INFO.email,
+      website: center.website || DEFAULT_CENTER_INFO.website,
+    };
+  }, [patient?.centerId]);
 
   // Helper functions for payment status checking
   const isReportAccessible = (request) => {
@@ -313,8 +445,8 @@ const ViewProfile = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  const handleViewPrescription = (medication) => {
-    setSelectedPrescription(medication);
+  const handleViewPrescription = (prescription) => {
+    setSelectedPrescription(prescription);
     setShowPrescriptionModal(true);
   };
 
@@ -323,8 +455,8 @@ const ViewProfile = () => {
     setSelectedPrescription(null);
   };
 
-  const handleDownloadPrescription = (medication) => {
-    if (!medication) return;
+  const handleDownloadPrescription = (prescription) => {
+    if (!prescription) return;
     if (!patient) {
       toast.warn('Patient details are still loading. Please try again.');
       return;
@@ -333,6 +465,35 @@ const ViewProfile = () => {
     const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
     let cursorY = 60;
+
+    const toDate = (value) => {
+      if (!value) return null;
+      const date = value instanceof Date ? value : new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+
+    const formatDate = (value, withTime = false) => {
+      const date = toDate(value);
+      if (!date) return '-';
+      return withTime
+        ? date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : date.toLocaleDateString('en-GB');
+    };
+
+    const medications = Array.isArray(prescription.medications) ? prescription.medications : [];
+    const tests = Array.isArray(prescription.tests) ? prescription.tests : [];
+
+    const firstFollowUp = prescription.followUpInstruction || '-';
+    const preparedBy = prescription.preparedBy || prescription.prescribedBy || '-';
+    const printedBy = prescription.printedBy || preparedBy || '-';
+    const credentials = prescription.preparedByCredentials || '';
+    const councilNumber = prescription.medicalCouncilNumber || '';
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
@@ -366,49 +527,100 @@ const ViewProfile = () => {
     cursorY += 10;
 
     doc.setFont('helvetica', 'bold');
-    const prescribedDate = medication.prescribedDate
-      ? new Date(medication.prescribedDate).toLocaleDateString()
-      : medication.createdAt
-      ? new Date(medication.createdAt).toLocaleDateString()
-      : new Date().toLocaleDateString();
-    doc.text(`Patient: ${patient?.name || 'N/A'}`, 40, cursorY);
-    doc.text(`Date: ${prescribedDate}`, 360, cursorY);
-    cursorY += 16;
-
-    doc.setFont('helvetica', 'normal');
-    const uhid = patient?.uhId || patient?._id || 'N/A';
-    const ageGender = [
-      patient?.age ? `${patient.age}` : null,
-      patient?.gender || null,
-    ]
-      .filter(Boolean)
-      .join(' / ') || 'N/A';
-    doc.text(`UHID: ${uhid}`, 40, cursorY);
-    doc.text(`Age/Gender: ${ageGender}`, 360, cursorY);
-    cursorY += 20;
-
-    autoTable(doc, {
-      startY: cursorY,
-      head: [['Medicine', 'Dose', 'Frequency', 'Duration', 'Instructions']],
-      body: [[
-        medication.drugName || '',
-        medication.dose || '',
-        medication.frequency || '',
-        medication.duration || '',
-        medication.instructions || '',
-      ]],
-      styles: { fontSize: 10, cellPadding: 6, halign: 'left' },
-      headStyles: { fillColor: [59, 130, 246], textColor: 255, halign: 'left' },
-      columnStyles: {
-        4: { cellWidth: 180 },
-      },
+    const patientInfo = [
+      `Patient Name: ${patient?.name || '-'}`,
+      `Patient ID: ${patient?.uhId || patient?._id || '-'}`,
+      `Age/Gender: ${patient?.age || '-'} ${patient?.gender ? '/ ' + patient.gender : ''}`,
+      `Diagnosis: ${prescription?.diagnosis || '-'}`,
+      `Prescribed By: ${prescription?.prescribedBy || '-'}`,
+      `Prescribed Date: ${formatDate(prescription?.prescribedDate)}`,
+      `Report Generated: ${formatDate(prescription?.reportGeneratedAt, true)}`,
+    ];
+    patientInfo.forEach((info) => {
+      doc.text(info, 40, cursorY);
+      cursorY += 16;
     });
 
-    const finalY = doc.lastAutoTable?.finalY || cursorY + 60;
+    const head = [['Drug Name', 'Dose', 'Duration', 'Frequency', 'Instructions', 'Adverse Effect']];
+    const medsBody = medications.length > 0
+      ? medications.map((med) => [
+          med.drugName || med.name || med.medicine || '-',
+          med.dose || med.dosage || '-',
+          med.duration || '-',
+          med.frequency || med.freq || '-',
+          med.instructions || med.instruction || '-',
+          med.adverseEvent || med.adverseEffect || '-',
+        ])
+      : [['-', '-', '-', '-', '-', '-']];
+
+    autoTable(doc, {
+      head,
+      body: medsBody,
+      startY: cursorY + 10,
+      styles: { fontSize: 9, cellPadding: 6 },
+      headStyles: { fillColor: [226, 232, 240], textColor: 15, fontStyle: 'bold' },
+    });
+
+    let currentY = doc.lastAutoTable?.finalY || cursorY + 60;
+
+    if (tests.length > 0) {
+      currentY += 24;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Prescribed Tests', 40, currentY);
+
+      const testsBody = tests.map((test) => [test.name || '-', test.instruction || '-']);
+      autoTable(doc, {
+        head: [['Test Name', 'Instruction']],
+        body: testsBody,
+        startY: currentY + 10,
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [226, 232, 240], textColor: 15, fontStyle: 'bold' },
+      });
+      currentY = doc.lastAutoTable?.finalY || currentY + 40;
+    }
+
+    currentY += 24;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('Follow-up Instruction', 40, currentY);
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
+    const followUpLines = doc.splitTextToSize(firstFollowUp, 520);
+    followUpLines.forEach((line) => {
+      currentY += 14;
+      doc.text(line, 40, currentY);
+    });
+
+    currentY += 24;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('Prepared By', 40, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    currentY += 14;
+    doc.text(`Prepared By: ${preparedBy}`, 40, currentY);
+    if (credentials) {
+      currentY += 14;
+      doc.text(`Credentials: ${credentials}`, 40, currentY);
+    }
+    if (councilNumber) {
+      currentY += 14;
+      doc.text(`Medical Council Reg. No.: ${councilNumber}`, 40, currentY);
+    }
+    currentY += 18;
+    doc.text(`Printed By: ${printedBy}`, 40, currentY);
+
+    currentY += 28;
     doc.setFont('helvetica', 'italic');
-    doc.text(`For ${mergedCenter.name}`, 40, finalY + 30);
-    doc.text('Doctor Signature', 420, finalY + 30);
+    doc.setFontSize(10);
+    doc.text(`For ${mergedCenter.name}`, 40, currentY);
+    doc.text('Doctor Signature', 420, currentY);
+
+    currentY += 24;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('Lifestyle • Nutrition • Physiotherapy • Allergy Care', 150, currentY + 12);
 
     const fileName = `${(patient?.name || 'patient').replace(/\s+/g, '_')}_prescription.pdf`;
     doc.save(fileName);
@@ -1056,16 +1268,16 @@ const ViewProfile = () => {
                 </p>
               </div>
               <div className="p-4 sm:p-6">
-                {medLoading ? (
+                {prescriptionsLoading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
                     <p className="text-slate-600 text-xs">Loading medications...</p>
                   </div>
-                ) : medError ? (
+                ) : prescriptionsError ? (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <p className="text-red-600 text-xs">{medError}</p>
+                    <p className="text-red-600 text-xs">{prescriptionsError}</p>
                   </div>
-                ) : (medications || []).length === 0 ? (
+                ) : prescriptionList.length === 0 ? (
                   <div className="text-center py-8">
                     <Pill className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                     <p className="text-slate-500 text-xs">No medications found</p>
@@ -1075,53 +1287,60 @@ const ViewProfile = () => {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Drug Name</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Dose</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Duration</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Frequency</th>
+                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Prescribed Date</th>
                           <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Prescribed By</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date Prescribed</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Adverse Effect</th>
+                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Medicines</th>
                           <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Instructions</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
-                        {(medications || []).map((med, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs font-medium text-slate-800">{med.drugName}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.dose}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.duration}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.frequency || 'N/A'}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                              {typeof med.prescribedBy === 'string' ? med.prescribedBy : 
-                               typeof med.prescribedBy === 'object' && med.prescribedBy?.name ? med.prescribedBy.name : 'N/A'}
-                            </td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                              {med.createdAt ? new Date(med.createdAt).toLocaleDateString() : 'N/A'}
-                            </td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.adverseEvent || 'None'}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.instructions || 'N/A'}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  onClick={() => handleViewPrescription(med)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50 transition-colors"
-                                >
-                                  <Eye className="h-3.5 w-3.5" />
-                                  View
-                                </button>
-                                <button
-                                  onClick={() => handleDownloadPrescription(med)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                  Download
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                        {prescriptionList.map((prescription, idx) => {
+                          const meds = Array.isArray(prescription.medications)
+                            ? prescription.medications
+                            : [];
+                          const firstMed = meds[0] || {};
+                          const firstMedName = firstMed.drugName || firstMed.name || firstMed.medicine || '—';
+                          const medsCount = meds.length;
+                          const displayDate = prescription.prescribedDate
+                            ? new Date(prescription.prescribedDate).toLocaleDateString()
+                            : 'N/A';
+                          const instructionPreview = meds
+                            .map((med) => med.instructions || med.instruction)
+                            .filter(Boolean)
+                            .join('; ');
+                          return (
+                            <tr key={`prescription-${idx}`} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{displayDate}</td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{prescription.prescribedBy || 'N/A'}</td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
+                                <div className="font-semibold text-slate-800">{firstMedName}</div>
+                                {medsCount > 1 && (
+                                  <div className="text-slate-500 text-[11px]">+ {medsCount - 1} more medicine{medsCount - 1 === 1 ? '' : 's'}</div>
+                                )}
+                              </td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
+                                {instructionPreview || '—'}
+                              </td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
+                                  <button
+                                    onClick={() => handleViewPrescription(prescription)}
+                                    className="inline-flex items-center justify-center px-3 py-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
+                                  >
+                                    View
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadPrescription(prescription)}
+                                    className="inline-flex items-center justify-center px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                                  >
+                                    Download
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1452,20 +1671,20 @@ const ViewProfile = () => {
                   onClick={() => navigate(`/dashboard/Doctor/patients/profile/AddMedications/${patient._id}`)}
                   className="bg-teal-600 hover:bg-teal-700 text-white px-3 sm:px-4 py-2 rounded-lg font-medium transition-colors text-xs w-full sm:w-auto"
                 >
-                  Add Medication
+                  Create / Print Prescription
                 </button>
               </div>
               <div className="p-4 sm:p-6">
-                {medLoading ? (
+                {prescriptionsLoading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
                     <p className="text-slate-600 text-xs">Loading medications...</p>
                   </div>
-                ) : medError ? (
+                ) : prescriptionsError ? (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <p className="text-red-600 text-xs">{medError}</p>
+                    <p className="text-red-600 text-xs">{prescriptionsError}</p>
                   </div>
-                ) : (medications || []).length === 0 ? (
+                ) : prescriptionList.length === 0 ? (
                   <div className="text-center py-8">
                     <Pill className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                     <p className="text-slate-500 text-xs">No medications found</p>
@@ -1475,34 +1694,59 @@ const ViewProfile = () => {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Drug Name</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Dose</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Duration</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Frequency</th>
+                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Prescribed Date</th>
                           <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Prescribed By</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date Prescribed</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Adverse Effect</th>
+                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Medicines</th>
                           <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Instructions</th>
+                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
-                        {(medications || []).map((med, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs font-medium text-slate-800">{med.drugName}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.dose}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.duration}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.frequency || 'N/A'}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                              {typeof med.prescribedBy === 'string' ? med.prescribedBy : 
-                               typeof med.prescribedBy === 'object' && med.prescribedBy?.name ? med.prescribedBy.name : 'N/A'}
-                            </td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                              {med.createdAt ? new Date(med.createdAt).toLocaleDateString() : 'N/A'}
-                            </td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.adverseEvent || 'None'}</td>
-                            <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{med.instructions || 'N/A'}</td>
-                          </tr>
-                        ))}
+                        {prescriptionList.map((prescription, idx) => {
+                          const meds = Array.isArray(prescription.medications)
+                            ? prescription.medications
+                            : [];
+                          const firstMedName = meds[0]?.drugName || meds[0]?.name || meds[0]?.medicine || '—';
+                          const medsCount = meds.length;
+                          const displayDate = prescription.prescribedDate
+                            ? new Date(prescription.prescribedDate).toLocaleDateString()
+                            : 'N/A';
+                          const instructionPreview = meds
+                            .map((med) => med.instructions || med.instruction)
+                            .filter(Boolean)
+                            .join('; ');
+                          return (
+                            <tr key={`prescription-${idx}`} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{displayDate}</td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{prescription.prescribedBy || 'N/A'}</td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
+                                <div className="font-semibold text-slate-800">{firstMedName}</div>
+                                {medsCount > 1 && (
+                                  <div className="text-slate-500 text-[11px]">+ {medsCount - 1} more medicine{medsCount - 1 === 1 ? '' : 's'}</div>
+                                )}
+                              </td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
+                                {instructionPreview || '—'}
+                              </td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
+                                  <button
+                                    onClick={() => handleViewPrescription(prescription)}
+                                    className="inline-flex items-center justify-center px-3 py-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
+                                  >
+                                    View
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadPrescription(prescription)}
+                                    className="inline-flex items-center justify-center px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                                  >
+                                    Download
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1542,7 +1786,7 @@ const ViewProfile = () => {
               <PrescriptionPreviewCard
                 centerInfo={centerInfo}
                 patient={patient}
-                medication={selectedPrescription}
+                prescription={selectedPrescription}
               />
             </div>
           </div>
