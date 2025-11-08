@@ -41,6 +41,27 @@ import {
 import { toast } from 'react-toastify';
 import API from '../../services/api';
 import { getPatientAppointment, getPatientPaymentHistory } from '../../services/api';
+import { roundToNearestTen, applyRoundingAdjustment } from '../../utils/rounding';
+
+const resolveInvoiceTimestamp = (invoice, fallback) => {
+  if (!invoice) return fallback || null;
+
+  const billingEntries = Array.isArray(invoice.billing) ? invoice.billing : [];
+  const firstBillingWithGeneratedAt = billingEntries.find((entry) => entry?.generatedAt);
+  const firstBillingEntry = billingEntries[0];
+
+  return (
+    invoice.generatedAt ||
+    invoice.date ||
+    invoice.createdAt ||
+    firstBillingWithGeneratedAt?.generatedAt ||
+    firstBillingEntry?.paidAt ||
+    firstBillingEntry?.createdAt ||
+    firstBillingEntry?.updatedAt ||
+    fallback ||
+    null
+  );
+};
 
 export default function ConsultationBilling() {
   const dispatch = useDispatch();
@@ -62,7 +83,6 @@ export default function ConsultationBilling() {
   });
   
   // Invoice creation time state
-  const [invoiceCreationTime, setInvoiceCreationTime] = useState(null);
 
   const isDateToday = (dateStr) => {
     if (!dateStr) return false;
@@ -387,6 +407,7 @@ export default function ConsultationBilling() {
     discountPercentage: 0,
     discountAmount: 0,
     discountReason: '',
+    customDiscountReason: '',
     appointmentTime: ''
   });
 
@@ -423,7 +444,7 @@ export default function ConsultationBilling() {
     amount: '',
     refundMethod: 'cash',
     refundType: 'withPenalty', // 'withPenalty' or 'full' 
-    reason: '',
+    reason: 'Refund processed',
     notes: '',
     patientBehavior: 'okay' // 'okay' or 'rude' - determines penalty policy
   });
@@ -434,6 +455,8 @@ export default function ConsultationBilling() {
 
   // Invoice data for InvoiceDisplay component
   const [invoiceData, setInvoiceData] = useState(null);
+  const resolvedInvoiceTimestamp = resolveInvoiceTimestamp(invoiceData);
+  const invoiceDateObject = resolvedInvoiceTimestamp ? new Date(resolvedInvoiceTimestamp) : null;
 
   // Payment history state
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -926,9 +949,6 @@ export default function ConsultationBilling() {
     setSelectedPatient(patient);
     const isNew = isPatientNew(patient);
     
-    // Set invoice creation time
-    setInvoiceCreationTime(new Date());
-    
     // Pre-populate form based on patient status and center fees
     setInvoiceFormData({
       registrationFee: isNew ? centerFees.registrationFee : 0,
@@ -943,7 +963,9 @@ export default function ConsultationBilling() {
       discountType: 'percentage',
       discountPercentage: 0,
       discountAmount: 0,
-      discountReason: ''
+    discountReason: '',
+    customDiscountReason: '',
+    appointmentTime: ''
     });
     
     setShowCreateInvoiceModal(true);
@@ -955,6 +977,35 @@ export default function ConsultationBilling() {
     if (!selectedPatient) return;
 
     try {
+      if (invoiceFormData.discountReason === 'other' && !invoiceFormData.customDiscountReason.trim()) {
+        toast.error('Please enter a custom discount reason');
+        return;
+      }
+
+      const effectiveDiscountReason = invoiceFormData.discountReason === 'other'
+        ? invoiceFormData.customDiscountReason.trim()
+        : invoiceFormData.discountReason;
+
+      const subtotal =
+        Number(invoiceFormData.registrationFee || 0) +
+        Number(invoiceFormData.consultationFee || 0) +
+        invoiceFormData.serviceCharges.reduce(
+          (sum, service) => sum + (parseFloat(service.amount) || 0),
+          0
+        );
+      const taxAmount = subtotal * (Number(invoiceFormData.taxPercentage) / 100);
+      let discountAmountForTotals = 0;
+      if (invoiceFormData.discountType === 'percentage') {
+        discountAmountForTotals = subtotal * (Number(invoiceFormData.discountPercentage) / 100);
+      } else if (invoiceFormData.discountType === 'amount') {
+        discountAmountForTotals = Number(invoiceFormData.discountAmount) || 0;
+      }
+      const roundingDetails = applyRoundingAdjustment({
+        subtotal,
+        taxes: taxAmount,
+        discounts: discountAmountForTotals
+      });
+
       const invoiceData = {
         patientId: selectedPatient._id,
         doctorId: selectedPatient.assignedDoctor?._id || selectedPatient.assignedDoctor,
@@ -966,7 +1017,12 @@ export default function ConsultationBilling() {
         discountType: invoiceFormData.discountType,
         discountPercentage: invoiceFormData.discountPercentage,
         discountAmount: invoiceFormData.discountAmount,
-        discountReason: invoiceFormData.discountReason
+        discountReason: effectiveDiscountReason,
+        rounding: {
+          rawTotal: roundingDetails.rawTotal,
+          roundedTotal: roundingDetails.roundedTotal,
+          roundingDifference: roundingDetails.roundingDifference
+        }
       };
 
       console.log('Creating invoice:', invoiceData);
@@ -1562,7 +1618,7 @@ export default function ConsultationBilling() {
       amount: availableForRefund.toString(),
       refundMethod: 'cash',
       refundType: 'partial',
-      reason: '',
+      reason: 'Refund processed',
       notes: '',
       patientBehavior: 'okay' // Default to okay behavior
     });
@@ -1573,8 +1629,8 @@ export default function ConsultationBilling() {
   const handleRefundSubmit = async (e) => {
     e.preventDefault();
     
-    if (!selectedPatient || !refundData.reason.trim()) {
-      toast.error('Please provide a refund reason');
+    if (!selectedPatient) {
+      toast.error('No patient selected for refund');
       return;
     }
 
@@ -1597,12 +1653,12 @@ export default function ConsultationBilling() {
     }
 
     try {
-      const refundPayload = {
+    const refundPayload = {
         patientId: selectedPatient._id,
         amount: calculatedRefundAmount,
         refundMethod: refundData.refundMethod,
         refundType: refundData.refundType,
-        reason: refundData.reason.trim(),
+        reason: (refundData.reason || '').trim() || 'Refund processed',
         notes: refundData.notes,
         patientBehavior: refundData.patientBehavior, // Include patient behavior for penalty policy
         penaltyAmount: refundData.refundType === 'withPenalty' ? penaltyAmount : 0
@@ -1966,6 +2022,16 @@ export default function ConsultationBilling() {
       bill.type === 'consultation' && !bill.consultationType?.startsWith('superconsultant_')
     )?.amount || 0;
 
+    const timestampSource = {
+      generatedAt: firstBill?.generatedAt,
+      date: firstBill?.generatedAt || firstBill?.createdAt,
+      createdAt: firstBill?.createdAt,
+      billing: consultationBilling
+    };
+
+    const resolvedTimestamp = resolveInvoiceTimestamp(timestampSource, patient?.createdAt);
+    const invoiceTimestamp = resolvedTimestamp || new Date().toISOString();
+
     return {
       patient: {
         name: patient.name,
@@ -2021,7 +2087,8 @@ export default function ConsultationBilling() {
       discountAmount,
       discountReason,
       invoiceNumber: consultationBilling[0]?.invoiceNumber || `INV-${patient._id.slice(-6)}`,
-      date: new Date(),
+      generatedAt: invoiceTimestamp,
+      date: invoiceTimestamp,
       generatedBy: user?.name || 'Receptionist',
       password: patient.uhId ? `${patient.uhId}${patient.gender?.charAt(0) || 'P'}` : 'N/A'
     };
@@ -3122,7 +3189,13 @@ export default function ConsultationBilling() {
                       name="discountType"
                       value="percentage"
                       checked={invoiceFormData.discountType === 'percentage'}
-                      onChange={(e) => setInvoiceFormData({...invoiceFormData, discountType: e.target.value, discountReason: '', discountPercentage: 0})}
+                      onChange={(e) => setInvoiceFormData({
+                        ...invoiceFormData,
+                        discountType: e.target.value,
+                        discountReason: '',
+                        customDiscountReason: '',
+                        discountPercentage: 0
+                      })}
                       className="mr-2"
                     />
                     <span className="text-xs text-slate-700">By Percentage (%)</span>
@@ -3133,7 +3206,13 @@ export default function ConsultationBilling() {
                       name="discountType"
                       value="amount"
                       checked={invoiceFormData.discountType === 'amount'}
-                      onChange={(e) => setInvoiceFormData({...invoiceFormData, discountType: e.target.value, discountReason: '', discountAmount: 0})}
+                      onChange={(e) => setInvoiceFormData({
+                        ...invoiceFormData,
+                        discountType: e.target.value,
+                        discountReason: '',
+                        customDiscountReason: '',
+                        discountAmount: 0
+                      })}
                       className="mr-2"
                     />
                     <span className="text-xs text-slate-700">By Amount (₹)</span>
@@ -3158,10 +3237,11 @@ export default function ConsultationBilling() {
                             setInvoiceFormData({
                               ...invoiceFormData, 
                               discountReason: selectedReason,
+                              customDiscountReason: '',
                               discountPercentage: discountPercentage
                             });
                           } else {
-                            setInvoiceFormData({...invoiceFormData, discountReason: '', discountPercentage: 0});
+                            setInvoiceFormData({...invoiceFormData, discountReason: '', customDiscountReason: '', discountPercentage: 0});
                           }
                         }}
                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
@@ -3181,6 +3261,20 @@ export default function ConsultationBilling() {
                         <p className="text-xs text-green-600 mt-1">
                           ✅ Discount percentage automatically set to {invoiceFormData.discountPercentage}%
                         </p>
+                      )}
+                      {invoiceFormData.discountReason === 'other' && (
+                        <div className="mt-2">
+                          <label className="block text-xs font-medium text-slate-500 mb-1">
+                            Custom Discount Reason
+                          </label>
+                          <input
+                            type="text"
+                            value={invoiceFormData.customDiscountReason}
+                            onChange={(e) => setInvoiceFormData({...invoiceFormData, customDiscountReason: e.target.value})}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                            placeholder="Enter custom discount reason"
+                          />
+                        </div>
                       )}
                       {invoiceFormData.discountReason === 'other' && (
                         <p className="text-xs text-orange-600 mt-1">
@@ -3236,33 +3330,49 @@ export default function ConsultationBilling() {
 
                     {/* Discount Reason - Only show if discount amount > 0 */}
                     {invoiceFormData.discountAmount > 0 && (
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-2">
-                        Discount Reason *
-                      </label>
-                      <select
-                        value={invoiceFormData.discountReason}
-                        onChange={(e) => setInvoiceFormData({...invoiceFormData, discountReason: e.target.value})}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-                        required
-                      >
-                        <option value="">Select reason...</option>
-                        <option value="staff">Staff Discount</option>
-                        <option value="senior">Senior Citizen Discount</option>
-                        <option value="student">Student Discount</option>
-                        <option value="employee">Employee Discount</option>
-                        <option value="insurance">Insurance Coverage</option>
-                        <option value="referral">Referral Discount</option>
-                        <option value="promotion">Promotional Discount</option>
-                        <option value="charity">Charity Case</option>
-                        <option value="other">Other (Please specify in notes)</option>
-                      </select>
-                      {invoiceFormData.discountReason === 'other' && (
-                        <p className="text-xs text-orange-600 mt-1">
-                          📝 Please specify the reason in the notes field below
-                        </p>
-                      )}
-                    </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-2">
+                          Discount Reason *
+                        </label>
+                        <select
+                          value={invoiceFormData.discountReason}
+                          onChange={(e) => setInvoiceFormData({
+                            ...invoiceFormData,
+                            discountReason: e.target.value,
+                            customDiscountReason: e.target.value === 'other' ? '' : invoiceFormData.customDiscountReason
+                          })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                          required
+                        >
+                          <option value="">Select reason...</option>
+                          <option value="staff">Staff Discount</option>
+                          <option value="senior">Senior Citizen Discount</option>
+                          <option value="student">Student Discount</option>
+                          <option value="employee">Employee Discount</option>
+                          <option value="insurance">Insurance Coverage</option>
+                          <option value="referral">Referral Discount</option>
+                          <option value="promotion">Promotional Discount</option>
+                          <option value="charity">Charity Case</option>
+                          <option value="other">Other (Please specify below)</option>
+                        </select>
+                        {invoiceFormData.discountReason === 'other' && (
+                          <div className="mt-2">
+                            <label className="block text-xs font-medium text-slate-500 mb-1">
+                              Custom Discount Reason
+                            </label>
+                            <input
+                              type="text"
+                              value={invoiceFormData.customDiscountReason}
+                              onChange={(e) => setInvoiceFormData({...invoiceFormData, customDiscountReason: e.target.value})}
+                              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                              placeholder="Enter custom discount reason"
+                            />
+                            <p className="text-xs text-orange-600 mt-1">
+                              📝 Please specify the reason above; remove if not needed
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -3416,6 +3526,8 @@ export default function ConsultationBilling() {
                     }
                     
                     const total = subtotal + taxAmount - discountAmount;
+                    const roundedTotal = roundToNearestTen(total);
+                    const roundingDifference = Number((roundedTotal - total).toFixed(2));
                     
                     return (
                       <>
@@ -3435,9 +3547,15 @@ export default function ConsultationBilling() {
                             <span>-₹{discountAmount.toFixed(2)}</span>
                 </div>
                         )}
+                        {roundingDifference !== 0 && (
+                          <div className="flex justify-between text-xs text-slate-500">
+                            <span>Rounding Adjustment:</span>
+                            <span>{roundingDifference > 0 ? '+' : '-'}₹{Math.abs(roundingDifference).toFixed(2)}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between font-bold border-t border-slate-300 pt-1">
                           <span>Total:</span>
-                          <span>₹{total.toFixed(2)}</span>
+                          <span>₹{roundedTotal.toFixed(2)}</span>
               </div>
                       </>
                     );
@@ -3754,7 +3872,7 @@ export default function ConsultationBilling() {
                         <span className="font-bold">Bill No:</span> {invoiceData.invoiceNumber}
                       </p>
                       <p className="text-sm font-medium text-slate-700">
-                        <span className="font-bold">BILL</span> Date: {new Date(invoiceData.date).toLocaleDateString('en-GB')}, {new Date(invoiceData.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        <span className="font-bold">BILL</span> Date: {invoiceDateObject ? invoiceDateObject.toLocaleDateString('en-GB') : 'N/A'}, {invoiceDateObject ? invoiceDateObject.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}
                       </p>
                     </div>
                   </div>
@@ -4078,107 +4196,174 @@ export default function ConsultationBilling() {
                   </div>
                   </div>
 
-                  {/* Transaction History - Shows all payments and refunds */}
+                  {/* Transaction History - Aggregated view of payments and refunds */}
                   {(() => {
-                    // Filter out superconsultation billing - only use consultation billing
                     const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
-                    
-                    // Get all billing records with payments/refunds
-                    const transactions = [];
-                    
-                    consultationBilling.forEach(bill => {
-                      // Add payment transaction if paid
-                      if (bill.paidAmount > 0) {
-                        transactions.push({
-                          type: 'payment',
-                          amount: bill.paidAmount,
-                          method: bill.paymentMethod || 'cash',
-                          date: bill.paidAt || bill.createdAt,
-                          transactionId: bill.transactionId,
-                          description: bill.description || 'Payment'
+                    if (consultationBilling.length === 0) return null;
+
+                    const accumulateLatestDate = (currentDate, candidate) => {
+                      if (!candidate) return currentDate;
+                      const dateObj = candidate instanceof Date ? candidate : new Date(candidate);
+                      if (Number.isNaN(dateObj.getTime())) return currentDate;
+                      if (!currentDate || dateObj > currentDate) return dateObj;
+                      return currentDate;
+                    };
+
+                    let totalPaymentAmount = 0;
+                    let latestPaymentDate = null;
+                    const paymentMethods = new Set();
+
+                    let totalRefundAmount = 0;
+                    let latestRefundDate = null;
+                    const refundMethods = new Set();
+
+                    consultationBilling.forEach((bill) => {
+                      const payments = Array.isArray(bill.payments) && bill.payments.length > 0 ? bill.payments : null;
+                      if (payments) {
+                        payments.forEach((payment) => {
+                          const amount = parseFloat(payment?.amount) || 0;
+                          if (amount > 0) {
+                            totalPaymentAmount += amount;
+                            const method = (payment?.method || payment?.paymentMethod || bill.paymentMethod || 'cash').toLowerCase();
+                            if (method) paymentMethods.add(method);
+                            latestPaymentDate = accumulateLatestDate(latestPaymentDate, payment?.processedAt || payment?.paidAt || payment?.createdAt);
+                          }
                         });
+                      } else {
+                        const amount = parseFloat(
+                          bill.customData?.totals?.paid ??
+                          bill.paidAmount ??
+                          0
+                        ) || 0;
+                        if (amount > 0) {
+                          totalPaymentAmount += amount;
+                          const method = (bill.paymentMethod || 'cash').toLowerCase();
+                          if (method) paymentMethods.add(method);
+                          latestPaymentDate = accumulateLatestDate(latestPaymentDate, bill.paidAt || bill.updatedAt || bill.createdAt);
+                        }
                       }
-                      
-                      // Add refund transactions
-                      if (bill.refunds && bill.refunds.length > 0) {
-                        bill.refunds.forEach(refund => {
-                          transactions.push({
-                            type: 'refund',
-                            amount: refund.amount || 0,
-                            method: refund.method || 'cash',
-                            date: refund.processedAt || refund.createdAt,
-                            reason: refund.reason,
-                            description: bill.description || 'Refund'
-                          });
+
+                      const refunds = Array.isArray(bill.refunds) && bill.refunds.length > 0 ? bill.refunds : null;
+                      if (refunds) {
+                        refunds.forEach((refund) => {
+                          const amount = parseFloat(refund?.amount) || 0;
+                          if (amount > 0) {
+                            totalRefundAmount += amount;
+                            const method = (refund?.method || refund?.refundMethod || bill.refundMethod || 'cash').toLowerCase();
+                            if (method) refundMethods.add(method);
+                            latestRefundDate = accumulateLatestDate(latestRefundDate, refund?.processedAt || refund?.createdAt);
+                          }
                         });
-                      } else if (bill.refundAmount > 0) {
-                        transactions.push({
-                          type: 'refund',
-                          amount: bill.refundAmount,
-                          method: bill.refundMethod || 'cash',
-                          date: bill.refundAt || bill.updatedAt || bill.createdAt,
-                          description: bill.description || 'Refund'
-                        });
+                      } else {
+                        const amount = parseFloat(
+                          bill.refundAmount ??
+                          bill.customData?.totals?.refundedAmount ??
+                          0
+                        ) || 0;
+                        if (amount > 0) {
+                          totalRefundAmount += amount;
+                          const method = (bill.refundMethod || 'cash').toLowerCase();
+                          if (method) refundMethods.add(method);
+                          latestRefundDate = accumulateLatestDate(latestRefundDate, bill.refundAt || bill.updatedAt || bill.createdAt);
+                        }
                       }
                     });
-                    
-                    // Sort by date (newest first)
-                    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
-                    
-                    if (transactions.length > 0) {
-                      return (
-                        <div className="mb-6">
-                          <h4 className="text-sm font-semibold text-slate-800 mb-3">Transaction History</h4>
-                          <table className="min-w-full border-collapse border border-slate-300">
-                            <thead>
-                              <tr className="bg-slate-100">
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Date & Time</th>
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Type</th>
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Description</th>
-                                <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Amount</th>
-                                <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Method</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {transactions.map((transaction, index) => (
-                                <tr key={index} className={transaction.type === 'refund' ? 'bg-orange-50' : 'bg-white'}>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    {new Date(transaction.date).toLocaleDateString('en-GB')} {new Date(transaction.date).toLocaleTimeString('en-GB')}
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    <span className={`px-2 py-1 rounded-full font-medium ${
-                                      transaction.type === 'payment' 
-                                        ? 'bg-green-100 text-green-700' 
-                                        : 'bg-orange-100 text-orange-700'
-                                    }`}>
-                                      {transaction.type === 'payment' ? 'Payment' : 'Refund'}
-                                    </span>
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs">
-                                    <div className="font-medium">{transaction.description}</div>
-                                    {transaction.reason && (
-                                      <div className="text-slate-500 text-xs mt-1">{transaction.reason}</div>
-                                    )}
-                                    {transaction.transactionId && (
-                                      <div className="text-slate-400 text-xs mt-1">ID: {transaction.transactionId}</div>
-                                    )}
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs font-medium">
-                                    <span className={transaction.type === 'payment' ? 'text-green-600' : 'text-orange-600'}>
-                                      {transaction.type === 'payment' ? '+' : '-'}₹{transaction.amount.toFixed(2)}
-                                    </span>
-                                  </td>
-                                  <td className="border border-slate-300 px-3 py-2 text-xs capitalize">
-                                    {transaction.method}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      );
+
+                    const formatMethodLabel = (methodSet) => {
+                      if (!methodSet || methodSet.size === 0) return 'N/A';
+                      if (methodSet.size === 1) {
+                        const method = Array.from(methodSet)[0];
+                        return method.charAt(0).toUpperCase() + method.slice(1);
+                      }
+                      return 'Multiple';
+                    };
+
+                    const formatDateTimeLabel = (value) => {
+                      if (!value) return 'N/A';
+                      const dateObj = value instanceof Date ? value : new Date(value);
+                      if (Number.isNaN(dateObj.getTime())) return 'N/A';
+                      return `${dateObj.toLocaleDateString('en-GB')} ${dateObj.toLocaleTimeString('en-GB')}`;
+                    };
+
+                    const transactions = [];
+
+                    if (totalPaymentAmount > 0) {
+                      transactions.push({
+                        type: 'payment',
+                        amount: totalPaymentAmount,
+                        method: formatMethodLabel(paymentMethods),
+                        date: latestPaymentDate,
+                        description: totalPaymentAmount >= finalTotalAmount
+                          ? 'Full Bill Payment'
+                          : 'Bill Payment'
+                      });
                     }
-                    return null;
+
+                    if (totalRefundAmount > 0) {
+                      transactions.push({
+                        type: 'refund',
+                        amount: totalRefundAmount,
+                        method: formatMethodLabel(refundMethods),
+                        date: latestRefundDate,
+                        description: totalRefundAmount >= totalPaymentAmount
+                          ? 'Refund Issued'
+                          : 'Partial Refund'
+                      });
+                    }
+
+                    if (transactions.length === 0) {
+                      return null;
+                    }
+
+                    transactions.sort((a, b) => {
+                      if (!a.date) return 1;
+                      if (!b.date) return -1;
+                      return new Date(b.date) - new Date(a.date);
+                    });
+
+                    return (
+                      <div className="mb-6">
+                        <h4 className="text-sm font-semibold text-slate-800 mb-3">Transaction History</h4>
+                        <table className="min-w-full border-collapse border border-slate-300">
+                          <thead>
+                            <tr className="bg-slate-100">
+                              <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Date & Time</th>
+                              <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Type</th>
+                              <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Description</th>
+                              <th className="border border-slate-300 px-3 py-2 text-right text-xs font-medium text-slate-700 uppercase">Amount</th>
+                              <th className="border border-slate-300 px-3 py-2 text-left text-xs font-medium text-slate-700 uppercase">Method</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {transactions.map((transaction, index) => (
+                              <tr key={index} className={transaction.type === 'refund' ? 'bg-orange-50' : 'bg-white'}>
+                                <td className="border border-slate-300 px-3 py-2 text-xs">
+                                  {formatDateTimeLabel(transaction.date)}
+                                </td>
+                                <td className="border border-slate-300 px-3 py-2 text-xs">
+                                  <span className={`px-2 py-1 rounded-full font-medium ${
+                                    transaction.type === 'payment' 
+                                      ? 'bg-green-100 text-green-700' 
+                                      : 'bg-orange-100 text-orange-700'
+                                  }`}>
+                                    {transaction.type === 'payment' ? 'Payment' : 'Refund'}
+                                  </span>
+                                </td>
+                                <td className="border border-slate-300 px-3 py-2 text-xs">
+                                  {transaction.description}
+                                </td>
+                                <td className="border border-slate-300 px-3 py-2 text-right text-xs font-medium">
+                                  <span className={transaction.type === 'payment' ? 'text-green-600' : 'text-orange-600'}>
+                                    {transaction.type === 'payment' ? '+' : '-'}₹{transaction.amount.toFixed(2)}
+                                  </span>
+                                </td>
+                                <td className="border border-slate-300 px-3 py-2 text-xs">{transaction.method}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
                   })()}
 
                   {/* Generation Details */}
@@ -4186,8 +4371,8 @@ export default function ConsultationBilling() {
                     {/* Left - Generation Info */}
                     <div className="text-xs">
                       <div><span className="font-medium">Generated By:</span> {invoiceData.generatedBy}</div>
-                      <div><span className="font-medium">Date:</span> {new Date(invoiceData.date).toLocaleDateString('en-GB')}</div>
-                      <div><span className="font-medium">Time:</span> {new Date(invoiceData.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
+                      <div><span className="font-medium">Date:</span> {invoiceDateObject ? invoiceDateObject.toLocaleDateString('en-GB') : 'N/A'}</div>
+                      <div><span className="font-medium">Time:</span> {invoiceDateObject ? invoiceDateObject.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}</div>
                     </div>
                     
                     {/* Right - Invoice Terms & Signature */}
@@ -4680,123 +4865,11 @@ export default function ConsultationBilling() {
                 />
               </div>
 
-              {/* Patient Behavior Assessment */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-2">
-                  Patient Behavior Assessment *
-                </label>
-                <div className="space-y-2">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="patientBehavior"
-                      value="okay"
-                      checked={patientBehavior === 'okay'}
-                      onChange={(e) => setPatientBehavior(e.target.value)}
-                      className="mr-2"
-                    />
-                    <span className="text-xs text-slate-700">Patient is okay with penalty (₹150 registration fee)</span>
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="patientBehavior"
-                      value="rude"
-                      checked={patientBehavior === 'rude'}
-                      onChange={(e) => setPatientBehavior(e.target.value)}
-                      className="mr-2"
-                    />
-                    <span className="text-xs text-slate-700">Patient is rude - Full refund + ask not to return</span>
-                  </label>
-                </div>
-              </div>
+           
+            
 
-              {/* Refund Type Selection */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-2">
-                  Refund Type *
-                </label>
-                <div className="space-y-2">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="refundType"
-                      value="partial"
-                      checked={refundType === 'partial'}
-                      onChange={(e) => setRefundType(e.target.value)}
-                      className="mr-2"
-                    />
-                    <span className="text-xs text-slate-700">Partial Refund (₹{penaltyAmount} penalty)</span>
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="refundType"
-                      value="full"
-                      checked={refundType === 'full'}
-                      onChange={(e) => setRefundType(e.target.value)}
-                      className="mr-2"
-                    />
-                    <span className="text-xs text-slate-700">Full Refund (No penalty)</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Penalty Amount Input */}
-              {refundType === 'partial' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-2">
-                    Penalty Amount (₹)
-                  </label>
-                  <input
-                    type="number"
-                    value={penaltyAmount}
-                    onChange={(e) => setPenaltyAmount(parseFloat(e.target.value) || 0)}
-                    min="0"
-                    max="1000"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent text-xs"
-                    placeholder="Enter penalty amount"
-                  />
-                </div>
-              )}
-
-              {/* Refund Summary */}
-              {selectedPatient && (() => {
-                // Filter out superconsultation billing - only use consultation billing
-                const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
-                const latestBill = consultationBilling.length > 0 ? consultationBilling[consultationBilling.length - 1] : null;
-                if (!latestBill) return null;
-                
-                const totalAmount = latestBill.customData?.totals?.total || latestBill.amount || 0;
-                const paidAmount = latestBill.customData?.totals?.paid || latestBill.paidAmount || 0;
-                const refundAmount = refundType === 'full' ? paidAmount : Math.max(0, paidAmount - penaltyAmount);
-                
-                return (
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                    <h4 className="text-xs font-semibold text-slate-800 mb-2">Refund Summary</h4>
-                    <div className="space-y-1 text-xs">
-                      <div className="flex justify-between">
-                        <span>Total Bill Amount:</span>
-                        <span>₹{totalAmount.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Amount Paid:</span>
-                        <span>₹{paidAmount.toFixed(2)}</span>
-                      </div>
-                      {refundType === 'partial' && (
-                        <div className="flex justify-between text-red-600">
-                          <span>Penalty (Registration Fee):</span>
-                          <span>-₹{penaltyAmount.toFixed(2)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between font-semibold border-t border-slate-300 pt-1">
-                        <span>Refund Amount:</span>
-                        <span className="text-green-600">₹{refundAmount.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
+              
+              
 
               <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                 <div className="flex items-start">
@@ -4986,20 +5059,6 @@ export default function ConsultationBilling() {
                 </select>
               </div>
 
-              {/* Refund Reason */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-2">
-                  Refund Reason *
-                </label>
-                <textarea
-                  value={refundData.reason}
-                  onChange={(e) => setRefundData({...refundData, reason: e.target.value})}
-                  rows={3}
-                  required
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-xs"
-                  placeholder="Please provide a reason for the refund..."
-                />
-              </div>
 
               {/* Notes */}
               <div>

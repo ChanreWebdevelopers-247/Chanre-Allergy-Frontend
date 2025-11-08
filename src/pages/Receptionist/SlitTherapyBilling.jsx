@@ -13,6 +13,28 @@ import {
   cancelSlitTherapyRequest as cancelSlitTherapyRequestApi,
   refundSlitTherapyRequest as refundSlitTherapyRequestApi
 } from '../../services/api';
+import { roundToNearestTen } from '../../utils/rounding';
+
+const resolveInvoiceTimestamp = (invoice, fallback) => {
+  if (!invoice) return fallback || null;
+
+  const billingEntry = invoice.billing || invoice.currentBilling || {};
+  const billingArray = Array.isArray(invoice.billing) ? invoice.billing : [];
+  const firstWithGeneratedAt = billingArray.find((entry) => entry?.generatedAt);
+  const firstEntry = billingArray[0];
+
+  return (
+    invoice.generatedAt ||
+    invoice.createdAt ||
+    billingEntry?.generatedAt ||
+    billingEntry?.createdAt ||
+    billingEntry?.updatedAt ||
+    firstWithGeneratedAt?.generatedAt ||
+    firstEntry?.createdAt ||
+    fallback ||
+    null
+  );
+};
 
 const SLIT_PRODUCTS = [
   { code: 'SLIT001', name: 'SLIT001', description: 'SLIT Therapy Product 001', price: 6000 },
@@ -270,12 +292,13 @@ export default function SlitTherapyBilling() {
   };
 
   const openPaymentModal = (request) => {
+    const roundedAmount = roundToNearestTen(Number(request.billing?.amount || 0));
     setSelectedForPayment(request);
     setPaymentDetails({
       paymentMethod: 'Cash',
       transactionId: '',
       paymentNotes: '',
-      paymentAmount: Number(request.billing?.amount || 0).toFixed(2)
+      paymentAmount: roundedAmount.toFixed(2)
     });
   };
 
@@ -284,7 +307,7 @@ export default function SlitTherapyBilling() {
     if (!selectedForPayment) return;
 
     try {
-      const totalAmount = Number(selectedForPayment.billing?.amount || 0);
+      const totalAmount = roundToNearestTen(Number(selectedForPayment.billing?.amount || 0));
       await dispatch(markReceptionistSlitTherapyPaid({
         id: selectedForPayment._id,
         payload: {
@@ -377,12 +400,15 @@ export default function SlitTherapyBilling() {
       </tr>
     `).join('');
 
-    const createdAt = new Date(invoiceData.createdAt || Date.now()).toLocaleString();
+    const createdTimestamp = resolveInvoiceTimestamp(invoiceData);
+    const createdAt = createdTimestamp ? new Date(createdTimestamp).toLocaleString() : 'Not Available';
     const paidAt = invoiceData.billing?.paidAt ? new Date(invoiceData.billing.paidAt).toLocaleString() : 'Not Paid';
     const courierText = invoiceData.courierRequired ? `Yes (₹${Number(invoiceData.courierFee || DEFAULT_COURIER_FEE).toFixed(2)})` : 'No';
-    const totalAmount = Number(invoiceData.billing?.amount || 0).toFixed(2);
-    const paidAmount = Number(invoiceData.billing?.paidAmount || 0).toFixed(2);
-    const balance = Math.max(0, Number(invoiceData.billing?.amount || 0) - Number(invoiceData.billing?.paidAmount || 0)).toFixed(2);
+    const rawTotalAmount = Number(invoiceData.billing?.amount || 0);
+    const rawPaidAmount = Number(invoiceData.billing?.paidAmount || 0);
+    const totalAmount = roundToNearestTen(rawTotalAmount).toFixed(2);
+    const paidAmount = roundToNearestTen(rawPaidAmount).toFixed(2);
+    const balance = Math.max(0, roundToNearestTen(rawTotalAmount) - roundToNearestTen(rawPaidAmount)).toFixed(2);
 
     invoiceWindow.document.write(`<!DOCTYPE html>
       <html>
@@ -650,8 +676,8 @@ export default function SlitTherapyBilling() {
                   </thead>
                   <tbody className="bg-white divide-y divide-slate-100">
                     {paginatedRequests.map((request) => {
-                      const totalAmount = request.billing?.amount || 0;
-                      const paidAmount = request.billing?.paidAmount || 0;
+                      const totalAmount = roundToNearestTen(request.billing?.amount || 0);
+                      const paidAmount = roundToNearestTen(request.billing?.paidAmount || 0);
                       const balance = Math.max(0, totalAmount - paidAmount);
 
                       return (
@@ -1005,7 +1031,7 @@ export default function SlitTherapyBilling() {
               <div>
                 <h2 className="text-2xl font-semibold text-slate-800">Invoice Details</h2>
                 <p className="text-sm text-slate-500">
-                  Invoice {invoiceRequest.billing?.invoiceNumber || 'Pending'} • Created {new Date(invoiceRequest.createdAt || Date.now()).toLocaleString()}
+                Invoice {invoiceRequest.billing?.invoiceNumber || 'Pending'} • Created {formatDateTime(resolveInvoiceTimestamp(invoiceRequest, invoiceRequest?.createdAt))}
                 </p>
               </div>
               <button onClick={closeInvoiceModal} className="text-slate-500 hover:text-slate-700">✕</button>

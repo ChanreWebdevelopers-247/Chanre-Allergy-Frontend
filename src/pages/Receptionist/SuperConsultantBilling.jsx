@@ -31,6 +31,27 @@ import { toast } from 'react-toastify';
 import API from '../../services/api';
 import { store } from '../../redux/store';
 import Pagination from '../../components/Pagination';
+import { roundToNearestTen, applyRoundingAdjustment } from '../../utils/rounding';
+
+const resolveInvoiceTimestamp = (invoice, fallback) => {
+  if (!invoice) return fallback || null;
+
+  const billingEntries = Array.isArray(invoice.billing) ? invoice.billing : [];
+  const firstWithGeneratedAt = billingEntries.find((entry) => entry?.generatedAt);
+  const firstEntry = billingEntries[0];
+
+  return (
+    invoice.generatedAt ||
+    invoice.date ||
+    invoice.createdAt ||
+    firstWithGeneratedAt?.generatedAt ||
+    firstEntry?.paidAt ||
+    firstEntry?.createdAt ||
+    firstEntry?.updatedAt ||
+    fallback ||
+    null
+  );
+};
 
 export default function SuperConsultantBilling() {
   const dispatch = useDispatch();
@@ -73,6 +94,8 @@ export default function SuperConsultantBilling() {
   // Invoice preview state
   const [showInvoicePreviewModal, setShowInvoicePreviewModal] = useState(false);
   const [invoiceData, setInvoiceData] = useState(null);
+  const resolvedInvoiceTimestamp = resolveInvoiceTimestamp(invoiceData);
+  const invoiceDateObject = resolvedInvoiceTimestamp ? new Date(resolvedInvoiceTimestamp) : null;
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [loadingPaymentHistory, setLoadingPaymentHistory] = useState(false);
 
@@ -888,6 +911,14 @@ export default function SuperConsultantBilling() {
     } else if (discountType === 'amount') {
       calculatedDiscount = discountAmount;
     }
+
+    const roundingDetails = applyRoundingAdjustment({
+      subtotal: totalAmount,
+      taxes: 0,
+      discounts: calculatedDiscount
+    });
+    const roundedTotalAmount = roundingDetails.roundedTotal;
+    const outstandingAmount = roundedTotalAmount - totalPaid;
     
     // Format consultation type name
     const consultationTypeName = superconsultantBill.consultationType
@@ -898,6 +929,16 @@ export default function SuperConsultantBilling() {
     // Get doctor information
     const doctor = patient.assignedDoctor || {};
     const doctorSpecializations = doctor.specializations || doctor.specialization || 'N/A';
+
+    const timestampSource = {
+      generatedAt: superconsultantBill.generatedAt,
+      date: superconsultantBill.generatedAt || superconsultantBill.createdAt,
+      createdAt: superconsultantBill.createdAt,
+      billing: relatedBills
+    };
+
+    const resolvedTimestamp = resolveInvoiceTimestamp(timestampSource, patient?.createdAt);
+    const invoiceTimestamp = resolvedTimestamp || new Date().toISOString();
 
     return {
       patient: {
@@ -921,9 +962,9 @@ export default function SuperConsultantBilling() {
       consultationTypeCode: superconsultantBill.consultationType,
       serviceCharges: serviceCharges,
       registrationFee: 0, // No registration fee for superconsultant
-      totalAmount: totalAmount,
+      totalAmount: roundedTotalAmount,
       totalPaid: totalPaid,
-      outstanding: totalAmount - totalPaid,
+      outstanding: outstandingAmount,
       discountType: discountType,
       discountPercentage: discountPercentage,
       discountAmount: discountAmount,
@@ -931,15 +972,22 @@ export default function SuperConsultantBilling() {
       discountReason: discountReason,
       notes: superconsultantBill.paymentNotes || '',
       billing: relatedBills,
-      createdAt: superconsultantBill.createdAt || patient.createdAt,
-      date: superconsultantBill.createdAt || patient.createdAt,
+      createdAt: invoiceTimestamp,
+      generatedAt: invoiceTimestamp,
+      date: invoiceTimestamp,
       generatedBy: user?.name || 'Receptionist',
       referenceDoctor: patient.referenceDoctor || 'N/A',
       totals: {
         subtotal: totalAmount,
-        discount: calculatedDiscount,
-        tax: 0,
-        total: totalAmount - calculatedDiscount
+        discount: roundingDetails.adjustedDiscounts,
+        tax: roundingDetails.adjustedTaxes,
+        roundOffAmount: roundingDetails.roundingDifference,
+        total: roundedTotalAmount
+      },
+      rounding: {
+        rawTotal: roundingDetails.rawTotal,
+        roundedTotal: roundedTotalAmount,
+        roundingDifference: roundingDetails.roundingDifference
       }
     };
   };
@@ -1004,6 +1052,16 @@ export default function SuperConsultantBilling() {
     }
 
     try {
+      const serviceChargeTotal = invoiceFormData.serviceCharges
+        .filter(s => s.name && s.amount && parseFloat(s.amount) > 0)
+        .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+
+      const roundingDetailsForSubmit = applyRoundingAdjustment({
+        subtotal: consultationFee + serviceChargeTotal,
+        taxes: 0,
+        discounts: 0
+      });
+
       const invoiceData = {
         patientId: selectedPatient._id,
         doctorId: doctorId,
@@ -1014,7 +1072,21 @@ export default function SuperConsultantBilling() {
           amount: parseFloat(s.amount)
         })),
         notes: invoiceFormData.notes || '',
-        consultationType: invoiceFormData.consultationType // Use selected consultation type
+        consultationType: invoiceFormData.consultationType, // Use selected consultation type
+        rounding: {
+          rawTotal: roundingDetailsForSubmit.rawTotal,
+          roundedTotal: roundingDetailsForSubmit.roundedTotal,
+          roundingDifference: roundingDetailsForSubmit.roundingDifference
+        },
+        totals: {
+          subtotal: consultationFee + serviceChargeTotal,
+          taxAmount: roundingDetailsForSubmit.adjustedTaxes,
+          discountAmount: roundingDetailsForSubmit.adjustedDiscounts,
+          roundOffAmount: roundingDetailsForSubmit.roundingDifference,
+          total: roundingDetailsForSubmit.roundedTotal,
+          due: roundingDetailsForSubmit.roundedTotal,
+          paid: 0
+        }
       };
 
       console.log('Submitting invoice data:', invoiceData);
@@ -1578,6 +1650,7 @@ export default function SuperConsultantBilling() {
                         bill.consultationType?.startsWith('superconsultant_')
                       );
                       const totalAmount = consultationBill?.amount || 0;
+                      const roundedTotalAmount = roundToNearestTen(totalAmount);
                       const paidAmount = consultationBill?.paidAmount || 0;
                       const hasBilling = consultationBill !== undefined;
                       const appointmentData = getSuperconsultantAppointmentData(patient);
@@ -1669,7 +1742,7 @@ export default function SuperConsultantBilling() {
                               </span>
                             {hasBilling && (
                               <div className="text-xs text-slate-500 mt-1">
-                                ₹{paidAmount}/{totalAmount}
+                                ₹{roundToNearestTen(paidAmount)}/{roundedTotalAmount}
                               </div>
                             )}
                             </td>
@@ -2222,7 +2295,7 @@ export default function SuperConsultantBilling() {
                         <span className="font-bold">Bill No:</span> {invoiceData.invoiceNumber}
                       </p>
                       <p className="text-sm font-medium text-slate-700">
-                        <span className="font-bold">BILL</span> Date: {new Date(invoiceData.date).toLocaleDateString('en-GB')}, {new Date(invoiceData.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        <span className="font-bold">BILL</span> Date: {invoiceDateObject ? invoiceDateObject.toLocaleDateString('en-GB') : 'N/A'}, {invoiceDateObject ? invoiceDateObject.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}
                       </p>
                     </div>
                   </div>

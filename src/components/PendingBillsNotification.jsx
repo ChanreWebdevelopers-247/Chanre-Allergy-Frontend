@@ -18,7 +18,7 @@ export default function PendingBillsNotification({ isOpen, onClose }) {
   const dispatch = useDispatch();
   const { patients, loading, billingRequests, billingLoading } = useSelector((state) => state.receptionist);
   const [pendingBills, setPendingBills] = useState([]);
-  const [followUpBills, setFollowUpBills] = useState([]);
+  const [reassignmentBills, setReassignmentBills] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -34,8 +34,6 @@ export default function PendingBillsNotification({ isOpen, onClose }) {
           patients: results[0],
           billingRequests: results[1]
         });
-        console.log('🔍 Billing requests from API:', results[1]);
-        console.log('🔍 Billing requests length from API:', results[1]?.length);
       }).catch((error) => {
         console.error('🔍 Error fetching data:', error);
       }).finally(() => {
@@ -63,165 +61,147 @@ export default function PendingBillsNotification({ isOpen, onClose }) {
 
   useEffect(() => {
     if (billingRequests && billingRequests.length > 0) {
-      console.log('🔍 Processing', billingRequests.length, 'billing requests');
-      
-      const followUpPending = billingRequests.filter(request => {
-        // Only log details for requests that might be unpaid
-        const isLikelyUnpaid = request.status === 'Billing_Paid' && 
-          request.billing?.status === 'partially_paid' ||
-          request.status !== 'Billing_Paid';
+      const reassignmentPending = billingRequests.filter(request => {
+        if (!request) return false;
         
-        if (isLikelyUnpaid) {
-          console.log('🔍 Processing Request:', request.patient?.name || 'Unknown', 'Status:', request.status, 'Billing Status:', request.billing?.status);
+        const isReassignment = request.type === 'reassignment_consultation' || request.isReassignedEntry || request.reassignmentRequest;
+        if (!isReassignment) {
+          return false;
         }
-        
-        // Check if billing is an array, if not, treat it as a single object or check other properties
-        let hasUnpaidBills = false;
-        
-        if (Array.isArray(request.billing)) {
-          hasUnpaidBills = request.billing.some(bill => 
-            bill.status === 'No payments' || 
-            bill.status === 'no payments' || 
-            bill.status === 'pending' ||
-            bill.status === 'partially_paid' ||
-            (bill.remaining && bill.remaining > 0)
-          );
-        } else if (request.billing) {
-          // If billing is a single object, check its properties
-          const bill = request.billing;
-          hasUnpaidBills = bill.status === 'No payments' || 
-            bill.status === 'no payments' || 
-            bill.status === 'pending' ||
-            bill.status === 'partially_paid' ||
-            (bill.remaining && bill.remaining > 0);
-        } else {
-          // Check if the request itself has unpaid status
-          // Updated to match actual data structure from billing management page
-          hasUnpaidBills = request.status === 'No payments' || 
-            request.status === 'no payments' || 
+
+        const billingData = Array.isArray(request.billing) ? request.billing : request.billing ? [request.billing] : [];
+
+        const hasUnpaid = billingData.some(bill =>
+          bill &&
+          (bill.status === 'No payments' ||
+           bill.status === 'no payments' ||
+           bill.status === 'pending' ||
+           bill.status === 'partially_paid' ||
+           bill.status === 'unpaid' ||
+           bill.status === 'partial' ||
+           (parseFloat(bill.remaining || 0) > 0))
+        );
+
+        if (billingData.length === 0) {
+          return request.status === 'No payments' ||
+            request.status === 'no payments' ||
             request.status === 'pending' ||
-            request.status === 'Billing Generated' ||  // ✅ Added: Bills that are generated but not paid
-            request.status === 'Billing_Pending' ||     // ✅ Added: Bills pending generation
-            request.status === 'Billing_Generated' ||   // ✅ Added: Alternative naming
-            (request.status === 'Billing_Paid' && request.billing?.status === 'partially_paid') || // ✅ Added: Partially paid bills
-            (request.remaining && request.remaining > 0) ||
-            (request.total && request.paid && request.total > request.paid);
+            request.status === 'Billing Generated' ||
+            request.status === 'Billing_Pending' ||
+            request.status === 'Billing_Generated' ||
+            (request.status === 'Billing_Paid' && parseFloat(request.remaining || 0) > 0) ||
+            (parseFloat(request.total || 0) > parseFloat(request.paid || 0));
         }
-        
-        if (isLikelyUnpaid) {
-          console.log('🔍 Billing Request Result:', request.patient?.name || 'Unknown', 'Has unpaid bills:', hasUnpaidBills);
-        }
-        return hasUnpaidBills;
+
+        return hasUnpaid;
       });
-      
-      console.log('🔍 Pending follow-up bills:', followUpPending.length);
-      setFollowUpBills(followUpPending);
+
+      setReassignmentBills(reassignmentPending);
     } else {
-      setFollowUpBills([]);
+      setReassignmentBills([]);
     }
   }, [billingRequests]);
 
+  const filterConsultationBilling = (billing = []) => {
+    if (!billing || billing.length === 0) return [];
+
+    const superInvoices = new Set();
+    billing.forEach((bill) => {
+      const consultationType = (bill.consultationType || '').toLowerCase();
+      if (consultationType.startsWith('superconsultant') && bill.invoiceNumber) {
+        superInvoices.add(bill.invoiceNumber);
+      }
+      if ((bill.meta?.source || '').toLowerCase() === 'superconsultant' && bill.invoiceNumber) {
+        superInvoices.add(bill.invoiceNumber);
+      }
+    });
+
+    return billing.filter((bill) => {
+      const consultationType = (bill.consultationType || '').toLowerCase();
+      if (consultationType.startsWith('superconsultant')) {
+        return false;
+      }
+      if ((bill.meta?.source || '').toLowerCase() === 'superconsultant') {
+        return false;
+      }
+      if (bill.invoiceNumber && superInvoices.has(bill.invoiceNumber)) {
+        return false;
+      }
+      return ['consultation', 'registration', 'service'].includes((bill.type || '').toLowerCase());
+    });
+  };
+
+  const computeOutstanding = (bill) => {
+    if (!bill) return 0;
+    const status = (bill.status || '').toLowerCase();
+    if (['cancelled', 'refunded'].includes(status)) {
+      return 0;
+    }
+
+    if (typeof bill.remaining === 'number') {
+      return Math.max(0, bill.remaining);
+    }
+
+    const amount = parseFloat(bill.amount || 0) || 0;
+    const paidAmount = parseFloat(bill.paidAmount || 0) || 0;
+    const refundAmount = Array.isArray(bill.refunds)
+      ? bill.refunds.reduce((sum, refund) => sum + (parseFloat(refund.amount) || 0), 0)
+      : parseFloat(bill.refundAmount || 0) || 0;
+
+    const effectivePaid = Math.max(paidAmount, refundAmount);
+    const remaining = amount - effectivePaid;
+    return Math.max(0, remaining);
+  };
+
   const getPatientStatus = (patient) => {
-    if (!patient.billing || patient.billing.length === 0) {
+    if (!patient?.billing || patient.billing.length === 0) {
       return 'Consultation Fee Required';
     }
 
-    // Check for consultation fee for the current doctor
-    const currentDoctorId = patient.assignedDoctor?._id || patient.assignedDoctor;
-    
-    const consultationFee = patient.billing.find(bill => {
-      const isConsultationFee = bill.type === 'consultation' || bill.description?.toLowerCase().includes('consultation');
-      return isConsultationFee && (
-        !bill.doctorId || 
-        bill.doctorId.toString() === currentDoctorId?.toString()
-      );
+    const consultationBilling = filterConsultationBilling(patient.billing);
+
+    if (consultationBilling.length === 0) {
+      // If only super-consultation bills exist, consider them settled for this workflow
+      return 'All Paid';
+    }
+
+    let consultationOutstanding = 0;
+    let registrationOutstanding = 0;
+    let serviceOutstanding = 0;
+
+    consultationBilling.forEach((bill) => {
+      const outstanding = computeOutstanding(bill);
+      if (outstanding <= 0.5) {
+        return;
+      }
+
+      const type = (bill.type || '').toLowerCase();
+      if (type === 'consultation' || bill.description?.toLowerCase().includes('consultation')) {
+        consultationOutstanding += outstanding;
+      } else if (type === 'registration') {
+        registrationOutstanding += outstanding;
+      } else if (type === 'service') {
+        serviceOutstanding += outstanding;
+      }
     });
-    
-    const registrationFee = patient.billing.find(bill => bill.type === 'registration');
-    
-    // Check ALL service charges, not just current doctor's
-    const serviceCharges = patient.billing.filter(bill => bill.type === 'service');
-    
-    // Check for any unpaid bills (consultation, registration, or service)
-    const unpaidBills = patient.billing.filter(bill => 
-      bill.status !== 'paid' && bill.status !== 'completed'
-    );
 
-    const hasConsultationFee = !!consultationFee;
-    const hasRegistrationFee = !!registrationFee;
-    const hasServiceCharges = serviceCharges.length > 0;
-    const hasUnpaidBills = unpaidBills.length > 0;
-
-    const paidConsultationFee = hasConsultationFee && (consultationFee.status === 'paid' || consultationFee.status === 'completed');
-    const paidRegistrationFee = hasRegistrationFee && (registrationFee.status === 'paid' || registrationFee.status === 'completed');
-    const paidServiceCharges = hasServiceCharges && serviceCharges.every(bill => bill.status === 'paid' || bill.status === 'completed');
-
-    // Determine if patient is new (within 24 hours)
-    const isNewPatient = isPatientNew(patient);
-
-    // Check for any unpaid bills first
-    if (hasUnpaidBills) {
-      const unpaidConsultation = unpaidBills.find(bill => 
-        bill.type === 'consultation' || bill.description?.toLowerCase().includes('consultation')
-      );
-      const unpaidRegistration = unpaidBills.find(bill => bill.type === 'registration');
-      const unpaidServices = unpaidBills.filter(bill => bill.type === 'service');
-
-      if (unpaidConsultation) {
-        return 'Consultation Fee Pending';
-      }
-      if (unpaidRegistration) {
-        return 'Registration Fee Pending';
-      }
-      if (unpaidServices.length > 0) {
-        return 'Service Charges Pending';
-      }
+    if (consultationOutstanding <= 0 && registrationOutstanding <= 0 && serviceOutstanding <= 0) {
+      return 'All Paid';
     }
 
-    // Check for bills with "No payments" status (like in follow-up page)
-    const noPaymentBills = patient.billing.filter(bill => 
-      bill.status === 'No payments' || bill.status === 'no payments' || bill.status === 'pending'
-    );
-    
-    if (noPaymentBills.length > 0) {
-      return 'No Payments';
-    }
-
-    // Check for bills with remaining amounts > 0 (like the ₹20,000 remaining case)
-    const billsWithRemaining = patient.billing.filter(bill => {
-      const remaining = bill.remaining || 0;
-      return remaining > 0;
-    });
-    
-    if (billsWithRemaining.length > 0) {
-      return 'Service Charges Pending';
-    }
-
-    // Priority order: Registration Fee > Consultation Fee > Service Charges
-    if (isNewPatient && !hasRegistrationFee) {
-      return 'Registration Fee Required';
-    }
-
-    if (!hasConsultationFee) {
-      return 'Consultation Fee Required';
-    }
-
-    if (hasConsultationFee && !paidConsultationFee) {
+    if (consultationOutstanding > 0) {
       return 'Consultation Fee Pending';
     }
 
-    if (hasServiceCharges && !paidServiceCharges) {
+    if (registrationOutstanding > 0) {
+      return 'Registration Fee Pending';
+    }
+
+    if (serviceOutstanding > 0) {
       return 'Service Charges Pending';
     }
 
-    return 'All Paid';
-  };
-
-  const isPatientNew = (patient) => {
-    const registrationDate = new Date(patient.createdAt);
-    const now = new Date();
-    const hoursDifference = (now - registrationDate) / (1000 * 60 * 60);
-    return hoursDifference <= 24;
+    return 'Pending Payment';
   };
 
   const getStatusIcon = (status) => {
@@ -279,7 +259,7 @@ export default function PendingBillsNotification({ isOpen, onClose }) {
             <p className="text-slate-600">Loading pending bills...</p>
             <p className="text-xs text-slate-500 mt-2">Fetching patient data...</p>
           </div>
-        ) : (pendingBills.length === 0 && followUpBills.length === 0) ? (
+        ) : (pendingBills.length === 0 && reassignmentBills.length === 0) ? (
           <div className="text-center py-8">
             <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-green-600 mb-2">All Clear!</h3>
@@ -292,14 +272,14 @@ export default function PendingBillsNotification({ isOpen, onClose }) {
               <div className="flex items-center gap-2 mb-2">
                 <AlertCircle className="h-5 w-5 text-orange-600" />
                 <h3 className="font-semibold text-orange-800">
-                  {(pendingBills.length + followUpBills.length)} Patient{(pendingBills.length + followUpBills.length) !== 1 ? 's' : ''} Require{(pendingBills.length + followUpBills.length) === 1 ? 's' : ''} Payment
+                  {(pendingBills.length + reassignmentBills.length)} Patient{(pendingBills.length + reassignmentBills.length) !== 1 ? 's' : ''} Require{(pendingBills.length + reassignmentBills.length) === 1 ? 's' : ''} Payment
                 </h3>
               </div>
               <p className="text-sm text-orange-700">
                 Please collect the following pending payments from patients.
               </p>
               <div className="text-xs text-orange-600 mt-2">
-                Debug: Consultation: {pendingBills.length}, Follow-up: {followUpBills.length}, Total: {pendingBills.length + followUpBills.length}
+                Consultation: {pendingBills.length}, Reassignment: {reassignmentBills.length}, Total: {pendingBills.length + reassignmentBills.length}
               </div>
             </div>
 
@@ -363,70 +343,41 @@ export default function PendingBillsNotification({ isOpen, onClose }) {
               </div>
             )}
 
-            {/* Follow-up Bills */}
-            {followUpBills.length > 0 && (
+            {/* Reassignment Bills */}
+            {reassignmentBills.length > 0 && (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 mb-3">
                   <FileText className="h-5 w-5 text-purple-600" />
-                  <h4 className="font-semibold text-purple-800">Follow-up Bills Pending ({followUpBills.length})</h4>
+                  <h4 className="font-semibold text-purple-800">Reassignment Bills Pending ({reassignmentBills.length})</h4>
                 </div>
                 <div className="grid gap-3">
-                  {followUpBills.map((request) => {
-                    // Handle different billing data structures
-                    let unpaidBills = [];
-                    
-                    if (Array.isArray(request.billing)) {
-                      unpaidBills = request.billing.filter(bill => 
-                        bill.status === 'No payments' || 
-                        bill.status === 'no payments' || 
-                        bill.status === 'pending' ||
-                        bill.status === 'partially_paid' ||
-                        (bill.remaining && bill.remaining > 0)
-                      );
-                    } else if (request.billing) {
-                      // If billing is a single object, add it to array if it's unpaid
-                      const bill = request.billing;
-                      if (bill.status === 'No payments' || 
-                          bill.status === 'no payments' || 
-                          bill.status === 'pending' ||
-                          bill.status === 'partially_paid' ||
-                          (bill.remaining && bill.remaining > 0)) {
-                        unpaidBills = [bill];
-                      }
-                    } else {
-                      // If no billing object, create a bill from request properties
-                      // Updated to match actual data structure from billing management page
-                      unpaidBills = [{
-                        description: request.testType || 'Service Charge',
-                        amount: request.total || 0,
-                        remaining: request.remaining || (request.total && request.paid ? request.total - request.paid : 0),
-                        status: request.status || 'No payments'
-                      }];
-                    }
-                    
-                    // Use direct fields from TestRequest document since populate might not be working
-                    console.log('🔍 Request data structure:', {
-                      id: request._id,
-                      patient: request.patient,
-                      patientName: request.patientName,
-                      patientPhone: request.patientPhone,
-                      patientAddress: request.patientAddress,
-                      doctor: request.doctor,
-                      doctorName: request.doctorName,
-                      testType: request.testType,
-                      status: request.status,
-                      total: request.total,
-                      remaining: request.remaining
-                    });
-                    
+                  {reassignmentBills.map((request) => {
                     const patientName = request.patient?.name || request.patientName || 'Unknown Patient';
                     const patientPhone = request.patient?.phone || request.patientPhone || 'No phone';
-                    const patientAddress = request.patient?.address || request.patientAddress || 'No address';
-                    const patientAge = request.patient?.age || 'N/A';
-                    const patientGender = request.patient?.gender || 'N/A';
                     const patientUhId = request.patient?.uhId || 'Not assigned';
                     const doctorName = request.doctor?.name || request.doctorName || 'Not assigned';
-                    
+                    const patientAge = request.patient?.age || 'N/A';
+                    const patientGender = request.patient?.gender || 'N/A';
+
+                    const billingData = Array.isArray(request.billing) ? request.billing : request.billing ? [request.billing] : [];
+                    const outstandingAmount = billingData.reduce((sum, bill) => {
+                      const remaining = parseFloat(bill?.remaining || 0);
+                      return Number.isFinite(remaining) ? sum + remaining : sum;
+                    }, 0);
+
+                    const statusLabel = (() => {
+                      if (billingData.some(bill => bill?.status === 'partially_paid' || bill?.status === 'partial')) {
+                        return 'Partially Paid';
+                      }
+                      if (billingData.some(bill => bill?.status === 'pending' || bill?.status === 'No payments' || bill?.status === 'no payments')) {
+                        return 'Payment Pending';
+                      }
+                      if (outstandingAmount > 0) {
+                        return 'Outstanding Balance';
+                      }
+                      return 'Payment Pending';
+                    })();
+
                     return (
                       <div key={request._id} className="border border-purple-200 rounded-lg p-4 hover:bg-purple-50 transition-colors">
                         <div className="flex items-start justify-between">
@@ -455,34 +406,21 @@ export default function PendingBillsNotification({ isOpen, onClose }) {
                               </div>
                             </div>
                             
-                            <div className="space-y-2">
-                              {unpaidBills.map((bill, index) => (
-                                <div key={index} className="bg-purple-50 border border-purple-200 rounded p-2">
-                                  <div className="flex items-center justify-between text-sm">
-                                    <div className="flex items-center gap-2">
-                                      <FileText className="h-3 w-3 text-purple-600" />
-                                      <span className="font-medium">{bill.description || request.testType || 'Service Charge'}</span>
-                                    </div>
-                                    <div className="text-right">
-                                      <div className="font-semibold">₹{bill.amount || bill.total || 0}</div>
-                                      {bill.remaining > 0 && (
-                                        <div className="text-xs text-red-600">Remaining: ₹{bill.remaining}</div>
-                                      )}
-                                      <div className="text-xs text-gray-500">
-                                        Status: {bill.status || 'No payments'}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
+                            <div className="flex items-center gap-2 mt-2">
+                              <span className="px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 bg-purple-100 text-purple-700">
+                                <Clock className="h-3 w-3" />
+                                {statusLabel}
+                              </span>
+                              {outstandingAmount > 0 && (
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                                  Outstanding ₹{outstandingAmount.toFixed(2)}
+                                </span>
+                              )}
                             </div>
                           </div>
                           
                           <div className="text-right text-sm text-slate-600">
                             <div>{patientAge} years, {patientGender}</div>
-                            <div className="text-xs text-slate-500">
-                              Test: {request.testType || 'Unknown'}
-                            </div>
                             <div className="text-xs text-purple-600 mt-1">
                               Bill #{request._id?.slice(-8)}
                             </div>

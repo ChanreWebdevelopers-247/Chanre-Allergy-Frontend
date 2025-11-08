@@ -13,7 +13,8 @@ import {
   ChevronRight,
   Plus,
   Users,
-  CalendarCheck
+  CalendarCheck,
+  Phone
 } from 'lucide-react';
 
 export default function BookSlot() {
@@ -40,6 +41,7 @@ export default function BookSlot() {
   const [expandedDates, setExpandedDates] = useState({}); // Track which dates have expanded slots
   const [dateSlots, setDateSlots] = useState({}); // Store slots for multiple dates
   const [loadingDates, setLoadingDates] = useState({}); // Track loading state per date
+  const [cancelingSlotId, setCancelingSlotId] = useState(null);
 
   // Helper function to format dates consistently (YYYY-MM-DD)
   const formatDateString = (date) => {
@@ -795,6 +797,42 @@ export default function BookSlot() {
     }
   };
 
+  const handleCancelSlot = async (slot) => {
+    if (!slot?._id) {
+      toast.error('Slot information is missing');
+      return;
+    }
+
+    const dateStr = slot.date ? formatDateString(slot.date) : selectedDate;
+
+    const confirmCancel = window.confirm('Cancel this appointment and restore the slot?');
+    if (!confirmCancel) return;
+
+    try {
+      setCancelingSlotId(slot._id);
+
+      await API.post('/doctor-calendar/slots/cancel', {
+        slotId: slot._id,
+        cancellationReason: ''
+      });
+
+      toast.success('Appointment cancelled and slot restored');
+
+      if (dateStr === selectedDate) {
+        await fetchSlots();
+      } else if (dateStr) {
+        await fetchSlotsForDate(dateStr);
+      } else if (selectedDate) {
+        await fetchSlots();
+      }
+    } catch (error) {
+      console.error('Error cancelling slot:', error);
+      toast.error(error.response?.data?.message || 'Failed to cancel appointment');
+    } finally {
+      setCancelingSlotId(null);
+    }
+  };
+
   const openBookingModal = (slot) => {
     console.log('openBookingModal called with:', slot);
     if (!slot) {
@@ -1411,7 +1449,7 @@ export default function BookSlot() {
                         key={slot._id}
                         className="p-4 bg-gradient-to-br from-red-50 to-red-100 border-2 border-red-300 rounded-lg"
                       >
-                        <div className="flex justify-between items-start">
+                        <div className="flex justify-between items-start gap-3">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
                               <Clock className="h-4 w-4 text-red-600" />
@@ -1427,13 +1465,29 @@ export default function BookSlot() {
                                 UH ID: {slot.patientId.uhId}
                               </div>
                             )}
+                            {slot.patientId?.phone && (
+                              <div className="text-xs text-gray-600 mt-1 flex items-center gap-1">
+                                <Phone className="h-3 w-3 text-gray-500" />
+                                <span>Phone: {slot.patientId.phone}</span>
+                              </div>
+                            )}
                             {slot.bookedBy && (
                               <div className="text-xs text-gray-500 mt-1">
                                 Booked by: {slot.bookedBy.name}
                               </div>
                             )}
                           </div>
-                          <CheckCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                          <div className="flex flex-col items-end gap-2">
+                            <CheckCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                            <button
+                              onClick={() => handleCancelSlot(slot)}
+                              disabled={cancelingSlotId === slot._id}
+                              className="flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              <XCircle className="h-4 w-4" />
+                              {cancelingSlotId === slot._id ? 'Cancelling...' : 'Cancel'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}

@@ -5,8 +5,46 @@ import ReceptionistLayout from './ReceptionistLayout';
 import { fetchReceptionistBillingRequests, generateReceptionistBill, markReceptionistBillPaid, updatePaidBill } from '../../features/receptionist/receptionistThunks';
 import { Search, Filter, Plus, CheckCircle, FileText, IndianRupee, Hash, X, CreditCard, Receipt, Upload, Clock, Download, DollarSign, Building, Edit, Trash2 } from 'lucide-react';
 import { API_CONFIG } from '../../config/environment';
+import { applyRoundingAdjustment } from '../../utils/rounding';
 
 const currencySymbol = '₹';
+
+const resolveBillingTimestamp = (billing = {}, fallback) => {
+  if (!billing) return fallback || null;
+
+  const payments = Array.isArray(billing.payments) ? billing.payments : [];
+  const firstPaymentWithTimestamp = payments.find((payment) => payment?.createdAt || payment?.timestamp);
+
+  return (
+    billing.generatedAt ||
+    billing.createdAt ||
+    billing.updatedAt ||
+    firstPaymentWithTimestamp?.createdAt ||
+    firstPaymentWithTimestamp?.timestamp ||
+    fallback ||
+    null
+  );
+};
+
+const formatServerDateTime = (value, options) => {
+  if (!value) return 'N/A';
+
+  try {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return 'N/A';
+    }
+    return date.toLocaleString('en-GB', {
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit',
+      ...options,
+    });
+  } catch (error) {
+    console.error('Error formatting server timestamp:', value, error);
+    return 'N/A';
+  }
+};
 
 // Utility function to safely render object fields
 const safeRender = (value, fallback = 'N/A') => {
@@ -126,6 +164,7 @@ function ReceptionistBilling() {
   const [discountPercentage, setDiscountPercentage] = useState(0);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [discountReason, setDiscountReason] = useState('');
+const [customDiscountReason, setCustomDiscountReason] = useState('');
   
   // Center discount settings
   const [centerDiscountSettings, setCenterDiscountSettings] = useState({
@@ -351,7 +390,7 @@ function ReceptionistBilling() {
   };
 
   const subTotal = items.reduce((s, it) => s + (Number(it.quantity || 0) * Number(it.unitPrice || 0)), 0);
-  
+
   // Calculate discount based on type
   let calculatedDiscount = 0;
   if (discountType === 'percentage') {
@@ -362,8 +401,16 @@ function ReceptionistBilling() {
     // Fallback to old discounts value
     calculatedDiscount = Number(discounts || 0);
   }
-  
-  const grandTotal = Math.max(0, subTotal + Number(taxes || 0) - calculatedDiscount);
+
+  const roundingDetails = applyRoundingAdjustment({
+    subtotal: subTotal,
+    taxes: Number(taxes || 0),
+    discounts: calculatedDiscount
+  });
+
+  const grandTotal = Math.max(0, roundingDetails.roundedTotal);
+  const rawGrandTotal = roundingDetails.rawTotal;
+  const roundingDifference = roundingDetails.roundingDifference;
 
   // Calculate billing workflow statistics (including completed and Report_Sent)
   const workflowStats = useMemo(() => {
@@ -397,11 +444,24 @@ function ReceptionistBilling() {
       setTaxes(req.billing.taxes || 0);
       setDiscounts(req.billing.discounts || 0);
       setNotes(req.billing.notes || '');
-      // Reset new discount fields
-      setDiscountType('percentage');
-      setDiscountPercentage(0);
-      setDiscountAmount(0);
-      setDiscountReason('');
+      const savedDiscountType = req.billing.discountType || 'amount';
+      setDiscountType(savedDiscountType);
+      if (savedDiscountType === 'percentage') {
+        setDiscountPercentage(req.billing.discountPercentage || 0);
+        setDiscountAmount(0);
+      } else {
+        setDiscountPercentage(0);
+        setDiscountAmount(req.billing.discountAmount || 0);
+      }
+      const savedReason = req.billing.discountReason || '';
+      const predefinedReasons = ['staff', 'senior', 'student', 'employee', 'insurance', 'referral', 'promotion', 'charity', ''];
+      if (savedReason && !predefinedReasons.includes(savedReason)) {
+        setDiscountReason('other');
+        setCustomDiscountReason(savedReason);
+      } else {
+        setDiscountReason(savedReason);
+        setCustomDiscountReason('');
+      }
     } else if (req.selectedTests && Array.isArray(req.selectedTests) && req.selectedTests.length > 0) {
       // ✅ NEW: If selectedTests exist, automatically populate items
       setItems(req.selectedTests.map(test => ({
@@ -418,6 +478,7 @@ function ReceptionistBilling() {
       setDiscountPercentage(0);
       setDiscountAmount(0);
       setDiscountReason('');
+      setCustomDiscountReason('');
       toast.success(`Automatically loaded ${req.selectedTests.length} test(s) from request with codes and prices`);
     } else {
       // Fallback to old method with testType
@@ -462,6 +523,7 @@ function ReceptionistBilling() {
       setDiscountPercentage(0);
       setDiscountAmount(0);
       setDiscountReason('');
+      setCustomDiscountReason('');
     }
   };
 
@@ -475,6 +537,7 @@ function ReceptionistBilling() {
     setDiscountPercentage(0);
     setDiscountAmount(0);
     setDiscountReason('');
+    setCustomDiscountReason('');
   };
 
   // ✅ NEW: Search lab tests
@@ -861,16 +924,38 @@ function ReceptionistBilling() {
       calculatedDiscountValue = Number(discounts || 0);
     }
     
+    if (discountReason === 'other' && !customDiscountReason.trim()) {
+      toast.error('Please enter a custom discount reason');
+      return;
+    }
+
+    const roundingDetailsForPayload = applyRoundingAdjustment({
+      subtotal: subTotal,
+      taxes: Number(taxes || 0),
+      discounts: calculatedDiscountValue
+    });
+
+    const roundingDiscountDelta = roundingDetailsForPayload.adjustedDiscounts - calculatedDiscountValue;
+    const adjustedDiscountAmount =
+      discountType === 'amount'
+        ? Number(((discountAmount || 0) + roundingDiscountDelta).toFixed(2))
+        : undefined;
+
     const payload = { 
       items: cleanedItems, 
-      taxes: Number(taxes || 0), 
-      discounts: calculatedDiscountValue, 
+      taxes: roundingDetailsForPayload.adjustedTaxes, 
+      discounts: roundingDetailsForPayload.adjustedDiscounts, 
       discountType: discountType,
       discountPercentage: discountType === 'percentage' ? discountPercentage : undefined,
-      discountAmount: discountType === 'amount' ? discountAmount : undefined,
-      discountReason: discountReason,
+      discountAmount: adjustedDiscountAmount,
+      discountReason: discountReason === 'other' ? customDiscountReason.trim() : discountReason,
       currency: 'INR', 
-      notes 
+      notes,
+      rounding: {
+        rawTotal: roundingDetailsForPayload.rawTotal,
+        roundedTotal: roundingDetailsForPayload.roundedTotal,
+        roundingDifference: roundingDetailsForPayload.roundingDifference
+      }
     };
     
 
@@ -1201,6 +1286,40 @@ function ReceptionistBilling() {
   // Error boundary for rendering
   const renderContent = () => {
     try {
+      const selectedBillingTimestamp = selected
+        ? resolveBillingTimestamp(selected.billing, selected.updatedAt || selected.createdAt)
+        : null;
+      const formattedSelectedBillingTimestamp = selectedBillingTimestamp
+        ? formatServerDateTime(selectedBillingTimestamp)
+        : null;
+
+      const selectedForPaymentTimestamp = selectedForPayment
+        ? resolveBillingTimestamp(selectedForPayment.billing, selectedForPayment.updatedAt || selectedForPayment.createdAt)
+        : null;
+      const formattedSelectedForPaymentTimestamp = selectedForPaymentTimestamp
+        ? formatServerDateTime(selectedForPaymentTimestamp)
+        : null;
+
+      const selectedForCancelTimestamp = selectedForCancel
+        ? resolveBillingTimestamp(selectedForCancel.billing, selectedForCancel.updatedAt || selectedForCancel.createdAt)
+        : null;
+      const formattedSelectedForCancelTimestamp = selectedForCancelTimestamp
+        ? formatServerDateTime(selectedForCancelTimestamp)
+        : null;
+
+      const selectedForRefundTimestamp = selectedForRefund
+        ? resolveBillingTimestamp(selectedForRefund.billing, selectedForRefund.updatedAt || selectedForRefund.createdAt)
+        : null;
+      const formattedSelectedForRefundTimestamp = selectedForRefundTimestamp
+        ? formatServerDateTime(selectedForRefundTimestamp)
+        : null;
+
+      const selectedForEditTimestamp = selectedForEdit
+        ? resolveBillingTimestamp(selectedForEdit.billing, selectedForEdit.updatedAt || selectedForEdit.createdAt)
+        : null;
+      const formattedSelectedForEditTimestamp = selectedForEditTimestamp
+        ? formatServerDateTime(selectedForEditTimestamp)
+        : null;
       
       return (
         <ReceptionistLayout>
@@ -1416,6 +1535,13 @@ function ReceptionistBilling() {
                   <tbody className="divide-y divide-slate-100">
                     {paginatedData.map((req, index) => {
                       const globalIndex = (currentPage - 1) * itemsPerPage + index;
+                      const billingTimestamp = resolveBillingTimestamp(
+                        req.billing,
+                        req.updatedAt || req.createdAt,
+                      );
+                      const formattedBillingTimestamp = billingTimestamp
+                        ? formatServerDateTime(billingTimestamp)
+                        : null;
                       return (
                       <tr key={req._id} className={`hover:bg-slate-50 transition-colors duration-150 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-25'}`}>
                         <td className="px-3 py-2 text-xs">
@@ -1473,6 +1599,11 @@ function ReceptionistBilling() {
                               <div className="font-bold text-slate-800">
                                 {currencySymbol}{req.billing.amount.toFixed(2)}
                               </div>
+                              {formattedBillingTimestamp && (
+                                <div className="text-[10px] text-slate-500">
+                                  Bill generated: {formattedBillingTimestamp}
+                                </div>
+                              )}
                               {(() => {
                                 const backendPaidAmount = req.billing.paidAmount || 0;
                                 const totalAmount = req.billing.amount;
@@ -1908,6 +2039,11 @@ function ReceptionistBilling() {
                       <span className="font-medium">Doctor:</span> {ultraSafeRender(selected.doctorName) || ultraSafeRender(selected.doctorId?.name)} | 
                       <span className="font-medium ml-2">Center:</span> {ultraSafeRender(selected.centerName)}
                     </div>
+                    {selected?.billing?.invoiceNumber && formattedSelectedBillingTimestamp && (
+                      <div className="text-xs text-slate-500 mt-1">
+                        Bill generated on {formattedSelectedBillingTimestamp}
+                      </div>
+                    )}
                   </div>
                   <button onClick={closeBillModal} className="p-2 rounded-lg hover:bg-white/50 transition-colors duration-200">
                     <X className="h-6 w-6 text-slate-600" />
@@ -2082,8 +2218,8 @@ function ReceptionistBilling() {
                       />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Discount Type
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Discount Type
                       </label>
                       <div className="flex gap-4 mb-3">
                         <label className="flex items-center">
@@ -2096,6 +2232,7 @@ function ReceptionistBilling() {
                               setDiscountType('percentage');
                               setDiscountPercentage(0);
                               setDiscountReason('');
+                              setCustomDiscountReason('');
                             }}
                             className="mr-2"
                           />
@@ -2111,6 +2248,7 @@ function ReceptionistBilling() {
                               setDiscountType('amount');
                               setDiscountAmount(0);
                               setDiscountReason('');
+                              setCustomDiscountReason('');
                             }}
                             className="mr-2"
                           />
@@ -2133,9 +2271,11 @@ function ReceptionistBilling() {
                                   const discountPercentage = selectedReason === 'other' ? 0 : centerDiscountSettings[selectedReason] || 0;
                                   setDiscountReason(selectedReason);
                                   setDiscountPercentage(discountPercentage);
+                                  setCustomDiscountReason('');
                                 } else {
                                   setDiscountReason('');
                                   setDiscountPercentage(0);
+                                  setCustomDiscountReason('');
                                 }
                               }}
                               className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
@@ -2160,6 +2300,20 @@ function ReceptionistBilling() {
                               <p className="text-xs text-orange-600 mt-1">
                                 📝 Enter custom discount percentage below
                               </p>
+                            )}
+                            {discountReason === 'other' && (
+                              <div className="mt-2">
+                                <label className="block text-xs font-medium text-slate-500 mb-1">
+                                  Custom Discount Reason
+                                </label>
+                                <input
+                                  type="text"
+                                  value={customDiscountReason}
+                                  onChange={(e) => setCustomDiscountReason(e.target.value)}
+                                  className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                  placeholder="Enter custom discount reason"
+                                />
+                              </div>
                             )}
                           </div>
 
@@ -2212,7 +2366,12 @@ function ReceptionistBilling() {
                             </label>
                             <select
                               value={discountReason}
-                              onChange={(e) => setDiscountReason(e.target.value)}
+                              onChange={(e) => {
+                                setDiscountReason(e.target.value);
+                                if (e.target.value !== 'other') {
+                                  setCustomDiscountReason('');
+                                }
+                              }}
                               className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                             >
                               <option value="">Select reason...</option>
@@ -2231,6 +2390,20 @@ function ReceptionistBilling() {
                                 📝 Please specify the reason in the notes field below
                               </p>
                             )}
+                            {discountReason === 'other' && (
+                              <div className="mt-2">
+                                <label className="block text-xs font-medium text-slate-500 mb-1">
+                                  Custom Discount Reason
+                                </label>
+                                <input
+                                  type="text"
+                                  value={customDiscountReason}
+                                  onChange={(e) => setCustomDiscountReason(e.target.value)}
+                                  className="w-full border border-slate-300 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                  placeholder="Enter custom discount reason"
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -2239,6 +2412,11 @@ function ReceptionistBilling() {
                       <div className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg px-4 py-3">
                         <div className="text-sm text-slate-600">Grand Total</div>
                         <div className="text-2xl font-bold text-slate-800">{currencySymbol}{grandTotal.toFixed(2)}</div>
+                        {roundingDifference !== 0 && (
+                          <div className="text-xs text-slate-500 mt-1">
+                            Includes rounding adjustment of {roundingDifference > 0 ? '+' : '-'}{currencySymbol}{Math.abs(roundingDifference).toFixed(2)} (raw total {currencySymbol}{rawGrandTotal.toFixed(2)})
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2309,6 +2487,11 @@ function ReceptionistBilling() {
                     <div className="text-xs text-slate-500 mt-1">
                       Amount: {currencySymbol}{selectedForPayment.billing?.amount?.toFixed(2) || '0.00'} | Center: {ultraSafeRender(selectedForPayment.centerName)}
                     </div>
+                    {selectedForPayment?.billing?.invoiceNumber && formattedSelectedForPaymentTimestamp && (
+                      <div className="text-xs text-slate-500 mt-1">
+                        Bill generated on {formattedSelectedForPaymentTimestamp}
+                      </div>
+                    )}
                   </div>
                   <button onClick={closePaymentModal} className="p-1 rounded hover:bg-slate-100">
                     <X className="h-5 w-5" />
@@ -2362,7 +2545,7 @@ function ReceptionistBilling() {
                     
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Transaction ID <span className="text-red-500">*</span>
+                        Transaction ID <span className="text-red-500"></span>
                       </label>
                       <input 
                         type="text"
@@ -2370,7 +2553,7 @@ function ReceptionistBilling() {
                         placeholder="Enter transaction ID or reference number"
                         value={paymentDetails.transactionId}
                         onChange={(e) => setPaymentDetails(prev => ({ ...prev, transactionId: e.target.value }))}
-                        required
+                        
                       />
                     </div>
                   </div>
@@ -2425,7 +2608,7 @@ function ReceptionistBilling() {
                                           </span>
                                         </div>
                                         <div className="text-xs text-slate-600 mt-1">
-                                          {new Date(payment.timestamp).toLocaleString()} - {payment.method}
+                                        {formatServerDateTime(payment.timestamp)} - {payment.method || 'N/A'}
                                         </div>
                                         {payment.transactionId && (
                                           <div className="text-xs text-slate-500 mt-1">
@@ -2590,6 +2773,11 @@ function ReceptionistBilling() {
                     <p className="text-sm text-slate-600">
                       Amount: {currencySymbol}{selectedForCancel.billing?.amount?.toFixed(2) || '0.00'}
                     </p>
+                    {selectedForCancel?.billing?.invoiceNumber && formattedSelectedForCancelTimestamp && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        Bill generated on {formattedSelectedForCancelTimestamp}
+                      </p>
+                    )}
                   </div>
                   <button onClick={closeCancelModal} className="p-2 rounded-lg hover:bg-slate-100">
                     <X className="h-5 w-5" />
@@ -2681,6 +2869,11 @@ function ReceptionistBilling() {
                     <p className="text-sm text-slate-600">
                       Original Amount: {currencySymbol}{selectedForRefund.billing?.amount?.toFixed(2) || '0.00'}
                     </p>
+                    {selectedForRefund?.billing?.invoiceNumber && formattedSelectedForRefundTimestamp && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        Bill generated on {formattedSelectedForRefundTimestamp}
+                      </p>
+                    )}
                   </div>
                   <button onClick={closeRefundModal} className="p-2 rounded-lg hover:bg-slate-100">
                     <X className="h-5 w-5" />
@@ -2811,6 +3004,11 @@ function ReceptionistBilling() {
                       <span className="font-medium">Original Amount:</span> {currencySymbol}{selectedForEdit.billing?.amount?.toFixed(2) || '0.00'} | 
                       <span className="font-medium ml-2">Paid:</span> {currencySymbol}{selectedForEdit.billing?.paidAmount?.toFixed(2) || '0.00'}
                     </div>
+                    {selectedForEdit?.billing?.invoiceNumber && formattedSelectedForEditTimestamp && (
+                      <div className="text-xs text-slate-500 mt-1">
+                        Bill generated on {formattedSelectedForEditTimestamp}
+                      </div>
+                    )}
                   </div>
                   <button onClick={closeEditBillModal} className="p-2 rounded-lg hover:bg-white/50 transition-colors duration-200">
                     <X className="h-6 w-6 text-slate-600" />

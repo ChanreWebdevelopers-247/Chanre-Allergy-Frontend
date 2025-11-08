@@ -39,6 +39,62 @@ import {
 import { toast } from 'react-toastify';
 import API from '../../services/api';
 import { getPatientAppointment } from '../../services/api';
+import { applyRoundingAdjustment } from '../../utils/rounding';
+
+const resolveTimestamp = (...values) => {
+  for (const value of values) {
+    if (!value) continue;
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+  return null;
+};
+
+const resolveBillingTimestamp = (billing = {}, fallback) => {
+  if (!billing) return resolveTimestamp(fallback);
+  const payments = Array.isArray(billing.payments) ? billing.payments : [];
+  const paymentTimestamps = payments
+    .map((payment) => payment?.createdAt || payment?.timestamp)
+    .filter(Boolean);
+
+  return resolveTimestamp(
+    billing.generatedAt,
+    billing.createdAt,
+    billing.updatedAt,
+    ...paymentTimestamps,
+    fallback
+  );
+};
+
+const formatServerDate = (value) => {
+  if (!value) return 'N/A';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleDateString('en-GB');
+};
+
+const formatServerTime = (value) => {
+  if (!value) return 'N/A';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+};
+
+const formatServerDateTimeLabel = (value) => {
+  const date = resolveTimestamp(value);
+  if (!date) return 'N/A';
+  const datePart = formatServerDate(date);
+  const timePart = formatServerTime(date);
+  if (datePart === 'N/A' && timePart === 'N/A') return 'N/A';
+  if (timePart === 'N/A') return datePart;
+  return `${datePart} at ${timePart}`;
+};
 
 export default function ReassignPatient() {
   const dispatch = useDispatch();
@@ -94,6 +150,8 @@ export default function ReassignPatient() {
     serviceCharges: [{ name: 'Standard Service Charge', amount: '150', description: 'Standard Service Charge' }],
     taxPercentage: 0,
     discountPercentage: 0,
+    discountReason: '',
+    customDiscountReason: '',
     notes: '',
     consultationType: 'OP'
   });
@@ -119,6 +177,17 @@ export default function ReassignPatient() {
     paymentReference: '',
     notes: '',
     patientBehavior: 'okay' // 'okay' or 'rude' - determines penalty policy
+  });
+
+  const [centerDiscountSettings, setCenterDiscountSettings] = useState({
+    staff: 0,
+    senior: 0,
+    student: 0,
+    employee: 0,
+    insurance: 0,
+    referral: 0,
+    promotion: 0,
+    charity: 0
   });
   
   const [workingHoursReassignData, setWorkingHoursReassignData] = useState({
@@ -154,6 +223,27 @@ export default function ReassignPatient() {
     dispatch(fetchReceptionistPatients());
     fetchCenterInfo();
   }, [dispatch]);
+
+  useEffect(() => {
+    const fetchCenterDiscountSettings = async () => {
+      const centerId = getCenterId();
+      if (!centerId) return;
+
+      try {
+        const response = await API.get(`/centers/${centerId}/fees`);
+        if (response.data?.discountSettings) {
+          setCenterDiscountSettings(prev => ({
+            ...prev,
+            ...response.data.discountSettings
+          }));
+        }
+      } catch (error) {
+        console.error('Error fetching center discount settings:', error);
+      }
+    };
+
+    fetchCenterDiscountSettings();
+  }, [user]);
 
   // Auto-refresh patient data every 30 seconds to keep doctor status updated
   useEffect(() => {
@@ -239,6 +329,12 @@ export default function ReassignPatient() {
           missCallNumber: center.missCallNumber || '080-42516666',
           mobileNumber: center.mobileNumber || '9686197153'
         });
+        if (center?.fees?.discountSettings || center?.discountSettings) {
+          setCenterDiscountSettings(prev => ({
+            ...prev,
+            ...(center?.fees?.discountSettings || center?.discountSettings)
+          }));
+        }
         console.log('✅ Center info refreshed:', center.name);
       } catch (error) {
         console.error('Error fetching center info:', error);
@@ -810,6 +906,8 @@ export default function ReassignPatient() {
       serviceCharges: defaultServiceCharges.length > 0 ? defaultServiceCharges : [{ name: '', amount: '', description: '' }],
       taxPercentage: 0,
       discountPercentage: 0,
+      discountReason: '',
+      customDiscountReason: '',
       notes: isFree ? `Free reassignment for ${patient.name} (within 7 days)` : `Invoice for reassigned patient: ${patient.name}`,
       consultationType: defaultConsultationType
     });
@@ -2106,23 +2204,298 @@ export default function ReassignPatient() {
 
       {/* Invoice Preview Modal - Updated 2025-01-16 15:00 */}
       {showInvoicePreviewModal && selectedPatient && (() => {
-        const latestBill = selectedPatient.reassignedBilling?.[selectedPatient.reassignedBilling.length - 1];
+        const backendLatestBill = selectedPatient.reassignedBilling?.[selectedPatient.reassignedBilling.length - 1];
+        const latestBill = generatedInvoice || backendLatestBill;
         if (!latestBill) return null;
-        
-        // Extract data from backend
-        const totalAmount = latestBill.amount || 0;
-        const refundedAmount = latestBill.refundAmount || 0;
-        const remainingPaidAmount = latestBill.paidAmount || 0;
-        
-        // Get custom data if available
-        const customTotalAmount = latestBill.customData?.totals?.total || 0;
-        const customPaidAmount = latestBill.customData?.totals?.paid || 0;
-        const customRefundedAmount = latestBill.refunds?.reduce((sum, refund) => sum + (refund.amount || 0), 0) || 0;
-        
-        // Determine which data source to use
-        const finalTotalAmount = customTotalAmount || totalAmount;
-        const finalRefundedAmount = customRefundedAmount || refundedAmount;
-        const finalRemainingPaidAmount = customPaidAmount || remainingPaidAmount;
+
+        const totalsSource = latestBill.customData?.totals || latestBill.totals || {};
+
+        const parseAmount = (value) => {
+          if (value === null || value === undefined) return NaN;
+          if (typeof value === 'number') {
+            return Number.isFinite(value) ? value : NaN;
+          }
+          if (typeof value === 'string') {
+            const cleaned = value.replace(/[^0-9.-]/g, '');
+            if (!cleaned) return NaN;
+            const parsed = Number(cleaned);
+            return Number.isFinite(parsed) ? parsed : NaN;
+          }
+          return NaN;
+        };
+
+        const pickFirstAmount = (...values) => {
+          for (const value of values) {
+            const parsed = parseAmount(value);
+            if (Number.isFinite(parsed)) {
+              return parsed;
+            }
+          }
+          return NaN;
+        };
+
+        const pickGreatestAmount = (...values) => {
+          let result = NaN;
+          values.forEach((value) => {
+            const parsed = parseAmount(value);
+            if (Number.isFinite(parsed) && parsed > 0) {
+              if (!Number.isFinite(result) || parsed > result) {
+                result = parsed;
+              }
+            }
+          });
+          return result;
+        };
+        const subtotalFromTotals = pickFirstAmount(
+          totalsSource.subtotal,
+          latestBill.customData?.totals?.subtotal
+        );
+        const taxAmountValue = (() => {
+          const value = pickFirstAmount(
+            totalsSource.taxAmount,
+            latestBill.customData?.totals?.taxAmount,
+            latestBill.taxAmount,
+            latestBill.customData?.taxAmount
+          );
+          return Number.isFinite(value) ? value : 0;
+        })();
+        const roundOffAmountValue = (() => {
+          const value = pickFirstAmount(
+            totalsSource.roundOffAmount,
+            latestBill.roundOffAmount,
+            latestBill.rounding?.roundingDifference,
+            latestBill.customData?.totals?.roundOffAmount
+          );
+          return Number.isFinite(value) ? value : 0;
+        })();
+
+        let discountAmountValue = (() => {
+          const value = pickFirstAmount(
+            totalsSource.discountAmount,
+            latestBill.customData?.totals?.discountAmount,
+            latestBill.customData?.discountAmount,
+            latestBill.discountAmount
+          );
+          return Number.isFinite(value) ? value : 0;
+        })();
+
+        let discountPercentageValue = (() => {
+          const value = pickFirstAmount(
+            totalsSource.discountPercentage,
+            latestBill.customData?.totals?.discountPercentage,
+            latestBill.customData?.discountPercentage,
+            latestBill.discountPercentage
+          );
+          return Number.isFinite(value) ? value : 0;
+        })();
+        const resolvedDiscountPercentage = Number.isFinite(discountPercentageValue) ? discountPercentageValue : 0;
+        let discountReasonLabel = (() => {
+          const customReason =
+            latestBill.customData?.customDiscountReason ||
+            latestBill.customDiscountReason ||
+            latestBill.customData?.discountLabel ||
+            latestBill.discountLabel;
+          if (customReason) {
+            return customReason;
+          }
+          const reasonKey =
+            latestBill.customData?.discountReason ||
+            latestBill.discountReason ||
+            latestBill.totals?.discountReason;
+          if (reasonKey) {
+            const reasonMap = {
+              staff: 'Staff Discount',
+              senior: 'Senior Citizen Discount',
+              student: 'Student Discount',
+              employee: 'Employee Discount',
+              insurance: 'Insurance Coverage',
+              referral: 'Referral Discount',
+              promotion: 'Promotional Discount',
+              charity: 'Charity Case',
+              other: 'Custom Discount'
+            };
+            return reasonMap[reasonKey] || reasonKey.replace(/_/g, ' ');
+          }
+          return null;
+        })();
+
+        const finalTotalAmount = (() => {
+          const value = pickFirstAmount(
+            totalsSource.total,
+            latestBill.customData?.totals?.total,
+            latestBill.totalAmount,
+            latestBill.amount
+          );
+          return Number.isFinite(value) ? value : 0;
+        })();
+
+        const paidFromPayments = Array.isArray(latestBill.payments)
+          ? latestBill.payments.reduce((sum, payment) => {
+              const parsed = parseAmount(payment?.amount);
+              return Number.isFinite(parsed) ? sum + parsed : sum;
+            }, 0)
+          : NaN;
+        const finalRemainingPaidAmount = (() => {
+          const greatest = pickGreatestAmount(
+            totalsSource.paid,
+            latestBill.customData?.totals?.paid,
+            latestBill.customData?.paidAmount,
+            latestBill.customData?.paid,
+            latestBill.paidAmount,
+            paidFromPayments
+          );
+          if (Number.isFinite(greatest)) {
+            return greatest;
+          }
+          const first = pickFirstAmount(
+            totalsSource.paid,
+            latestBill.customData?.totals?.paid,
+            latestBill.customData?.paidAmount,
+            latestBill.customData?.paid,
+            latestBill.paidAmount,
+            paidFromPayments
+          );
+          return Number.isFinite(first) ? first : 0;
+        })();
+
+        const finalRefundedAmount = (() => {
+          const fromRefundArray = Array.isArray(latestBill.refunds)
+            ? latestBill.refunds.reduce((sum, refund) => {
+                const parsed = parseAmount(refund?.amount);
+                return Number.isFinite(parsed) ? sum + parsed : sum;
+              }, 0)
+            : NaN;
+          const value = pickFirstAmount(
+            totalsSource.refunded,
+            latestBill.customData?.totals?.refundedAmount,
+            latestBill.customData?.refundAmount,
+            latestBill.refundAmount,
+            fromRefundArray
+          );
+          return Number.isFinite(value) ? value : 0;
+        })();
+        const registrationFeeValue = (() => {
+          const value = pickFirstAmount(
+            latestBill.customData?.registrationFee,
+            latestBill.registrationFee,
+            totalsSource.registrationFee
+          );
+          return Number.isFinite(value) ? value : 0;
+        })();
+        const parsedServiceDetails = (() => {
+          if (!latestBill.serviceDetails || typeof latestBill.serviceDetails !== 'string') return [];
+          return latestBill.serviceDetails
+            .split(',')
+            .map((chunk) => chunk.trim())
+            .filter(Boolean)
+            .map((entry) => {
+              const [namePart, amountPart] = entry.split(':').map((part) => part.trim());
+              const amountMatch = amountPart ? amountPart.replace(/[^0-9.]/g, '') : '';
+              const amount = amountMatch ? parseFloat(amountMatch) : 0;
+              return {
+                name: namePart || 'Service',
+                amount,
+                description: entry
+              };
+            })
+            .filter((service) => service.name && !Number.isNaN(service.amount) && service.amount > 0);
+        })();
+        const consultationTypeForBill = latestBill.consultationType || latestBill.customData?.consultationType || 'OP';
+        const resolvedServiceCharges = (() => {
+          if (Array.isArray(latestBill.customData?.serviceCharges) && latestBill.customData.serviceCharges.length > 0) {
+            return [...latestBill.customData.serviceCharges];
+          }
+          if (Array.isArray(latestBill.serviceCharges) && latestBill.serviceCharges.length > 0) {
+            return [...latestBill.serviceCharges];
+          }
+          if (parsedServiceDetails.length > 0) {
+            return [...parsedServiceDetails];
+          }
+          return [];
+        })();
+        const summaryServiceTotal = resolvedServiceCharges.reduce(
+          (sum, service) => sum + (parseFloat(service.amount) || 0),
+          0
+        );
+        const storedConsultationFee = Number(
+          latestBill.customData?.consultationFee ??
+          latestBill.consultationFee ??
+          0
+        );
+        const defaultConsultationFee = (() => {
+          if (consultationTypeForBill === 'followup') return 0;
+          if (consultationTypeForBill === 'IP') return 1050;
+          return 850;
+        })();
+        const baselineConsultationFee = defaultConsultationFee > 0
+          ? defaultConsultationFee
+          : (storedConsultationFee > 0 ? storedConsultationFee : 0);
+        const baselineSubtotal = baselineConsultationFee + summaryServiceTotal + registrationFeeValue;
+        const hasExplicitDiscountMeta =
+          (Number.isFinite(discountAmountValue) && discountAmountValue > 0) ||
+          (Number.isFinite(discountPercentageValue) && Math.abs(discountPercentageValue) > 0);
+        const inferredDiscount = Math.max(
+          0,
+          baselineSubtotal + taxAmountValue - roundOffAmountValue - finalTotalAmount
+        );
+        if (
+          baselineConsultationFee > storedConsultationFee &&
+          inferredDiscount > 0.01 &&
+          inferredDiscount > discountAmountValue + 0.01
+        ) {
+          discountAmountValue = Number(inferredDiscount.toFixed(2));
+          discountPercentageValue = baselineSubtotal > 0
+            ? Number(((discountAmountValue / baselineSubtotal) * 100).toFixed(2))
+            : 0;
+          if (!discountReasonLabel) {
+            discountReasonLabel = 'Discount Applied';
+          }
+        } else if (!hasExplicitDiscountMeta && defaultConsultationFee > 0 && storedConsultationFee > 0 && defaultConsultationFee > storedConsultationFee) {
+          if (inferredDiscount > 0.01) {
+            discountAmountValue = Number(inferredDiscount.toFixed(2));
+            discountPercentageValue = baselineSubtotal > 0
+              ? Number(((discountAmountValue / baselineSubtotal) * 100).toFixed(2))
+              : 0;
+            if (!discountReasonLabel) {
+              discountReasonLabel = 'Discount Applied';
+            }
+          }
+        }
+        if (!Number.isFinite(discountAmountValue)) {
+          discountAmountValue = 0;
+        }
+        if (!Number.isFinite(discountPercentageValue)) {
+          discountPercentageValue = 0;
+        }
+        const resolvedDiscountPercentageValue = discountAmountValue > 0
+          ? (discountPercentageValue || (baselineSubtotal > 0
+              ? Number(((discountAmountValue / baselineSubtotal) * 100).toFixed(2))
+              : 0))
+          : discountPercentageValue;
+        const discountPercentageLabel = resolvedDiscountPercentageValue > 0
+          ? (Number.isInteger(resolvedDiscountPercentageValue)
+            ? `${resolvedDiscountPercentageValue}%`
+            : `${resolvedDiscountPercentageValue.toFixed(2)}%`)
+          : null;
+        let displayConsultationFee = storedConsultationFee > 0 ? storedConsultationFee : baselineConsultationFee;
+        if (discountAmountValue > 0 && baselineConsultationFee > 0 && baselineConsultationFee > displayConsultationFee) {
+          displayConsultationFee = baselineConsultationFee;
+        }
+        const consultationFeeForSummary = (() => {
+          if (discountAmountValue > 0 && baselineConsultationFee > 0) {
+            return baselineConsultationFee;
+          }
+          if (displayConsultationFee > 0) {
+            return displayConsultationFee;
+          }
+          if (Number.isFinite(subtotalFromTotals) && subtotalFromTotals > 0) {
+            return subtotalFromTotals - registrationFeeValue - summaryServiceTotal;
+          }
+          if (resolvedServiceCharges.length > 0 || registrationFeeValue > 0) {
+            return finalTotalAmount + discountAmountValue - taxAmountValue - summaryServiceTotal - registrationFeeValue;
+          }
+          return finalTotalAmount + discountAmountValue - taxAmountValue;
+        })();
         
         // For reassign patients, the logic is different:
         // - totalAmount: Total bill amount (1050)
@@ -2152,9 +2525,16 @@ export default function ReassignPatient() {
         // For invoice display - show the correct amounts
         const displayPaidAmount = finalRemainingPaidAmount;     // Show actual paid amount
         const displayRefundedAmount = finalRefundedAmount;      // Show refunded amount
-        const displayBalance = finalTotalAmount - finalRemainingPaidAmount; // Show balance due
+        const displayBalance = Math.max(0, finalTotalAmount - displayPaidAmount); // Show balance due
         
         const isFullyPaid = displayBalance <= 0;
+        const billTimestamp = resolveBillingTimestamp(latestBill, latestBill.createdAt);
+        const billDateLabel = formatServerDate(billTimestamp);
+        const billTimeLabel = formatServerTime(billTimestamp);
+        const renderDateTimeLabel = (timestamp, fallback) => {
+          const label = formatServerDateTimeLabel(resolveTimestamp(timestamp, fallback, billTimestamp));
+          return label === 'N/A' ? 'N/A' : label;
+        };
         
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -2392,7 +2772,8 @@ export default function ReassignPatient() {
                         <span className="font-bold">Bill No:</span> {latestBill.invoiceNumber}
                       </p>
                       <p className="text-sm font-medium text-slate-700">
-                        <span className="font-bold">BILL</span> Date: {new Date(latestBill.createdAt).toLocaleDateString('en-GB')}, {new Date(latestBill.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        <span className="font-bold">BILL</span> Date: {billDateLabel}
+                        {billTimeLabel !== 'N/A' ? `, ${billTimeLabel}` : ''}
                       </p>
                     </div>
                   </div>
@@ -2440,14 +2821,30 @@ export default function ReassignPatient() {
                           const rows = [];
                           
                           // Add consultation fee if exists - check multiple possible locations
-                          let consultationFee = latestBill.customData?.consultationFee || latestBill.consultationFee || 0;
+                          let consultationFee = Number(
+                            latestBill.customData?.consultationFee ??
+                            latestBill.consultationFee ??
+                            0
+                          );
+                          const subtotalFromTotals = Number.isFinite(Number(totalsSource.subtotal))
+                            ? Number(totalsSource.subtotal)
+                            : NaN;
                           
                           // Check if we need to split consultation fees
                           // Create a mutable copy of serviceCharges to avoid modifying frozen objects
                           // Check multiple possible locations for service charges
-                          const serviceChargesFromCustomData = latestBill.customData?.serviceCharges ? [...latestBill.customData.serviceCharges] : [];
-                          const serviceChargesFromBill = latestBill.serviceCharges ? [...latestBill.serviceCharges] : [];
-                          const existingServiceCharges = serviceChargesFromCustomData.length > 0 ? serviceChargesFromCustomData : serviceChargesFromBill;
+                          const serviceChargesFromCustomData = Array.isArray(latestBill.customData?.serviceCharges)
+                            ? [...latestBill.customData.serviceCharges]
+                            : [];
+                          const serviceChargesFromBill = Array.isArray(latestBill.serviceCharges)
+                            ? [...latestBill.serviceCharges]
+                            : [];
+                          const existingServiceCharges = (() => {
+                            if (serviceChargesFromCustomData.length > 0) return serviceChargesFromCustomData;
+                            if (serviceChargesFromBill.length > 0) return serviceChargesFromBill;
+                            if (resolvedServiceCharges.length > 0) return [...resolvedServiceCharges];
+                            return [];
+                          })();
                           const hasServiceCharges = existingServiceCharges.length > 0;
                           const consultationType = latestBill.consultationType || latestBill.customData?.consultationType || 'OP';
                           
@@ -2504,7 +2901,11 @@ export default function ReassignPatient() {
                           if (consultationFee === 0 && displayServiceCharges.length > 0) {
                             // If service charges exist but consultation fee is 0, calculate it from total
                             const serviceTotal = displayServiceCharges.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
-                            consultationFee = finalTotalAmount - serviceTotal;
+                            if (Number.isFinite(subtotalFromTotals) && subtotalFromTotals > 0) {
+                              consultationFee = subtotalFromTotals - registrationFeeValue - serviceTotal;
+                            } else {
+                              consultationFee = finalTotalAmount - serviceTotal;
+                            }
                           } else if (consultationFee === 0 && displayServiceCharges.length === 0) {
                             // If no customData or no service charges, check if total is 1000 (OP + Standard Service Charge)
                             if (finalTotalAmount === 1000 && consultationType === 'OP') {
@@ -2520,7 +2921,9 @@ export default function ReassignPatient() {
                               }
                             } else {
                               // Otherwise use the total as consultation fee
-                              consultationFee = finalTotalAmount;
+                              consultationFee = Number.isFinite(subtotalFromTotals) && subtotalFromTotals > 0
+                                ? subtotalFromTotals - registrationFeeValue
+                                : finalTotalAmount;
                             }
                           }
                           
@@ -2532,6 +2935,28 @@ export default function ReassignPatient() {
                               amount: '150',
                               description: 'Standard Service Charge'
                             });
+                          }
+
+                          const serviceTotalForDisplay = displayServiceCharges.reduce(
+                            (sum, service) => sum + (parseFloat(service.amount) || 0),
+                            0
+                          );
+                          const subtotalCandidate = Number.isFinite(subtotalFromTotals) && subtotalFromTotals > 0
+                            ? subtotalFromTotals
+                            : registrationFeeValue + consultationFee + serviceTotalForDisplay;
+
+                          if (
+                            subtotalCandidate > 0 &&
+                            (!Number.isFinite(consultationFee) || consultationFee === 0)
+                          ) {
+                            consultationFee = subtotalCandidate - registrationFeeValue - serviceTotalForDisplay;
+                          }
+
+                          if (
+                            subtotalCandidate > 0 &&
+                            Math.abs((consultationFee + registrationFeeValue + serviceTotalForDisplay) - subtotalCandidate) > 0.5
+                          ) {
+                            consultationFee = subtotalCandidate - registrationFeeValue - serviceTotalForDisplay;
                           }
                           
                           // CRITICAL: If consultationFee > ₹850 for OP, it means services are combined into it
@@ -2637,9 +3062,23 @@ export default function ReassignPatient() {
                             }
                           }
                           
-                          if (consultationFee > 0) {
-                            const consultationPaid = displayPaidAmount > 0 ? Math.min(consultationFee, displayPaidAmount) : 0;
-                            const consultationBalance = consultationFee - consultationPaid;
+                          const consultationFeeForRow = discountAmountValue > 0 && baselineConsultationFee > 0
+                            ? Math.max(consultationFee, baselineConsultationFee)
+                            : consultationFee;
+                          
+                          let remainingPaidForServices = displayPaidAmount;
+                          let discountRemainingForServices = discountAmountValue;
+                          
+                          if (consultationFeeForRow > 0) {
+                            const consultationDiscountApplied = Math.min(discountRemainingForServices, consultationFeeForRow);
+                            discountRemainingForServices = Math.max(0, Number((discountRemainingForServices - consultationDiscountApplied).toFixed(2)));
+                            
+                            const consultationEffectiveCharge = Math.max(0, consultationFeeForRow - consultationDiscountApplied);
+                            const consultationPaidCash = remainingPaidForServices > 0 ? Math.min(consultationEffectiveCharge, remainingPaidForServices) : 0;
+                            remainingPaidForServices = Math.max(0, Number((remainingPaidForServices - consultationPaidCash).toFixed(2)));
+                            
+                            const consultationTotalPaid = consultationPaidCash + consultationDiscountApplied;
+                            const consultationBalance = Math.max(0, consultationFeeForRow - consultationTotalPaid);
                             let consultationStatus, consultationStatusColor;
                             
                             if (isCancelled) {
@@ -2652,7 +3091,7 @@ export default function ReassignPatient() {
                               consultationStatus = 'Partially Refunded';
                               consultationStatusColor = 'text-yellow-600';
                             } else {
-                              consultationStatus = consultationPaid >= consultationFee ? 'Paid' : consultationPaid > 0 ? 'Partial' : 'Unpaid';
+                              consultationStatus = consultationBalance <= 0 ? 'Paid' : consultationTotalPaid > 0 ? 'Partial' : 'Unpaid';
                               consultationStatusColor = consultationStatus === 'Paid' ? 'text-green-600' : consultationStatus === 'Partial' ? 'text-orange-600' : 'text-red-600';
                             }
                             
@@ -2660,11 +3099,11 @@ export default function ReassignPatient() {
                               <tr key="consult">
                                 <td className="border border-slate-300 px-3 py-2 text-xs">{serialNumber++}</td>
                                 <td className="border border-slate-300 px-3 py-2 text-xs">
-                                  {consultationFee === 850 && consultationType === 'IP' ? 'OP Consultation Fee' : `${consultationType || 'OP'} Consultation Fee`}
+                                  {consultationFeeForRow === 850 && consultationType === 'IP' ? 'OP Consultation Fee' : `${consultationType || 'OP'} Consultation Fee`}
                                 </td>
                                 <td className="border border-slate-300 px-3 py-2 text-center text-xs">1</td>
-                                <td className="border border-slate-300 px-3 py-2 text-right text-xs">{consultationFee.toFixed(2)}</td>
-                                <td className="border border-slate-300 px-3 py-2 text-right text-xs">{consultationPaid.toFixed(2)}</td>
+                                <td className="border border-slate-300 px-3 py-2 text-right text-xs">{consultationFeeForRow.toFixed(2)}</td>
+                                <td className="border border-slate-300 px-3 py-2 text-right text-xs">₹{consultationTotalPaid.toFixed(2)}</td>
                                 <td className="border border-slate-300 px-3 py-2 text-right text-xs">{consultationBalance.toFixed(2)}</td>
                                 <td className="border border-slate-300 px-3 py-2 text-center text-xs">
                                   <span className={`font-medium ${consultationStatusColor}`}>
@@ -2715,6 +3154,17 @@ export default function ReassignPatient() {
                               services: validServices.map(s => ({ name: s.name, amount: s.amount }))
                             });
                             
+                            let serviceDiscountPool = discountRemainingForServices;
+                            const serviceDiscountAllocations = validServices.map((service) => {
+                              const amount = parseFloat(service.amount || 0);
+                              if (!Number.isFinite(amount) || amount <= 0) {
+                                return 0;
+                              }
+                              const allocation = Math.min(amount, serviceDiscountPool);
+                              serviceDiscountPool = Math.max(0, Number((serviceDiscountPool - allocation).toFixed(2)));
+                              return allocation;
+                            });
+                            
                             // Render each service in a SEPARATE row - CRITICAL: no combining allowed
                             // This forEach MUST create one row per service
                             validServices.forEach((service, index) => {
@@ -2730,16 +3180,12 @@ export default function ReassignPatient() {
                                 index: index
                               });
                               
-                              const consultationTotal = consultationFee;
-                              // Calculate remaining paid amount after consultation fee
-                              let remainingPaid = Math.max(0, displayPaidAmount - consultationTotal);
-                              
-                              // Distribute payment across services proportionally
-                              const totalServicesAmount = validServices.reduce((sum, s) => sum + parseFloat(s.amount || 0), 0);
-                              const servicePaid = totalServicesAmount > 0 
-                                ? Math.min(serviceAmount, Math.round((serviceAmount / totalServicesAmount) * remainingPaid * 100) / 100)
-                                : 0;
-                              const serviceBalance = serviceAmount - servicePaid;
+                              const serviceDiscountApplied = serviceDiscountAllocations[index] || 0;
+                              const serviceEffectiveCharge = Math.max(0, serviceAmount - serviceDiscountApplied);
+                              const servicePaidCash = Math.min(serviceEffectiveCharge, remainingPaidForServices);
+                              remainingPaidForServices = Math.max(0, Number((remainingPaidForServices - servicePaidCash).toFixed(2)));
+                              const serviceTotalPaid = servicePaidCash + serviceDiscountApplied;
+                              const serviceBalance = Math.max(0, serviceAmount - serviceTotalPaid);
                               
                               let serviceStatus, serviceStatusColor;
                               
@@ -2753,7 +3199,7 @@ export default function ReassignPatient() {
                                 serviceStatus = 'Partially Refunded';
                                 serviceStatusColor = 'text-yellow-600';
                               } else {
-                                serviceStatus = servicePaid >= serviceAmount ? 'Paid' : servicePaid > 0 ? 'Partial' : 'Unpaid';
+                                serviceStatus = serviceBalance <= 0 ? 'Paid' : serviceTotalPaid > 0 ? 'Partial' : 'Unpaid';
                                 serviceStatusColor = serviceStatus === 'Paid' ? 'text-green-600' : serviceStatus === 'Partial' ? 'text-orange-600' : 'text-red-600';
                               }
                               
@@ -2768,7 +3214,7 @@ export default function ReassignPatient() {
                                   </td>
                                   <td className="border border-slate-300 px-3 py-2 text-center text-xs">1</td>
                                   <td className="border border-slate-300 px-3 py-2 text-right text-xs">{serviceAmount.toFixed(2)}</td>
-                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs">{servicePaid.toFixed(2)}</td>
+                                  <td className="border border-slate-300 px-3 py-2 text-right text-xs">₹{serviceTotalPaid.toFixed(2)}</td>
                                   <td className="border border-slate-300 px-3 py-2 text-right text-xs">{serviceBalance.toFixed(2)}</td>
                                   <td className="border border-slate-300 px-3 py-2 text-center text-xs">
                                     <span className={`font-medium ${serviceStatusColor}`}>
@@ -2820,19 +3266,37 @@ export default function ReassignPatient() {
                     <div className="w-72">
                       <div className="space-y-1 text-xs">
                         <div className="flex justify-between">
-                          <span>Total Amount:</span>
-                          <span>₹{finalTotalAmount.toFixed(2)}</span>
+                          <span>Subtotal:</span>
+                          <span>₹{(() => {
+                            if (Number.isFinite(subtotalFromTotals) && subtotalFromTotals > 0) {
+                              return subtotalFromTotals.toFixed(2);
+                            }
+                            const fallbackSubtotal = consultationFeeForSummary + registrationFeeValue + summaryServiceTotal;
+                            return fallbackSubtotal.toFixed(2);
+                          })()}</span>
                         </div>
-                        {latestBill.customData?.totals?.discountAmount > 0 && (
+                        {discountAmountValue > 0 && (
                           <div className="flex justify-between">
                             <span>Discount(-):</span>
-                            <span>₹{(latestBill.customData.totals.discountAmount || 0).toFixed(2)}</span>
+                            <span>₹{discountAmountValue.toFixed(2)}</span>
                           </div>
                         )}
-                        {latestBill.customData?.totals?.taxAmount > 0 && (
+                        {discountReasonLabel && (
+                          <div className="text-[10px] text-slate-500">
+                            <span className="font-medium">Discount Reason:</span> {discountReasonLabel}
+                            {discountPercentageLabel ? ` (${discountPercentageLabel})` : ''}
+                          </div>
+                        )}
+                        {taxAmountValue > 0 && (
                           <div className="flex justify-between">
                             <span>Tax Amount:</span>
-                            <span>₹{(latestBill.customData.totals.taxAmount || 0).toFixed(2)}</span>
+                            <span>₹{taxAmountValue.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {roundOffAmountValue !== 0 && (
+                          <div className="flex justify-between">
+                            <span>Round Off:</span>
+                            <span>{roundOffAmountValue > 0 ? '+' : '-'}₹{Math.abs(roundOffAmountValue).toFixed(2)}</span>
                           </div>
                         )}
                         <div className="flex justify-between border-t border-slate-300 pt-1">
@@ -2905,11 +3369,7 @@ export default function ReassignPatient() {
                               <div>
                                 <div className="text-sm font-medium text-slate-800">₹{displayPaidAmount.toFixed(2)}</div>
                                 <div className="text-xs text-slate-500">
-                                  {latestBill.paidAt ? new Date(latestBill.paidAt).toLocaleDateString('en-GB') : 
-                                   latestBill.createdAt ? new Date(latestBill.createdAt).toLocaleDateString('en-GB') : 
-                                   'N/A'} at {latestBill.paidAt ? new Date(latestBill.paidAt).toLocaleTimeString('en-GB') : 
-                                   latestBill.createdAt ? new Date(latestBill.createdAt).toLocaleTimeString('en-GB') : 
-                                   'N/A'}
+                                  {renderDateTimeLabel(latestBill.paidAt, latestBill.createdAt)}
                                 </div>
                               </div>
                             </div>
@@ -2932,11 +3392,7 @@ export default function ReassignPatient() {
                               <div>
                                 <div className="text-sm font-medium text-slate-800">Bill Cancelled</div>
                                 <div className="text-xs text-slate-500">
-                                  {latestBill.cancelledAt ? new Date(latestBill.cancelledAt).toLocaleDateString('en-GB') : 
-                                   latestBill.createdAt ? new Date(latestBill.createdAt).toLocaleDateString('en-GB') : 
-                                   'N/A'} at {latestBill.cancelledAt ? new Date(latestBill.cancelledAt).toLocaleTimeString('en-GB') : 
-                                   latestBill.createdAt ? new Date(latestBill.createdAt).toLocaleTimeString('en-GB') : 
-                                   'N/A'}
+                                  {renderDateTimeLabel(latestBill.cancelledAt, latestBill.createdAt)}
                                 </div>
                               </div>
                             </div>
@@ -2959,11 +3415,7 @@ export default function ReassignPatient() {
                               <div>
                                 <div className="text-sm font-medium text-slate-800">₹{displayRefundedAmount.toFixed(2)} (Refund)</div>
                                 <div className="text-xs text-slate-500">
-                                  {latestBill.refundedAt ? new Date(latestBill.refundedAt).toLocaleDateString('en-GB') : 
-                                   latestBill.createdAt ? new Date(latestBill.createdAt).toLocaleDateString('en-GB') : 
-                                   'N/A'} at {latestBill.refundedAt ? new Date(latestBill.refundedAt).toLocaleTimeString('en-GB') : 
-                                   latestBill.createdAt ? new Date(latestBill.createdAt).toLocaleTimeString('en-GB') : 
-                                   'N/A'}
+                                  {renderDateTimeLabel(latestBill.refundedAt, latestBill.createdAt)}
                                 </div>
                               </div>
                             </div>
@@ -2986,7 +3438,7 @@ export default function ReassignPatient() {
                               <div>
                                 <div className="text-sm font-medium text-slate-800">₹{finalTotalAmount.toFixed(2)} (Pending)</div>
                                 <div className="text-xs text-slate-500">
-                                  {new Date(latestBill.createdAt).toLocaleDateString('en-GB')} at {new Date(latestBill.createdAt).toLocaleTimeString('en-GB')}
+                                  {renderDateTimeLabel(latestBill.createdAt)}
                                 </div>
                               </div>
                             </div>
@@ -3044,8 +3496,8 @@ export default function ReassignPatient() {
                     {/* Left - Generation Info */}
                     <div className="text-xs">
                       <div><span className="font-medium">Generated By:</span> {user?.name || 'System'}</div>
-                      <div><span className="font-medium">Date:</span> {new Date().toLocaleDateString('en-GB')}</div>
-                      <div><span className="font-medium">Time:</span> {new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
+                      <div><span className="font-medium">Date:</span> {billDateLabel}</div>
+                      <div><span className="font-medium">Time:</span> {billTimeLabel}</div>
               </div>
                     
                     {/* Right - Invoice Terms & Signature */}
@@ -3114,13 +3566,22 @@ export default function ReassignPatient() {
                 e.preventDefault();
                 try {
                   // Calculate totals
-                  const serviceTotal = invoiceFormData.serviceCharges.reduce((sum, service) => 
-                    sum + (parseFloat(service.amount) || 0), 0
+                  const registrationFee = parseFloat(invoiceFormData.registrationFee) || 0;
+                  const consultationFeeValue = parseFloat(invoiceFormData.consultationFee) || 0;
+                  const serviceTotal = invoiceFormData.serviceCharges.reduce(
+                    (sum, service) => sum + (parseFloat(service.amount) || 0),
+                    0
                   );
-                  const subtotal = (parseFloat(invoiceFormData.consultationFee) || 0) + serviceTotal;
+                  const subtotal = registrationFee + consultationFeeValue + serviceTotal;
                   const taxAmount = (subtotal * (parseFloat(invoiceFormData.taxPercentage) || 0)) / 100;
                   const discountAmount = (subtotal * (parseFloat(invoiceFormData.discountPercentage) || 0)) / 100;
-                  const total = subtotal + taxAmount - discountAmount;
+                  const roundingDetails = applyRoundingAdjustment({
+                    subtotal,
+                    taxes: taxAmount,
+                    discounts: discountAmount
+                  });
+                  const roundedTotal = roundingDetails.roundedTotal;
+                  const rawTotal = roundingDetails.rawTotal;
 
                   // Filter valid services - ensure all services with name and amount are included
                   const validServiceCharges = invoiceFormData.serviceCharges.filter(s => {
@@ -3128,14 +3589,22 @@ export default function ReassignPatient() {
                     const hasAmount = s.amount && parseFloat(s.amount) > 0;
                     return hasName && hasAmount;
                   });
+
+                  const serviceChargesPayload = validServiceCharges.map((service) => ({
+                    name: service.name.trim(),
+                    amount: parseFloat(service.amount),
+                    description: service.description || ''
+                  }));
                   
                   console.log('📤 Invoice Creation - Sending Data:', {
-                    consultationFee: parseFloat(invoiceFormData.consultationFee) || 0,
-                    serviceChargesCount: validServiceCharges.length,
-                    serviceCharges: validServiceCharges,
+                    registrationFee,
+                    consultationFee: consultationFeeValue,
+                    serviceChargesCount: serviceChargesPayload.length,
+                    serviceCharges: serviceChargesPayload,
                     totalServiceCharges: serviceTotal,
                     subtotal: subtotal,
-                    total: total
+                    rawTotal,
+                    roundedTotal
                   });
                   
                   const invoiceData = {
@@ -3143,19 +3612,30 @@ export default function ReassignPatient() {
                     doctorId: selectedPatient.assignedDoctor?._id,
                     centerId: getCenterId(),
                     consultationType: invoiceFormData.consultationType,
-                    consultationFee: parseFloat(invoiceFormData.consultationFee) || 0,
-                    serviceCharges: validServiceCharges,
+                    registrationFee,
+                    consultationFee: consultationFeeValue,
+                    serviceCharges: serviceChargesPayload,
                     taxPercentage: parseFloat(invoiceFormData.taxPercentage) || 0,
                     discountPercentage: parseFloat(invoiceFormData.discountPercentage) || 0,
+                    discountReason: invoiceFormData.discountReason || undefined,
+                    customDiscountReason: invoiceFormData.customDiscountReason || undefined,
+                    discountAmount: roundingDetails.adjustedDiscounts,
                     notes: invoiceFormData.notes,
+                    discountType: 'percentage',
                     isReassignedEntry: true,
                     totals: {
                       subtotal,
-                      taxAmount,
-                      discountAmount,
-                      total,
+                      taxAmount: roundingDetails.adjustedTaxes,
+                      discountAmount: roundingDetails.adjustedDiscounts,
+                      roundOffAmount: roundingDetails.roundingDifference,
+                      total: roundedTotal,
                       paid: 0,
-                      due: total
+                      due: roundedTotal
+                    },
+                    rounding: {
+                      rawTotal,
+                      roundedTotal,
+                      roundingDifference: roundingDetails.roundingDifference
                     }
                   };
 
@@ -3315,19 +3795,94 @@ export default function ReassignPatient() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="discount" className="block text-sm font-medium text-slate-700 mb-2">
-                      Discount Percentage (%)
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Select Discount Reason
                     </label>
-                    <input
-                      id="discount"
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={invoiceFormData.discountPercentage}
-                      onChange={(e) => setInvoiceFormData({...invoiceFormData, discountPercentage: e.target.value})}
+                    <select
+                      value={invoiceFormData.discountReason}
+                      onChange={(e) => {
+                        const selectedReason = e.target.value;
+                        if (selectedReason) {
+                          const discountValue = selectedReason === 'other'
+                            ? invoiceFormData.discountPercentage || 0
+                            : centerDiscountSettings[selectedReason] || 0;
+                          setInvoiceFormData({
+                            ...invoiceFormData,
+                            discountReason: selectedReason,
+                            customDiscountReason: selectedReason === 'other' ? invoiceFormData.customDiscountReason : '',
+                            discountPercentage: discountValue
+                          });
+                        } else {
+                          setInvoiceFormData({
+                            ...invoiceFormData,
+                            discountReason: '',
+                            customDiscountReason: '',
+                            discountPercentage: 0
+                          });
+                        }
+                      }}
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                      placeholder="0"
-                    />
+                    >
+                      <option value="">Select discount reason or enter custom %...</option>
+                      <option value="staff">Staff Discount ({centerDiscountSettings.staff}%)</option>
+                      <option value="senior">Senior Citizen Discount ({centerDiscountSettings.senior}%)</option>
+                      <option value="student">Student Discount ({centerDiscountSettings.student}%)</option>
+                      <option value="employee">Employee Discount ({centerDiscountSettings.employee}%)</option>
+                      <option value="insurance">Insurance Coverage ({centerDiscountSettings.insurance}%)</option>
+                      <option value="referral">Referral Discount ({centerDiscountSettings.referral}%)</option>
+                      <option value="promotion">Promotional Discount ({centerDiscountSettings.promotion}%)</option>
+                      <option value="charity">Charity Case ({centerDiscountSettings.charity}%)</option>
+                      <option value="other">Custom Discount (Enter manually below)</option>
+                    </select>
+                    {invoiceFormData.discountReason && invoiceFormData.discountReason !== 'other' && (
+                      <p className="text-xs text-green-600 mt-1">
+                        ✅ Discount percentage automatically set to {invoiceFormData.discountPercentage}%
+                      </p>
+                    )}
+                    {invoiceFormData.discountReason === 'other' && (
+                      <div className="mt-2">
+                        <label className="block text-xs font-medium text-slate-500 mb-1">
+                          Custom Discount Reason
+                        </label>
+                        <input
+                          type="text"
+                          value={invoiceFormData.customDiscountReason}
+                          onChange={(e) => setInvoiceFormData({...invoiceFormData, customDiscountReason: e.target.value})}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                          placeholder="Enter custom discount reason"
+                        />
+                        <p className="text-xs text-orange-600 mt-1">
+                          📝 Please specify the reason above; remove if not needed
+                        </p>
+                      </div>
+                    )}
+                    <div className="mt-3">
+                      <label htmlFor="discount" className="block text-sm font-medium text-slate-700 mb-2">
+                        Discount Percentage (%)
+                      </label>
+                      <input
+                        id="discount"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={invoiceFormData.discountPercentage}
+                        onChange={(e) => setInvoiceFormData({
+                          ...invoiceFormData,
+                          discountPercentage: e.target.value
+                        })}
+                        className={`w-full px-3 py-2 border border-slate-200 rounded-lg text-sm ${
+                          invoiceFormData.discountReason && invoiceFormData.discountReason !== 'other'
+                            ? 'bg-blue-50 border-blue-300'
+                            : ''
+                        }`}
+                        placeholder="0"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        {invoiceFormData.discountReason
+                          ? '💡 Auto-filled from selected reason - you can adjust if needed'
+                          : '💡 Select a reason above to auto-fill, or enter a custom percentage'}
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -3629,7 +4184,7 @@ export default function ReassignPatient() {
                     Doctor will only see this patient on the scheduled appointment date. Appointments can be scheduled for today or any future date.
                     {paymentData.appointmentTime && (
                       <span className="block mt-1 text-green-600 font-medium">
-                        ✅ Scheduled for: {new Date(paymentData.appointmentTime).toLocaleString()}
+                        ✅ Scheduled for: {formatServerDateTimeLabel(paymentData.appointmentTime)}
                       </span>
                     )}
                   </p>
