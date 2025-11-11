@@ -18,10 +18,30 @@ import {
 import { setTestRequests } from '../../../features/receptionist/receptionistSlice';
 import ReceptionistLayout from '../ReceptionistLayout';
 import {
-  ArrowLeft, User, Phone, Calendar, MapPin, Activity, Pill, FileText, Eye, Plus, AlertCircle, Mail, UserCheck, Edit, Clock
+  ArrowLeft,
+  User,
+  Phone,
+  Calendar,
+  MapPin,
+  Activity,
+  Pill,
+  FileText,
+  Eye,
+  Plus,
+  AlertCircle,
+  Mail,
+  UserCheck,
+  Edit,
+  Clock,
+  Paperclip,
+  Download
 } from 'lucide-react';
+import { SERVER_CONFIG } from '../../../config/environment';
+import API from '../../../services/api';
+import { toast } from 'react-toastify';
+import { openDocumentWithFallback } from '../../../utils/documentHelpers';
 
-const TABS = ["Overview", "History", "Tests", "Medications", "Lab Reports", "Follow Up", "Prescription"];
+const TABS = ["Overview", "Tests", "Medications", "Lab Reports", "Follow Up", "Prescription"];
 
 const ViewProfile = () => {
   const { id } = useParams();
@@ -31,6 +51,54 @@ const ViewProfile = () => {
   const [activeTab, setActiveTab] = useState("Overview");
   const [dataFetched, setDataFetched] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  const formatFileSize = (bytes) => {
+    if (!bytes || Number.isNaN(bytes)) return '';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / Math.pow(1024, exponent);
+    return `${value.toFixed(exponent === 0 ? 0 : 2)} ${units[exponent]}`;
+  };
+
+  const displayValue = (value, fallback = 'N/A') => {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    return value;
+  };
+
+  const formatDuration = (duration, unit = 'months') => {
+    if (duration === undefined || duration === null || duration === '') return null;
+    return `Duration: ${duration} ${unit}`;
+  };
+
+  const formatRecordDate = (value) => {
+    if (!value) return 'N/A';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const renderHistoryField = (label, value, duration) => (
+    <div className="p-3 bg-slate-50 rounded-lg" key={label}>
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-sm font-medium text-slate-600">{label}:</span>
+        <span className="text-sm text-slate-800 font-medium">{displayValue(value)}</span>
+      </div>
+      {duration ? (
+        <div className="text-xs text-slate-500">
+          {duration}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const downloadDocument = async (doc) => {
+    await openDocumentWithFallback({ doc, toast });
+  };
 
   // Function to check if patient can be edited (within 24 hours of creation)
   const canEditPatient = (patient) => {
@@ -420,7 +488,7 @@ const ViewProfile = () => {
           <div className="space-y-8">
             {/* Medical History */}
             <div className="bg-white rounded-xl shadow-sm border border-blue-100">
-              <div className="p-6 border-b border-blue-100 flex justify-between items-center">
+              <div className="p-6 border-b border-blue-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-semibold text-slate-800 flex items-center">
                     <FileText className="h-5 w-5 mr-2 text-blue-500" />
@@ -430,13 +498,24 @@ const ViewProfile = () => {
                     Complete patient medical history and examination records
                   </p>
                 </div>
-                <button
-                  onClick={() => navigate(`/dashboard/receptionist/patient-history/${patient._id}`)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
-                >
-                  <Eye className="h-4 w-4" />
-                  View Full History
-                </button>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/dashboard/receptionist/patient-history/${patient._id}`)}
+                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 text-xs md:text-sm"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add History
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/dashboard/receptionist/patient-history/${patient._id}`)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 text-xs md:text-sm"
+                  >
+                    <Eye className="h-4 w-4" />
+                    View Full History
+                  </button>
+                </div>
               </div>
               <div className="p-6">
                 {historyLoading ? (
@@ -454,57 +533,147 @@ const ViewProfile = () => {
                     <p className="text-slate-500">No history found</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            Date
-                          </th>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            Medical Conditions
-                          </th>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            Triggers
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-slate-200">
-                        {(Array.isArray(history) ? history : [history]).map((h, idx) => (
-                          <tr key={h._id || idx} className="hover:bg-slate-50">
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="flex items-center text-sm text-slate-900">
-                                <Calendar className="h-4 w-4 mr-2 text-slate-400" />
-                                {h.createdAt ? new Date(h.createdAt).toLocaleDateString() : "N/A"}
+                  <div className="space-y-6">
+                    {(Array.isArray(history) ? history : [history]).map((record, idx) => {
+                      const attachments = [
+                        ...(Array.isArray(record.attachments) ? record.attachments : []),
+                        ...(Array.isArray(record.medicalHistoryDocs) ? record.medicalHistoryDocs : [])
+                      ];
+                      if ((!attachments || attachments.length === 0) && record.reportFile) {
+                        attachments.push({ filename: record.reportFile, originalName: 'Medical Report' });
+                      }
+
+                      const renderSection = (title, fields, gridClass = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3') => {
+                        const visibleFields = fields.filter(({ value, duration }) => {
+                          const hasValue = value !== undefined && value !== null && value !== '';
+                          const hasDuration = duration !== undefined && duration !== null && duration !== '';
+                          return hasValue || hasDuration;
+                        });
+
+                        if (visibleFields.length === 0) {
+                          return null;
+                        }
+
+                        return (
+                          <div key={title}>
+                            <h4 className="text-sm font-semibold text-slate-800 mb-3 border-b border-slate-200 pb-1">
+                              {title}
+                            </h4>
+                            <div className={gridClass}>
+                              {visibleFields.map(({ label, value, duration }) =>
+                                renderHistoryField(label, value, duration)
+                              )}
+                            </div>
+                          </div>
+                        );
+                      };
+
+                      const allergicFields = [
+                        { label: 'Hay Fever', value: record.hayFever, duration: formatDuration(record.hayFeverDuration) },
+                        { label: 'Asthma', value: record.asthma, duration: formatDuration(record.asthmaDuration) },
+                        { label: 'Food Allergies', value: record.foodAllergies, duration: formatDuration(record.foodAllergiesDuration) },
+                        { label: 'Drug Allergy', value: record.drugAllergy, duration: formatDuration(record.drugAllergyDuration) },
+                        { label: 'Eczema/Rashes', value: record.eczemaRashes, duration: formatDuration(record.eczemaRashesDuration) }
+                      ];
+
+                      const respiratoryFields = [
+                        { label: 'Breathing Problems', value: record.breathingProblems, duration: formatDuration(record.breathingProblemsDuration) },
+                        { label: 'Sinus Trouble', value: record.sinusTrouble, duration: formatDuration(record.sinusTroubleDuration) },
+                        { label: 'Hives/Swelling', value: record.hivesSwelling, duration: formatDuration(record.hivesSwellingDuration) },
+                        { label: 'Asthma Type', value: record.asthmaType },
+                        { label: 'Exercise Induced', value: record.exerciseInducedSymptoms }
+                      ];
+
+                      const medicalHistoryFields = [
+                        { label: 'Hypertension', value: record.hypertension, duration: formatDuration(record.hypertensionDuration) },
+                        { label: 'Diabetes', value: record.diabetes, duration: formatDuration(record.diabetesDuration) },
+                        { label: 'Hospital Admissions', value: record.hospitalAdmission, duration: formatDuration(record.hospitalAdmissionDuration) },
+                        { label: 'Family Smoking', value: record.familySmoking, duration: formatDuration(record.familySmokingDuration) },
+                        { label: 'Pets at Home', value: record.petsAtHome, duration: formatDuration(record.petsAtHomeDuration) }
+                      ];
+
+                      const clinicalFields = [
+                        { label: 'Family History', value: record.familyHistory },
+                        { label: 'Other Findings', value: record.otherFindings },
+                        { label: 'Clinical Notes', value: record.notes || record.additionalNotes },
+                        { label: 'Treatment Plan', value: record.treatmentPlan },
+                        { label: 'Occupation', value: record.occupation }
+                      ];
+
+                      return (
+                        <div key={record._id || idx} className="border border-slate-200 rounded-xl p-6 shadow-sm">
+                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                            <div>
+                              <h3 className="text-lg font-semibold text-slate-800">
+                                Medical History Record #{idx + 1}
+                              </h3>
+                              <div className="flex items-center gap-2 text-xs text-blue-500 mt-2">
+                                <Calendar className="h-4 w-4" />
+                                {formatRecordDate(record.createdAt)}
                               </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="text-sm text-slate-900">
-                                <div className="flex flex-wrap gap-1">
-                                  {h.hayFever && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">Hay Fever</span>}
-                                  {h.asthma && <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">Asthma</span>}
-                                  {h.breathingProblems && <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">Breathing Problems</span>}
-                                  {h.foodAllergies && <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium">Food Allergies</span>}
-                                  {h.drugAllergy && <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs font-medium">Drug Allergy</span>}
+                            </div>
+                            <div className="flex flex-wrap gap-3">
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/dashboard/receptionist/patient-history/${patient._id}`)}
+                                className="px-4 py-2 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                              >
+                                <Eye className="h-4 w-4" />
+                                View Details
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/dashboard/receptionist/patient-history/${patient._id}`)}
+                                className="px-4 py-2 text-xs border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-6">
+                            {renderSection('Allergic Conditions', allergicFields)}
+                            {renderSection('Respiratory & Triggers', respiratoryFields)}
+                            {renderSection('Medical History', medicalHistoryFields)}
+                            {renderSection('Clinical Notes', clinicalFields, 'grid grid-cols-1 sm:grid-cols-2 gap-3')}
+
+                            <div>
+                              <h4 className="text-sm font-semibold text-slate-800 mb-3 border-b border-slate-200 pb-1">
+                                Supporting Documents
+                              </h4>
+                              {attachments.length > 0 ? (
+                                <div className="space-y-2">
+                                  {attachments.map((doc, attachmentIdx) => {
+                                    const label = doc.originalName || doc.filename || `Document ${attachmentIdx + 1}`;
+                                    return (
+                                      <button
+                                        type="button"
+                                        key={`${doc.documentId || doc.filename || attachmentIdx}`}
+                                        onClick={() => downloadDocument(doc, label)}
+                                        className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-left hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                                      >
+                                        <span className="flex items-center gap-2 text-slate-700">
+                                          <Paperclip className="h-4 w-4 text-blue-500" />
+                                          <span className="font-medium truncate max-w-[200px]" title={label}>{label}</span>
+                                        </span>
+                                        <span className="flex items-center gap-2 text-slate-500">
+                                          {doc.size ? formatFileSize(doc.size) : null}
+                                          <Download className="h-4 w-4 text-blue-500" />
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
                                 </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="text-sm text-slate-900">
-                                <div className="flex flex-wrap gap-1">
-                                  {h.triggersUrtis && <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">URTIs</span>}
-                                  {h.triggersColdWeather && <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">Cold Weather</span>}
-                                  {h.triggersPollen && <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">Pollen</span>}
-                                  {h.triggersSmoke && <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">Smoke</span>}
-                                  {h.triggersExercise && <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">Exercise</span>}
-                                  {h.triggersPets && <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">Pets</span>}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              ) : (
+                                <p className="text-xs text-slate-500">
+                                  No documents attached to this history record.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

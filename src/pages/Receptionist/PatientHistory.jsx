@@ -1,9 +1,30 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { ArrowLeft, Calendar, FileText, User, CheckCircle, AlertCircle } from "lucide-react";
+import { ArrowLeft, Calendar, FileText, User, CheckCircle, AlertCircle, Paperclip, Download } from "lucide-react";
+import { toast } from "react-toastify";
 import { fetchReceptionistPatientHistory } from "../../features/receptionist/receptionistThunks";
 import ReceptionistLayout from './ReceptionistLayout';
+import { openDocumentWithFallback } from "../../utils/documentHelpers";
+
+const displayValue = (value, fallback = "N/A") => {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return value;
+};
+
+const formatDuration = (duration, unit = "months") => {
+  if (duration === undefined || duration === null || duration === "") return null;
+  return `Duration: ${duration} ${unit}`;
+};
+
+const formatFileSize = (bytes) => {
+  if (!bytes || Number.isNaN(bytes)) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, exponent);
+  return `${value.toFixed(exponent === 0 ? 0 : 2)} ${units[exponent]}`;
+};
 
 const ViewHistory = () => {
   const { patientId } = useParams();
@@ -807,24 +828,51 @@ const ViewHistory = () => {
                     </div>
                   )}
 
-                  {/* Report File */}
-                  {historyRecord.reportFile && (
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-800 mb-4 border-b border-slate-200 pb-2">
-                        Attached Report
-                      </h3>
-                      <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
-                        <FileText className="h-5 w-5 text-blue-600" />
-                        <span className="text-xs font-medium text-blue-800">{historyRecord.reportFile}</span>
-                        <button
-                          onClick={() => window.open(`https://api.chanreallergyclinic.com/api/files/${historyRecord.reportFile}`, '_blank')}
-                          className="ml-auto bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
-                        >
-                          View File
-                        </button>
+                  {/* Supporting Documents */}
+                  {(() => {
+                    const attachments = [
+                      ...(Array.isArray(historyRecord.attachments) ? historyRecord.attachments : []),
+                      ...(Array.isArray(historyRecord.medicalHistoryDocs) ? historyRecord.medicalHistoryDocs : []),
+                    ];
+                    if (attachments.length === 0 && historyRecord.reportFile) {
+                      attachments.push({
+                        filename: historyRecord.reportFile,
+                        originalName: historyRecord.reportFile,
+                      });
+                    }
+
+                    if (attachments.length === 0) return null;
+
+                    return (
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-800 mb-4 border-b border-slate-200 pb-2">
+                          Supporting Documents
+                        </h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {attachments.map((doc, idx) => {
+                            const label = doc.originalName || doc.filename || `Document ${idx + 1}`;
+                            return (
+                              <button
+                                key={`${doc.documentId || doc.filename || idx}`}
+                                type="button"
+                                onClick={() => openDocumentWithFallback({ doc, toast })}
+                                className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-left hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                              >
+                                <span className="flex items-center gap-2 text-slate-700 truncate max-w-[180px]" title={label}>
+                                  <Paperclip className="h-4 w-4 text-blue-500" />
+                                  <span className="font-medium truncate max-w-[160px]">{label}</span>
+                                </span>
+                                <span className="flex items-center gap-2 text-slate-500">
+                                  {formatFileSize(doc.size)}
+                                  <Download className="h-4 w-4 text-blue-500" />
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             ))}

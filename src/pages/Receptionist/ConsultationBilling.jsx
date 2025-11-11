@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchReceptionistPatients } from '../../features/receptionist/receptionistThunks';
@@ -36,12 +36,15 @@ import {
   RotateCcw,
   Calculator,
   FileCheck,
-  Receipt as ReceiptIcon
+  Receipt as ReceiptIcon,
+  Paperclip
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import API from '../../services/api';
 import { getPatientAppointment, getPatientPaymentHistory } from '../../services/api';
 import { roundToNearestTen, applyRoundingAdjustment } from '../../utils/rounding';
+import { SERVER_CONFIG } from '../../config/environment';
+import { openDocumentWithFallback } from '../../utils/documentHelpers';
 
 const resolveInvoiceTimestamp = (invoice, fallback) => {
   if (!invoice) return fallback || null;
@@ -134,6 +137,15 @@ export default function ConsultationBilling() {
       if (!slotDateTime) return false;
       return slotDateTime > now;
     });
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes || Number.isNaN(bytes)) return '';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const sized = bytes / Math.pow(k, i);
+    return `${sized.toFixed(i === 0 ? 0 : 2)} ${sizes[i]}`;
   };
 
   // Function to fetch appointment data for a patient
@@ -422,6 +434,8 @@ export default function ConsultationBilling() {
     appointmentTime: '',
     consultationType: 'OP' // OP, IP, or followup
   });
+  const [paymentDocuments, setPaymentDocuments] = useState([]);
+  const paymentDocsInputRef = useRef(null);
   
   // Appointment autocomplete states
   const [patientAppointment, setPatientAppointment] = useState(null);
@@ -527,6 +541,15 @@ export default function ConsultationBilling() {
       setSelectedSlotId(null);
     }
   }, [showPaymentModal, selectedPatient, selectedAppointmentDate]);
+
+  useEffect(() => {
+    if (!showPaymentModal) {
+      setPaymentDocuments([]);
+      if (paymentDocsInputRef.current) {
+        paymentDocsInputRef.current.value = '';
+      }
+    }
+  }, [showPaymentModal]);
 
   // Function to fetch available slots for assigned doctor and date
   const fetchAvailableSlots = async (doctorId, date) => {
@@ -1476,10 +1499,30 @@ export default function ConsultationBilling() {
         slotId: selectedSlotId // Include slot ID in payment payload
       };
 
-      console.log('Processing payment:', paymentPayload);
+      const formData = new FormData();
+      Object.entries(paymentPayload).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return;
+        if (typeof value === 'number') {
+          formData.append(key, value.toString());
+        } else {
+          formData.append(key, value);
+        }
+      });
+
+      if (paymentDocuments.length > 0) {
+        paymentDocuments.forEach((file) => formData.append('medicalHistoryDocs', file));
+      }
+
+      console.log('Processing payment:', paymentPayload, {
+        uploadedDocuments: paymentDocuments.length
+      });
       console.log('Selected patient before payment:', selectedPatient);
 
-      const response = await API.post('/billing/process-payment', paymentPayload);
+      const response = await API.post('/billing/process-payment', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
       
       console.log('Payment response:', response.data);
       
@@ -1499,6 +1542,10 @@ export default function ConsultationBilling() {
         setSelectedAppointmentDate('');
         setSelectedSlotId(null);
         setAvailableSlots([]);
+        setPaymentDocuments([]);
+        if (paymentDocsInputRef.current) {
+          paymentDocsInputRef.current.value = '';
+        }
         
         // Update the specific patient in Redux store with the returned data
         if (response.data.patient) {
@@ -1804,6 +1851,20 @@ export default function ConsultationBilling() {
     }
 
     return { totalOutstanding, breakdown };
+  };
+
+  const handlePaymentDocsChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+    setPaymentDocuments((prev) => [...prev, ...files]);
+    if (event.target) {
+      // Reset to allow uploading the same file again if needed
+      event.target.value = '';
+    }
+  };
+
+  const handleRemovePaymentDoc = (index) => {
+    setPaymentDocuments((prev) => prev.filter((_, i) => i !== index));
   };
 
   // Pagination logic
@@ -2416,6 +2477,21 @@ export default function ConsultationBilling() {
   };
 
   const stats = getStats();
+
+  const appointmentDocuments = useMemo(() => {
+    if (patientAppointment?.medicalHistoryDocs?.length) {
+      return patientAppointment.medicalHistoryDocs;
+    }
+    const appointmentObj = selectedPatient?.appointmentId;
+    if (appointmentObj && typeof appointmentObj === 'object' && Array.isArray(appointmentObj.medicalHistoryDocs)) {
+      return appointmentObj.medicalHistoryDocs;
+    }
+    return [];
+  }, [patientAppointment, selectedPatient]);
+
+  const downloadDocument = async (doc) => {
+    await openDocumentWithFallback({ doc, toast });
+  };
 
   // Helper function to convert numbers to words
   const numberToWords = (num) => {
@@ -3899,6 +3975,34 @@ export default function ConsultationBilling() {
                     </div>
                   </div>
 
+                  {appointmentDocuments.length > 0 && (
+                    <div className="mb-4">
+                      <h3 className="text-sm font-bold text-slate-900 mb-2">Patient Uploaded Documents</h3>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {appointmentDocuments.map((doc, index) => {
+                          const label = doc.originalName || doc.filename || `Document ${index + 1}`;
+                          return (
+                            <button
+                              type="button"
+                              key={`${doc.documentId || doc.path || index}`}
+                              onClick={() => downloadDocument(doc, label)}
+                              className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-left text-slate-700 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                            >
+                              <span className="flex items-center gap-2 truncate">
+                                <Paperclip className="h-4 w-4 text-blue-500" />
+                                <span className="font-medium truncate" title={label}>{label}</span>
+                              </span>
+                              <span className="flex items-center gap-2 text-slate-500">
+                                {formatFileSize(doc.size)}
+                                <Download className="h-4 w-4 text-blue-500" />
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Current Services Billed Table */}
                   <div className="mb-4">
                     <h3 className="text-sm font-bold text-slate-900 mb-3">Current Services Billed</h3>
@@ -4286,6 +4390,7 @@ export default function ConsultationBilling() {
                     };
 
                     const transactions = [];
+                    const invoiceTotalAmount = invoiceData?.totals?.total ?? 0;
 
                     if (totalPaymentAmount > 0) {
                       transactions.push({
@@ -4293,7 +4398,7 @@ export default function ConsultationBilling() {
                         amount: totalPaymentAmount,
                         method: formatMethodLabel(paymentMethods),
                         date: latestPaymentDate,
-                        description: totalPaymentAmount >= finalTotalAmount
+                        description: totalPaymentAmount >= invoiceTotalAmount
                           ? 'Full Bill Payment'
                           : 'Bill Payment'
                       });
@@ -4754,6 +4859,86 @@ export default function ConsultationBilling() {
                     <p className="text-xs text-slate-500 mt-1">
                       Doctor will only see this patient on the scheduled appointment date. Appointments can be scheduled for today or any future date.
                     </p>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                        <Paperclip className="h-4 w-4 text-blue-500" />
+                        Medical Documents
+                      </h4>
+                      {appointmentDocuments.length > 0 && (
+                        <span className="text-xs text-slate-500">
+                          {appointmentDocuments.length} file{appointmentDocuments.length === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {appointmentDocuments.length > 0 ? (
+                        appointmentDocuments.map((doc, index) => {
+                          const label = doc.originalName || doc.filename || `Document ${index + 1}`;
+                          return (
+                            <button
+                              type="button"
+                              key={`${doc.documentId || doc.path || index}`}
+                              onClick={() => downloadDocument(doc, label)}
+                              className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-left text-slate-700 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                            >
+                              <span className="flex items-center gap-2 text-slate-700 truncate max-w-[180px]" title={label}>
+                                <Paperclip className="h-4 w-4 text-blue-500" />
+                                <span className="font-medium truncate max-w-[180px]" title={label}>{label}</span>
+                              </span>
+                              <span className="flex items-center gap-2 text-slate-500">
+                                {formatFileSize(doc.size)}
+                                <Download className="h-4 w-4 text-blue-500" />
+                              </span>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className="text-xs text-slate-500">
+                          No documents were uploaded by the patient during booking. You can attach supporting files below.
+                        </p>
+                      )}
+                    </div>
+                    <div className="mt-4">
+                      <label className="block text-xs font-medium text-slate-700 mb-2">
+                        Add Attachments (optional)
+                      </label>
+                      <input
+                        ref={paymentDocsInputRef}
+                        type="file"
+                        multiple
+                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt"
+                        onChange={handlePaymentDocsChange}
+                        className="block w-full text-xs text-slate-600 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-2 file:text-blue-700 hover:file:bg-blue-200"
+                      />
+                      {paymentDocuments.length > 0 && (
+                        <ul className="mt-3 space-y-2">
+                          {paymentDocuments.map((file, index) => (
+                            <li
+                              key={`${file.name}-${file.lastModified}-${index}`}
+                              className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+                            >
+                              <span className="flex items-center gap-2 text-slate-700 truncate max-w-[200px]" title={file.name}>
+                                <Paperclip className="h-4 w-4 text-blue-500" />
+                                <span className="font-medium truncate">{file.name}</span>
+                              </span>
+                              <span className="flex items-center gap-3 text-slate-500">
+                                {formatFileSize(file.size)}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePaymentDoc(index)}
+                                  className="text-red-500 hover:text-red-600 transition-colors"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   </div>
                   
                   <div>

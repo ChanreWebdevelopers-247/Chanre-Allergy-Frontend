@@ -4,10 +4,11 @@ import { useDispatch, useSelector } from "react-redux";
 import { toast } from "react-toastify";
 import { fetchPatientDetails, fetchPatientMedications, fetchPatientHistory, fetchPatientFollowUps, fetchAllergicRhinitis, fetchAllergicConjunctivitis, fetchAllergicBronchitis, fetchAtopicDermatitis, fetchGPE, fetchPrescriptions, fetchTests, fetchPatientTestRequests, updatePatient } from '../../../../features/doctor/doctorThunks';
 import { canDoctorEditPatient, getEditRestrictionMessage } from '../../../../utils/patientPermissions';
-import { 
+import {
   ArrowLeft, User, Phone, Calendar, MapPin, Activity, Pill, FileText, Eye, Edit, Plus, AlertCircle, Mail, UserCheck, Clock, Download, X
 } from 'lucide-react';
 import API from '../../../../services/api';
+import { openDocumentWithFallback } from '../../../../utils/documentHelpers';
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -25,6 +26,46 @@ const DEFAULT_CENTER_INFO = {
   labWebsite: "www.chanrelabresults.com",
   code: "",
 };
+
+const displayValue = (value, fallback = "N/A") => {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return value;
+};
+
+const formatDuration = (duration, unit = "months") => {
+  if (duration === undefined || duration === null || duration === "") return null;
+  return `Duration: ${duration} ${unit}`;
+};
+
+const formatFileSize = (bytes) => {
+  if (!bytes || Number.isNaN(bytes)) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, exponent);
+  return `${value.toFixed(exponent === 0 ? 0 : 2)} ${units[exponent]}`;
+};
+
+const formatRecordDate = (value) => {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "N/A";
+  return date.toLocaleDateString("en-IN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+};
+
+const renderHistoryField = (label, value, duration) => (
+  <div key={label} className="p-3 bg-slate-50 rounded-lg">
+    <div className="flex justify-between items-center mb-1">
+      <span className="text-sm font-medium text-slate-600">{label}:</span>
+      <span className="text-sm text-slate-800 font-medium">{displayValue(value)}</span>
+    </div>
+    {duration ? <div className="text-xs text-slate-500">{duration}</div> : null}
+  </div>
+);
 
 const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => {
   const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
@@ -277,6 +318,13 @@ const ViewProfile = () => {
   const [centerLoading, setCenterLoading] = useState(false);
   const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
   const [selectedPrescription, setSelectedPrescription] = useState(null);
+
+  const downloadDocument = useCallback(
+    async (doc) => {
+      await openDocumentWithFallback({ doc, toast });
+    },
+    []
+  );
 
 
 
@@ -1489,76 +1537,173 @@ const ViewProfile = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {(history || []).map((historyItem, idx) => (
-                      <div key={idx} className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
-                          <h3 className="text-sm font-medium text-slate-800">
-                            Medical History Record #{idx + 1}
-                          </h3>
-                          <div className="flex gap-2">
-                            <span className="text-xs text-slate-500">
-                              {historyItem.createdAt ? new Date(historyItem.createdAt).toLocaleDateString() : 
-                               historyItem.date ? new Date(historyItem.date).toLocaleDateString() : 'N/A'}
-                            </span>
-                            <button
-                              onClick={() => navigate(`/dashboard/Doctor/patients/AddHistory/ViewHistory/${patient._id}`)}
-                              className="text-blue-600 hover:text-blue-900 text-xs font-medium"
-                            >
-                              View Details
-                            </button>
-                            <button
-                              onClick={() => navigate(`/dashboard/Doctor/patients/AddHistory/EditHistory/${patient._id}/${historyItem._id}`)}
-                              className="text-green-600 hover:text-green-900 text-xs font-medium"
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-                          <div>
-                            <h4 className="font-medium text-slate-700 mb-2">Allergic Conditions</h4>
-                            <p className="text-slate-600"><span className="font-medium">Hay Fever:</span> {historyItem.hayFever || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Asthma:</span> {historyItem.asthma || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Food Allergies:</span> {historyItem.foodAllergies || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Drug Allergy:</span> {historyItem.drugAllergy || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Eczema/Rashes:</span> {historyItem.eczemaRashes || 'N/A'}</p>
-                          </div>
-                          <div>
-                            <h4 className="font-medium text-slate-700 mb-2">Respiratory</h4>
-                            <p className="text-slate-600"><span className="font-medium">Breathing Problems:</span> {historyItem.breathingProblems || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Sinus Trouble:</span> {historyItem.sinusTrouble || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Hives/Swelling:</span> {historyItem.hivesSwelling || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Asthma Type:</span> {historyItem.asthmaType || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Exercise Induced:</span> {historyItem.exerciseInducedSymptoms || 'N/A'}</p>
-                          </div>
-                          <div>
-                            <h4 className="font-medium text-slate-700 mb-2">Medical History</h4>
-                            <p className="text-slate-600"><span className="font-medium">Hypertension:</span> {historyItem.hypertension || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Diabetes:</span> {historyItem.diabetes || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Hospital Admissions:</span> {historyItem.hospitalAdmission || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Family Smoking:</span> {historyItem.familySmoking || 'N/A'}</p>
-                            <p className="text-slate-600"><span className="font-medium">Pets at Home:</span> {historyItem.petsAtHome || 'N/A'}</p>
-                          </div>
-                        </div>
-                        {/* Show triggers if available */}
-                        {(historyItem.triggersUrtis || historyItem.triggersColdWeather || historyItem.triggersPollen || 
-                          historyItem.triggersSmoke || historyItem.triggersExercise || historyItem.triggersPets || 
-                          historyItem.triggersOthers) && (
-                          <div className="mt-4 pt-3 border-t border-slate-200">
-                            <h4 className="font-medium text-slate-700 mb-2">Triggers</h4>
-                            <div className="flex flex-wrap gap-2">
-                              {historyItem.triggersUrtis && <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs">URTI</span>}
-                              {historyItem.triggersColdWeather && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">Cold Weather</span>}
-                              {historyItem.triggersPollen && <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs">Pollen</span>}
-                              {historyItem.triggersSmoke && <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-xs">Smoke</span>}
-                              {historyItem.triggersExercise && <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs">Exercise</span>}
-                              {historyItem.triggersPets && <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs">Pets</span>}
-                              {historyItem.triggersOthers && <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-xs">{historyItem.triggersOthers}</span>}
+                    {(history || []).map((historyItem, idx) => {
+                      const attachments = [
+                        ...(Array.isArray(historyItem.attachments) ? historyItem.attachments : []),
+                        ...(Array.isArray(historyItem.medicalHistoryDocs) ? historyItem.medicalHistoryDocs : []),
+                      ];
+                      if (attachments.length === 0 && historyItem.reportFile) {
+                        attachments.push({
+                          filename: historyItem.reportFile,
+                          originalName: historyItem.originalName || "Medical Report",
+                        });
+                      }
+
+                      const allergicFields = [
+                        { label: "Hay Fever", value: historyItem.hayFever, duration: formatDuration(historyItem.hayFeverDuration) },
+                        { label: "Asthma", value: historyItem.asthma, duration: formatDuration(historyItem.asthmaDuration) },
+                        { label: "Food Allergies", value: historyItem.foodAllergies, duration: formatDuration(historyItem.foodAllergiesDuration) },
+                        { label: "Drug Allergy", value: historyItem.drugAllergy, duration: formatDuration(historyItem.drugAllergyDuration) },
+                        { label: "Eczema/Rashes", value: historyItem.eczemaRashes, duration: formatDuration(historyItem.eczemaRashesDuration) },
+                      ];
+
+                        const respiratoryFields = [
+                        { label: "Breathing Problems", value: historyItem.breathingProblems, duration: formatDuration(historyItem.breathingProblemsDuration) },
+                        { label: "Sinus Trouble", value: historyItem.sinusTrouble, duration: formatDuration(historyItem.sinusTroubleDuration) },
+                        { label: "Hives/Swelling", value: historyItem.hivesSwelling, duration: formatDuration(historyItem.hivesSwellingDuration) },
+                        { label: "Asthma Type", value: historyItem.asthmaType },
+                        { label: "Exercise Induced", value: historyItem.exerciseInducedSymptoms },
+                      ];
+
+                      const medicalHistoryFields = [
+                        { label: "Hypertension", value: historyItem.hypertension, duration: formatDuration(historyItem.hypertensionDuration) },
+                        { label: "Diabetes", value: historyItem.diabetes, duration: formatDuration(historyItem.diabetesDuration) },
+                        { label: "Hospital Admissions", value: historyItem.hospitalAdmission, duration: formatDuration(historyItem.hospitalAdmissionDuration) },
+                        { label: "Family Smoking", value: historyItem.familySmoking, duration: formatDuration(historyItem.familySmokingDuration) },
+                        { label: "Pets at Home", value: historyItem.petsAtHome, duration: formatDuration(historyItem.petsAtHomeDuration) },
+                      ];
+
+                      const clinicalFields = [
+                        { label: "Family History", value: historyItem.familyHistory },
+                        { label: "Other Findings", value: historyItem.otherFindings },
+                        { label: "Clinical Notes", value: historyItem.notes || historyItem.additionalNotes },
+                        { label: "Treatment Plan", value: historyItem.treatmentPlan },
+                        { label: "Occupation", value: historyItem.occupation },
+                      ];
+
+                      const renderSection = (title, fields, gridClass = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3") => {
+                        const visibleFields = fields.filter(({ value, duration }) => {
+                          const hasValue = value !== undefined && value !== null && value !== "" && value !== "N/A";
+                          const hasDuration = duration !== undefined && duration !== null && duration !== "";
+                          return hasValue || hasDuration;
+                        });
+
+                        if (visibleFields.length === 0) return null;
+
+                        return (
+                          <div key={title}>
+                            <h4 className="font-medium text-slate-700 mb-2">{title}</h4>
+                            <div className={gridClass}>
+                              {visibleFields.map(({ label, value, duration }) => renderHistoryField(label, value, duration))}
                             </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                        );
+                      };
+
+                      const sections = [
+                        renderSection("Allergic Conditions", allergicFields),
+                        renderSection("Respiratory & Triggers", respiratoryFields),
+                        renderSection("Medical History", medicalHistoryFields),
+                        renderSection("Clinical Notes", clinicalFields, "grid grid-cols-1 sm:grid-cols-2 gap-3"),
+                      ].filter(Boolean);
+
+                      const triggerBadges = [
+                        historyItem.triggersUrtis && { label: "URTI", className: "bg-red-100 text-red-800" },
+                        historyItem.triggersColdWeather && { label: "Cold Weather", className: "bg-blue-100 text-blue-800" },
+                        historyItem.triggersPollen && { label: "Pollen", className: "bg-yellow-100 text-yellow-800" },
+                        historyItem.triggersSmoke && { label: "Smoke", className: "bg-gray-100 text-gray-800" },
+                        historyItem.triggersExercise && { label: "Exercise", className: "bg-green-100 text-green-800" },
+                        historyItem.triggersPets && { label: "Pets", className: "bg-purple-100 text-purple-800" },
+                        historyItem.triggersOthers && { label: historyItem.triggersOthers, className: "bg-orange-100 text-orange-800" },
+                      ].filter(Boolean);
+
+                      const hasStructuredData = sections.length > 0 || triggerBadges.length > 0;
+                      const hasAttachments = attachments.length > 0;
+
+                      return (
+                        <div key={historyItem._id || idx} className="bg-slate-50 rounded-lg p-4 border border-slate-200 space-y-4">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                            <div>
+                              <h3 className="text-sm font-medium text-slate-800">
+                                Medical History Record #{idx + 1}
+                              </h3>
+                              <span className="text-xs text-slate-500">
+                                {formatRecordDate(historyItem.createdAt || historyItem.date)}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {hasStructuredData && (
+                                <button
+                                  onClick={() => navigate(`/dashboard/Doctor/patients/AddHistory/ViewHistory/${patient._id}`)}
+                                  className="text-blue-600 hover:text-blue-900 text-xs font-medium"
+                                >
+                                  View Full History
+                                </button>
+                              )}
+                              {hasStructuredData && historyItem._id && (
+                                <button
+                                  onClick={() => navigate(`/dashboard/Doctor/patients/AddHistory/EditHistory/${patient._id}/${historyItem._id}`)}
+                                  className="text-green-600 hover:text-green-900 text-xs font-medium"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {hasStructuredData ? (
+                            <>
+                              {sections}
+                              {triggerBadges.length > 0 && (
+                                <div className="pt-3 border-t border-slate-200">
+                                  <h4 className="font-medium text-slate-700 mb-2">Triggers</h4>
+                                  <div className="flex flex-wrap gap-2">
+                                    {triggerBadges.map((badge, badgeIdx) => (
+                                      <span key={badgeIdx} className={`${badge.className} px-2 py-1 rounded-full text-xs`}>
+                                        {badge.label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-xs text-slate-500">
+                              No structured history data recorded. Use the supporting documents below to review the details.
+                            </p>
+                          )}
+
+                          {hasAttachments && (
+                            <div className="pt-3 border-t border-slate-200">
+                              <h4 className="font-medium text-slate-700 mb-2">Supporting Documents</h4>
+                              <div className="space-y-2">
+                                {attachments.map((doc, attachmentIdx) => {
+                                  const label = doc.originalName || doc.filename || `Document ${attachmentIdx + 1}`;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={`${doc.documentId || doc.filename || attachmentIdx}`}
+                                      onClick={() => downloadDocument(doc, label)}
+                                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-left text-slate-700 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                                    >
+                                      <span className="flex items-center gap-2 truncate">
+                                        <Download className="h-4 w-4 text-blue-500" />
+                                        <span className="font-medium truncate max-w-[200px]" title={label}>
+                                          {label}
+                                        </span>
+                                      </span>
+                                      <span className="text-slate-500">
+                                        {doc.size ? formatFileSize(doc.size) : ""}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -1,10 +1,18 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { toast } from "react-toastify";
 import { fetchPatientHistory } from '../../features/doctor/doctorThunks';
-import { ArrowLeft, FileText, Calendar, User, Activity, Download, Edit } from 'lucide-react';
-import API from "../../services/api";
+import { ArrowLeft, FileText, Calendar, User, Activity, Download, Edit, Paperclip } from 'lucide-react';
+import { openDocumentWithFallback } from "../../utils/documentHelpers";
+
+const formatFileSize = (bytes) => {
+  if (!bytes || Number.isNaN(bytes)) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, exponent);
+  return `${value.toFixed(exponent === 0 ? 0 : 2)} ${units[exponent]}`;
+};
 
 const ViewHistory = () => {
   const { patientId } = useParams();
@@ -12,6 +20,27 @@ const ViewHistory = () => {
   const [history, setHistory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const openDocument = useCallback(
+    async (doc) => {
+      await openDocumentWithFallback({ doc, toast });
+    },
+    [toast]
+  );
+
+  const attachments = useMemo(() => {
+    if (!history) return [];
+    const docs = [];
+    if (Array.isArray(history.attachments)) docs.push(...history.attachments);
+    if (Array.isArray(history.medicalHistoryDocs)) docs.push(...history.medicalHistoryDocs);
+    if (docs.length === 0 && history.reportFile) {
+      docs.push({
+        filename: history.reportFile,
+        originalName: history.originalName || history.reportFile,
+      });
+    }
+    return docs;
+  }, [history]);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -77,7 +106,7 @@ const ViewHistory = () => {
         {/* Header */}
         <div className="mb-8">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => navigate(`/dashboard/doctor/patients/${patientId}`)}
             className="flex items-center text-slate-600 hover:text-slate-800 mb-4 transition-colors"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -804,34 +833,35 @@ const ViewHistory = () => {
               </div>
             )}
 
-            {/* Report File */}
-            {history.reportFile && (
+            {/* Supporting Documents */}
+            {attachments.length > 0 && (
               <div>
                 <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b border-slate-200 pb-2">
-                  Report File
+                  Supporting Documents
                 </h3>
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6 shadow-sm">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-blue-100 rounded-lg">
-                        <FileText className="h-5 w-5 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-slate-700">Report File</p>
-                        <p className="text-xs text-slate-500">{history.reportFile}</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const fileUrl = `${API.defaults.baseURL}/uploads/${history.reportFile}`;  
-                        window.open(fileUrl, '_blank');
-                      }}
-                      className="group flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all duration-200 text-sm font-semibold shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                    >
-                      <Download className="h-4 w-4 group-hover:animate-bounce" />
-                      View File
-                    </button>
-                  </div>
+                <div className="space-y-2">
+                  {attachments.map((doc, index) => {
+                    const label = doc.originalName || doc.filename || `Document ${index + 1}`;
+                    return (
+                      <button
+                        key={`${doc.documentId || doc.filename || index}`}
+                        type="button"
+                        onClick={() => openDocument(doc)}
+                        className="flex items-center justify-between gap-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <Paperclip className="h-4 w-4 text-blue-500" />
+                          <span className="font-medium truncate max-w-[220px]" title={label}>
+                            {label}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2 text-slate-500">
+                          {formatFileSize(doc.size)}
+                          <Download className="h-4 w-4 text-blue-500" />
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

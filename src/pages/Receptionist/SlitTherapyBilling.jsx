@@ -341,11 +341,11 @@ export default function SlitTherapyBilling() {
         payload: { remarks: closeRemarks }
       })).unwrap();
 
-      toast.success('SLIT therapy request closed');
+      toast.success('SLIT therapy request received');
       setSelectedForClose(null);
       setCloseRemarks('');
     } catch (error) {
-      toast.error(error || 'Failed to close SLIT therapy request');
+      toast.error(error || 'Failed to receive SLIT therapy request');
     }
   };
 
@@ -560,7 +560,7 @@ export default function SlitTherapyBilling() {
       Lab_Received: 'bg-purple-100 text-purple-800',
       Ready: 'bg-green-100 text-green-800',
       Delivered: 'bg-teal-100 text-teal-800',
-      Closed: 'bg-gray-100 text-gray-800',
+      Received: 'bg-gray-100 text-gray-800',
       Cancelled: 'bg-red-100 text-red-800'
     };
 
@@ -607,7 +607,7 @@ export default function SlitTherapyBilling() {
               <option value="Lab_Received">Lab Received</option>
               <option value="Ready">Ready</option>
               <option value="Delivered">Delivered</option>
-              <option value="Closed">Closed</option>
+              <option value="Received">Received</option>
               <option value="Cancelled">Cancelled</option>
             </select>
           </div>
@@ -761,7 +761,7 @@ export default function SlitTherapyBilling() {
                                     Refund
                                   </button>
                                 )}
-                                {request.status !== 'Closed' && request.status !== 'Cancelled' && (
+                                {request.status !== 'Received' && request.status !== 'Cancelled' && (
                                   <button
                                     onClick={() => openCancelModal(request)}
                                     className="px-3 py-1.5 text-xs font-semibold text-white bg-rose-500 rounded-md hover:bg-rose-600"
@@ -1376,7 +1376,7 @@ export default function SlitTherapyBilling() {
                 />
               </div>
               <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-600">
-                Confirm that the patient has collected the SLIT therapy package. This will mark the bill as closed in receptionist records.
+                Confirm that the patient has collected the SLIT therapy package. This will mark the bill as Received in receptionist records.
               </div>
               <div className="flex justify-end gap-2">
                 <button

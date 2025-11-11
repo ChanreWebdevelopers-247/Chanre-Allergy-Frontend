@@ -14,7 +14,7 @@ const STATUS_LABELS = {
   Lab_Received: 'In Lab Queue',
   Ready: 'Ready for Patient',
   Delivered: 'Out for Delivery / Pickup',
-  Closed: 'Completed & Archived',
+  Received: 'Completed & Archived',
   Cancelled: 'Request Cancelled'
 };
 
@@ -24,10 +24,10 @@ const STATUS_COLORS = {
   Lab_Received: 'bg-purple-100 text-purple-700',
   Ready: 'bg-green-100 text-green-700',
   Delivered: 'bg-teal-100 text-teal-700',
-  Closed: 'bg-slate-100 text-slate-700',
+  Received: 'bg-slate-100 text-slate-700',
   Cancelled: 'bg-rose-100 text-rose-700'
 };
-const AVAILABLE_FILTERS = ['All', 'Billing_Generated', 'Billing_Paid', 'Lab_Received', 'Ready', 'Delivered', 'Closed', 'Cancelled'];
+const AVAILABLE_FILTERS = ['All', 'Billing_Generated', 'Billing_Paid', 'Lab_Received', 'Ready', 'Delivered', 'Received', 'Cancelled'];
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50];
 const PROFILE_TABS = [
   { key: 'overview', label: 'Overview' },
@@ -75,8 +75,8 @@ const getStatusDescription = (request) => {
       return request.deliveryMethod === 'courier'
         ? 'Courier out for delivery / delivered to patient.'
         : 'Patient collected the package; receptionist to close once confirmed.';
-    case 'Closed':
-      return 'Reception confirmed delivery and closed the lifecycle.';
+    case 'Received':
+      return 'Reception confirmed delivery and received the package.';
     case 'Cancelled':
       return request.billing?.cancellationReason || 'Request was cancelled by reception.';
     default:
@@ -386,7 +386,7 @@ export default function SlitTherapyRequests() {
             <CheckCircle2 className="w-4 h-4" /> Awaiting Reception Closure
           </span>
         );
-      case 'Closed':
+      case 'Received':
         return (
           <span className="inline-flex items-center gap-2 px-3 py-1 text-sm text-slate-600 bg-slate-100 rounded-full border border-slate-200">
             <CheckCircle2 className="w-4 h-4" /> Completed
@@ -576,7 +576,7 @@ export default function SlitTherapyRequests() {
                                 Delivery confirmed by lab
                               </div>
                             )}
-                            {request.status === 'Closed' && (
+                            {request.status === 'Received' && (
                               <div className="text-xs text-slate-600 flex items-center gap-1">
                                 <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
                                 Workflow completed by reception
