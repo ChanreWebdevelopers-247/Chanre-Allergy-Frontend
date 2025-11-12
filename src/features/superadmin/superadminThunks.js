@@ -502,6 +502,10 @@ export const fetchSlitLabStaff = createAsyncThunk(
       const res = await API.get('/slit-lab-staff');
       return res.data;
     } catch (error) {
+      if (error?.response?.status === 404) {
+        console.warn('SLIT lab staff endpoint returned 404. Falling back to empty list.');
+        return [];
+      }
       console.error('Fetch SLIT lab staff error:', error.response?.data || error.message);
       return rejectWithValue(error.response?.data?.message || 'Failed to fetch SLIT lab staff');
     }

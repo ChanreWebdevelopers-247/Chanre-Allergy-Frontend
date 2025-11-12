@@ -504,6 +504,10 @@ export const getSlitLabStaff = async () => {
     const response = await API.get('/slit-lab-staff');
     return response.data;
   } catch (error) {
+    if (error?.response?.status === 404) {
+      console.warn('SLIT lab staff endpoint not available (404). Returning empty list.');
+      return [];
+    }
     console.error('Error fetching SLIT lab staff:', error);
     throw error;
   }
