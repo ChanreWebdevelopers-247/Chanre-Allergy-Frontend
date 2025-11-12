@@ -4,7 +4,7 @@ import {
   getCenterAppointments, 
   updateAppointmentStatus 
 } from '../../services/api';
-import { SERVER_CONFIG } from '../../config/environment';
+import { openDocumentWithFallback } from '../../utils/documentHelpers';
 
 const AppointmentManagement = () => {
   const [appointments, setAppointments] = useState([]);
@@ -367,14 +367,13 @@ const AppointmentManagement = () => {
                             <span className="text-xs text-gray-700 truncate">{doc.originalName}</span>
                             <span className="text-xs text-gray-500">({(doc.size / 1024).toFixed(2)} KB)</span>
                           </div>
-                          <a
-                            href={`${SERVER_CONFIG.BACKEND_URL}/${doc.path}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => openDocumentWithFallback({ doc, toast })}
                             className="ml-2 text-blue-600 hover:text-blue-800 text-xs font-semibold whitespace-nowrap"
                           >
                             View
-                          </a>
+                          </button>
                         </div>
                       ))}
                     </div>

@@ -15,11 +15,7 @@ import {
   fetchPatient,
   fetchReceptionistBillingRequests,
   generateReceptionistBill,
-  markReceptionistBillPaid,
-  fetchReceptionistSlitTherapyRequests,
-  createReceptionistSlitTherapyRequest,
-  markReceptionistSlitTherapyPaid,
-  closeReceptionistSlitTherapyRequest
+  markReceptionistBillPaid
 } from './receptionistThunks';
 
 const initialState = {
@@ -40,7 +36,6 @@ const initialState = {
   tests: [],
   testRequests: [],
   billingRequests: [],
-  slitTherapyRequests: [],
   allergicRhinitis: null,
   atopicDermatitis: null,
   allergicConjunctivitis: null,
@@ -255,67 +250,6 @@ const receptionistSlice = createSlice({
         }
       })
       .addCase(markReceptionistBillPaid.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload;
-      })
-      // SLIT therapy billing
-      .addCase(fetchReceptionistSlitTherapyRequests.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(fetchReceptionistSlitTherapyRequests.fulfilled, (state, action) => {
-        state.loading = false;
-        state.slitTherapyRequests = action.payload || [];
-      })
-      .addCase(fetchReceptionistSlitTherapyRequests.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload;
-      })
-      .addCase(createReceptionistSlitTherapyRequest.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(createReceptionistSlitTherapyRequest.fulfilled, (state, action) => {
-        state.loading = false;
-        if (action.payload) {
-          state.slitTherapyRequests = [action.payload, ...(state.slitTherapyRequests || [])];
-        }
-      })
-      .addCase(createReceptionistSlitTherapyRequest.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload;
-      })
-      .addCase(markReceptionistSlitTherapyPaid.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(markReceptionistSlitTherapyPaid.fulfilled, (state, action) => {
-        state.loading = false;
-        if (action.payload) {
-          const idx = state.slitTherapyRequests.findIndex(r => r._id === action.payload._id);
-          if (idx !== -1) {
-            state.slitTherapyRequests[idx] = action.payload;
-          }
-        }
-      })
-      .addCase(markReceptionistSlitTherapyPaid.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload;
-      })
-      .addCase(closeReceptionistSlitTherapyRequest.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(closeReceptionistSlitTherapyRequest.fulfilled, (state, action) => {
-        state.loading = false;
-        if (action.payload) {
-          const idx = state.slitTherapyRequests.findIndex(r => r._id === action.payload._id);
-          if (idx !== -1) {
-            state.slitTherapyRequests[idx] = action.payload;
-          }
-        }
-      })
-      .addCase(closeReceptionistSlitTherapyRequest.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })

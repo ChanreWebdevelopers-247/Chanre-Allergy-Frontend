@@ -15,6 +15,7 @@ import centerAdminBillingReducer from '../features/centerAdmin/centerAdminBillin
 import centerAdminDoctorReducer from '../features/centerAdmin/centerAdminDoctorSlice';
 import centerAdminReceptionistReducer from '../features/centerAdmin/centerAdminReceptionistSlice';
 import sessionReducer from '../features/session/sessionSlice';
+import slitTherapyReducer from '../features/slitTherapy/slitTherapySlice';
 
 export const store = configureStore({
   reducer: {
@@ -34,6 +35,7 @@ export const store = configureStore({
     centerAdminDoctors: centerAdminDoctorReducer,
     centerAdminReceptionists: centerAdminReceptionistReducer,
     session: sessionReducer,
+    slitTherapy: slitTherapyReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

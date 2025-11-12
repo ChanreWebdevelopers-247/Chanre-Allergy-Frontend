@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import { RefreshCw, PackageCheck, CheckCircle2, Timer, Truck, Eye, FileDown } from 'lucide-react';
 import { toast } from 'react-toastify';
-import API, {
-  getLabSlitTherapyRequests,
-  updateSlitTherapyRequestStatus
-} from '../../services/api';
+import API from '../../services/api';
+import {
+  fetchLabSlitTherapyRequests,
+  updateLabSlitTherapyStatus,
+} from '../../features/slitTherapy/slitTherapyThunks';
 import { viewPDFReport } from '../../utils/pdfHandler';
 
 const STATUS_LABELS = {
@@ -85,8 +87,12 @@ const getStatusDescription = (request) => {
 };
 
 export default function SlitTherapyRequests() {
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const dispatch = useDispatch();
+  const {
+    lab: { requests: labRequests = [], loading: labLoading, error: labError },
+    mutation: { loading: mutationLoading, error: mutationError },
+  } = useSelector((state) => state.slitTherapy);
+  const loading = labLoading || mutationLoading;
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -119,24 +125,24 @@ export default function SlitTherapyRequests() {
     prescriptions: []
   });
 
-  const fetchRequests = async () => {
-    try {
-      setLoading(true);
-      const response = await getLabSlitTherapyRequests();
-      setRequests(response?.requests || []);
-    } catch (error) {
-      toast.error(error?.response?.data?.message || 'Failed to load SLIT therapy requests');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    dispatch(fetchLabSlitTherapyRequests());
+  }, [dispatch]);
 
   useEffect(() => {
-    fetchRequests();
-  }, []);
+    if (labError) {
+      toast.error(labError);
+    }
+  }, [labError]);
+
+  useEffect(() => {
+    if (mutationError) {
+      toast.error(mutationError);
+    }
+  }, [mutationError]);
 
   const filteredRequests = useMemo(() => {
-    return (requests || []).filter((req) => {
+    return (labRequests || []).filter((req) => {
       const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
       const matchesSearch = !searchTerm
         || req.patientName?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -144,7 +150,7 @@ export default function SlitTherapyRequests() {
         || req.billing?.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase());
       return matchesStatus && matchesSearch;
     });
-  }, [requests, statusFilter, searchTerm]);
+  }, [labRequests, statusFilter, searchTerm]);
 
   const totalPages = useMemo(() => {
     const pages = Math.ceil((filteredRequests.length || 0) / pageSize);
@@ -177,15 +183,20 @@ export default function SlitTherapyRequests() {
     }
 
     try {
-      await updateSlitTherapyRequestStatus(request._id, {
-        status: nextStatus,
-        labNotes: notes,
-        courierTrackingNumber
-      });
+      await dispatch(
+        updateLabSlitTherapyStatus({
+          id: request._id,
+          payload: {
+            status: nextStatus,
+            labNotes: notes,
+            courierTrackingNumber,
+          },
+        })
+      ).unwrap();
       toast.success(`Status updated to ${nextStatus.replace(/_/g, ' ')}`);
-      fetchRequests();
     } catch (error) {
-      toast.error(error?.response?.data?.message || 'Failed to update status');
+      const message = error?.message || error || 'Failed to update status';
+      toast.error(message);
     }
   };
 
@@ -411,7 +422,7 @@ export default function SlitTherapyRequests() {
           <p className="text-slate-500">Manage SLIT therapy preparation and delivery statuses.</p>
         </div>
         <button
-          onClick={fetchRequests}
+          onClick={() => dispatch(fetchLabSlitTherapyRequests())}
           className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
         >
           <RefreshCw className="w-4 h-4" /> Refresh

@@ -47,58 +47,6 @@ export const fetchReceptionistBillingRequests = createAsyncThunk(
   }
 );
 
-// SLIT Therapy: fetch requests for receptionist
-export const fetchReceptionistSlitTherapyRequests = createAsyncThunk(
-  'receptionist/fetchSlitTherapyRequests',
-  async (params = {}, { rejectWithValue }) => {
-    try {
-      const res = await API.get('/slit-therapy/receptionist', { params });
-      return res.data?.requests || [];
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'Failed to fetch SLIT therapy requests');
-    }
-  }
-);
-
-// SLIT Therapy: create new request
-export const createReceptionistSlitTherapyRequest = createAsyncThunk(
-  'receptionist/createSlitTherapyRequest',
-  async (payload, { rejectWithValue }) => {
-    try {
-      const res = await API.post('/slit-therapy', payload);
-      return res.data?.request;
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'Failed to create SLIT therapy request');
-    }
-  }
-);
-
-// SLIT Therapy: mark as paid
-export const markReceptionistSlitTherapyPaid = createAsyncThunk(
-  'receptionist/markSlitTherapyPaid',
-  async ({ id, payload }, { rejectWithValue }) => {
-    try {
-      const res = await API.put(`/slit-therapy/${id}/mark-paid`, payload);
-      return res.data?.request;
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'Failed to record payment');
-    }
-  }
-);
-
-// SLIT Therapy: close request after delivery
-export const closeReceptionistSlitTherapyRequest = createAsyncThunk(
-  'receptionist/closeSlitTherapyRequest',
-  async ({ id, payload }, { rejectWithValue }) => {
-    try {
-      const res = await API.put(`/slit-therapy/${id}/close`, payload);
-      return res.data?.request;
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'Failed to close SLIT therapy request');
-    }
-  }
-);
-
 // Billing: generate bill
 export const generateReceptionistBill = createAsyncThunk(
   'receptionist/generateBill',

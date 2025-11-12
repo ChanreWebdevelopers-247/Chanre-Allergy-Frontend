@@ -246,7 +246,7 @@ const BookAppointment = () => {
           state: address.state || prev.patientLocation.state,
           pincode: address.postcode || prev.patientLocation.pincode
         },
-        patientAddress: prev.patientAddress || formattedAddress || prev.patientAddress
+      
       }));
     } catch (error) {
       console.error('Error resolving user address:', error);

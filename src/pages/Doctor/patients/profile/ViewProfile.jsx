@@ -5,12 +5,11 @@ import { toast } from "react-toastify";
 import { fetchPatientDetails, fetchPatientMedications, fetchPatientHistory, fetchPatientFollowUps, fetchAllergicRhinitis, fetchAllergicConjunctivitis, fetchAllergicBronchitis, fetchAtopicDermatitis, fetchGPE, fetchPrescriptions, fetchTests, fetchPatientTestRequests, updatePatient } from '../../../../features/doctor/doctorThunks';
 import { canDoctorEditPatient, getEditRestrictionMessage } from '../../../../utils/patientPermissions';
 import {
-  ArrowLeft, User, Phone, Calendar, MapPin, Activity, Pill, FileText, Eye, Edit, Plus, AlertCircle, Mail, UserCheck, Clock, Download, X
+  ArrowLeft, User, Phone, Calendar, MapPin, Activity, Pill, FileText, Eye, Edit, Plus, AlertCircle, Mail, UserCheck, Clock, Download, Printer, X
 } from 'lucide-react';
 import API from '../../../../services/api';
 import { openDocumentWithFallback } from '../../../../utils/documentHelpers';
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import { buildPrescriptionPrintHTML, openPrintPreview } from "../../../../utils/prescriptionPrint";
 
 const DEFAULT_CENTER_INFO = {
   name: "CHANRE RHEUMATOLOGY & IMMUNOLOGY CENTER & RESEARCH",
@@ -26,6 +25,8 @@ const DEFAULT_CENTER_INFO = {
   labWebsite: "www.chanrelabresults.com",
   code: "",
 };
+
+const DEFAULT_REMARKS = "Keep patient hydrated. Advise rest if fatigue worsens.";
 
 const displayValue = (value, fallback = "N/A") => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -67,6 +68,111 @@ const renderHistoryField = (label, value, duration) => (
   </div>
 );
 
+const resolvePrescriptionDate = (prescription) =>
+  prescription?.prescribedDate ||
+  prescription?.date ||
+  prescription?.createdAt ||
+  null;
+
+const resolveReportGenerated = (prescription) =>
+  prescription?.reportGeneratedAt || prescription?.updatedAt || null;
+
+const resolvePrescribedBy = (prescription) =>
+  prescription?.prescribedBy ||
+  prescription?.doctorName ||
+  prescription?.doctor ||
+  prescription?.doctorId?.name ||
+  prescription?.updatedBy?.name ||
+  "";
+
+const resolvePreparedBy = (prescription) =>
+  prescription?.preparedBy ||
+  prescription?.prepared_by ||
+  resolvePrescribedBy(prescription) ||
+  "";
+
+const resolvePrintedBy = (prescription) =>
+  prescription?.printedBy ||
+  prescription?.printed_by ||
+  prescription?.preparedBy ||
+  prescription?.updatedBy?.name ||
+  prescription?.doctorId?.name ||
+  "";
+
+const resolveFollowUpInstruction = (prescription) =>
+  prescription?.followUpInstruction ||
+  prescription?.testFollowupInstruction ||
+  prescription?.followUp ||
+  prescription?.instructions ||
+  "";
+
+const resolveRemarks = (prescription) =>
+  prescription?.remarks ||
+  prescription?.notes ||
+  prescription?.instructions ||
+  DEFAULT_REMARKS;
+
+const normalizePrescriptionMedications = (prescription) =>
+  Array.isArray(prescription?.medications)
+    ? prescription.medications.map((item) => ({
+        name:
+          item.drugName ||
+          item.medicine ||
+          item.name ||
+          item.medicationName ||
+          "—",
+        dosage: [
+          item.dose ||
+            item.dosage ||
+            item.dosageDetails ||
+            item.medicineDose ||
+            "",
+          item.frequency || item.freq || item.medicineFrequency || "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim(),
+        duration:
+          item.duration ||
+          item.period ||
+          item.medicineDuration ||
+          item.course ||
+          "—",
+        instruction: item.instructions || item.instruction || "—",
+      }))
+    : [];
+
+const normalizePrescriptionTests = (prescription) =>
+  Array.isArray(prescription?.tests)
+    ? prescription.tests.map((item) => ({
+        name: item.name || item.testName || "—",
+        instruction: item.instruction || item.instructions || "—",
+      }))
+    : [];
+
+const summarizeMedications = (medications) => {
+  if (!Array.isArray(medications) || medications.length === 0) {
+    return {
+      firstName: "—",
+      count: 0,
+      instructionsPreview: "—",
+    };
+  }
+
+  const first = medications[0];
+  const name = first.name;
+  const instructionPreview = medications
+    .map((med) => med.instruction)
+    .filter(Boolean)
+    .join("; ");
+
+  return {
+    firstName: name || "—",
+    count: medications.length,
+    instructionsPreview: instructionPreview || "—",
+  };
+};
+
 const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => {
   const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
   const ageGender = [
@@ -96,207 +202,260 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => 
       : date.toLocaleDateString("en-GB");
   };
 
-  const prescribedDate = formatDate(prescription?.prescribedDate);
-  const reportGenerated = formatDate(prescription?.reportGeneratedAt, true);
-  const medications = Array.isArray(prescription?.medications)
-    ? prescription.medications
-    : [];
-  const tests = Array.isArray(prescription?.tests) ? prescription.tests : [];
+  const medications = normalizePrescriptionMedications(prescription);
+  const tests = normalizePrescriptionTests(prescription);
+  const testsSummary = tests
+    .filter((test) => test?.name || test?.instruction)
+    .map(
+      (test) =>
+        `${test?.name || "—"}${test?.instruction ? ` — ${test.instruction}` : ""}`
+    );
+  const followUpInstruction = resolveFollowUpInstruction(prescription);
+  const remarks = resolveRemarks(prescription);
+  const prescribedBy = resolvePrescribedBy(prescription) || "—";
+  const preparedBy = resolvePreparedBy(prescription) || "—";
+  const printedBy = resolvePrintedBy(prescription) || "—";
+  const prescribedDate = formatDate(resolvePrescriptionDate(prescription));
+  const reportGenerated = formatDate(resolveReportGenerated(prescription), true);
 
   return (
-    <div className="bg-white rounded-2xl border border-blue-100 overflow-hidden shadow-sm">
-      <div className="bg-gradient-to-r from-blue-50 to-white px-6 py-6 text-center border-b border-blue-100">
-        <h2 className="text-sm sm:text-base font-bold text-slate-800 tracking-[0.12em] uppercase">
+    <div className="bg-white border border-slate-400 rounded-xl shadow-sm overflow-hidden">
+      <div className="border-b border-slate-400 px-6 py-6 text-center space-y-1">
+        <h2 className="text-[15px] sm:text-[17px] font-semibold uppercase tracking-[0.35em] text-slate-800">
           {mergedCenter.name}
         </h2>
-        <p className="text-[10px] sm:text-[11px] text-slate-600 mt-2 max-w-3xl mx-auto leading-relaxed">
-          {mergedCenter.subTitle}
+        {mergedCenter.subTitle ? (
+          <p className="text-[11px] text-slate-700 leading-relaxed">{mergedCenter.subTitle}</p>
+        ) : null}
+        <p className="text-[11px] text-slate-700">{mergedCenter.address}</p>
+        <p className="text-[11px] text-slate-700">
+          {mergedCenter.phone ? `Phone: ${mergedCenter.phone}` : ""}
+          {mergedCenter.fax ? ` | Fax: ${mergedCenter.fax}` : ""}
+          {mergedCenter.code ? ` | Center Code: ${mergedCenter.code}` : ""}
         </p>
-        <div className="mt-3 space-y-1 text-[11px] text-slate-700">
-          <p>{mergedCenter.address}</p>
-          <p>
-            <span className="font-medium">Phone:</span> {mergedCenter.phone}
-            {mergedCenter.fax ? ` | Fax: ${mergedCenter.fax}` : ""}
-          </p>
-          <p>
-            <span className="font-medium">Email:</span> {mergedCenter.email}
-            {mergedCenter.website ? ` | ${mergedCenter.website}` : ""}
-          </p>
-          <p>
-            <span className="font-medium">Lab:</span> {mergedCenter.labWebsite}
-            {mergedCenter.missCallNumber ? ` | Missed Call: ${mergedCenter.missCallNumber}` : ""}
-            {mergedCenter.mobileNumber ? ` | Appointment: ${mergedCenter.mobileNumber}` : ""}
-          </p>
-          {mergedCenter.code && (
-            <p className="uppercase tracking-[0.3em] text-slate-500">Center Code: {mergedCenter.code}</p>
-          )}
-        </div>
+        <p className="text-[11px] text-slate-700">
+          {mergedCenter.email ? `Email: ${mergedCenter.email}` : ""}
+          {mergedCenter.website ? ` | ${mergedCenter.website}` : ""}
+        </p>
+        <p className="text-[11px] text-slate-700">
+          {mergedCenter.labWebsite ? `Lab: ${mergedCenter.labWebsite}` : ""}
+          {mergedCenter.missCallNumber ? ` | Missed Call: ${mergedCenter.missCallNumber}` : ""}
+          {mergedCenter.mobileNumber ? ` | Appointment: ${mergedCenter.mobileNumber}` : ""}
+        </p>
       </div>
 
-      <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/70">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Patient Name</span>
-            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800 font-medium">
-              {patient?.name || "—"}
+      <div className="px-6 py-5 space-y-6 text-[12px] text-slate-800">
+        <table className="w-full border border-slate-400 text-[12px]">
+          <tbody>
+            <tr>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Patient Name
+                </span>
+                {patient?.name || "—"}
+              </td>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Patient ID / UHID
+                </span>
+                {patient?.uhId || patient?.patientCode || patient?._id || "—"}
+              </td>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Age / Gender
+                </span>
+                {ageGender || "—"}
+              </td>
+            </tr>
+            <tr>
+              <td className="border border-slate-400 px-3 py-2 align-top" colSpan={2}>
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Diagnosis
+                </span>
+                {prescription?.diagnosis || "—"}
+              </td>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Prescribed Date
+                </span>
+                {prescribedDate}
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mt-3">
+                  Report Generated
+                </span>
+                {reportGenerated}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.35em] text-slate-600 font-semibold mb-2">
+            Medicines
+          </div>
+          <table className="w-full border border-slate-400 text-[12px]">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700">
+                <th className="border border-slate-400 px-3 py-2 text-left">Medicine</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Dosage</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Duration</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Instruction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {medications.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="border border-slate-400 px-3 py-3 text-center text-slate-500">
+                    No medicines added.
+                  </td>
+                </tr>
+              ) : (
+                medications.map((med, idx) => {
+                  const name = med.drugName || med.name || med.medicine || "—";
+                  const dosageParts = [
+                    med.dose || med.dosage || med.dosageDetails || "",
+                    med.frequency || med.freq || med.frequncy || "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  const duration = med.duration || med.course || "—";
+                  const instruction = med.instructions || med.instruction || "—";
+
+                  return (
+                    <tr key={`preview-med-${idx}`} className="align-top">
+                      <td className="border border-slate-400 px-3 py-2 text-slate-800 font-medium">
+                        {name}
+                      </td>
+                      <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                        {dosageParts || "—"}
+                      </td>
+                      <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                        {duration}
+                      </td>
+                      <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                        {instruction}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.35em] text-slate-600 font-semibold mb-2">
+            Tests & Follow-up
+          </div>
+          <table className="w-full border border-slate-400 text-[12px]">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700">
+                <th className="border border-slate-400 px-3 py-2 text-left">Test Name</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Instruction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tests.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="border border-slate-400 px-3 py-3 text-center text-slate-500">
+                    No tests prescribed.
+                  </td>
+                </tr>
+              ) : (
+                tests.map((test, idx) => (
+                  <tr key={`preview-test-${idx}`} className="align-top">
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800 font-medium">
+                      {test.name || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {test.instruction || "—"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="border border-slate-400 px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+              Follow-up Instruction
+            </span>
+            <div className="text-slate-800 leading-relaxed">
+              {followUpInstruction || "—"}
             </div>
           </div>
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Patient ID</span>
-            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
-              {patient?.uhId || patient?._id || "—"}
+          <div className="border border-slate-400 px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+              Tests Summary
+            </span>
+            <div className="text-slate-800 leading-relaxed">
+              {testsSummary.length > 0 ? (
+                <ul className="list-disc list-inside space-y-1">
+                  {testsSummary.map((item, idx) => (
+                    <li key={`summary-${idx}`}>{item}</li>
+                  ))}
+                </ul>
+              ) : (
+                "—"
+              )}
             </div>
           </div>
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Age / Gender</span>
-            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
-              {ageGender || "—"}
+          <div className="border border-slate-400 px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+              Remarks
+            </span>
+            <div className="text-slate-800 leading-relaxed">
+              {remarks}
             </div>
           </div>
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Prescribed Date</span>
-            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
-              {prescribedDate}
-            </div>
-          </div>
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Diagnosis</span>
-            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
-              {prescription?.diagnosis || "—"}
-            </div>
-          </div>
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500">Report Generated</span>
-            <div className="mt-1 min-h-[38px] px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-slate-800">
+          <div className="border border-slate-400 px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+              Report Generated
+            </span>
+            <div className="text-slate-800 leading-relaxed">
               {reportGenerated}
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="px-6 py-4 overflow-x-auto">
-        <table className="w-full border border-slate-200 rounded-lg overflow-hidden text-xs">
-          <thead className="bg-slate-100 uppercase tracking-widest text-[10px] text-slate-600">
-            <tr>
-              <th className="border-b border-slate-200 px-3 py-3 text-left">Medicine</th>
-              <th className="border-b border-slate-200 px-3 py-3 text-left">Dose</th>
-              <th className="border-b border-slate-200 px-3 py-3 text-left">Frequency</th>
-              <th className="border-b border-slate-200 px-3 py-3 text-left">Duration</th>
-              <th className="border-b border-slate-200 px-3 py-3 text-left">Instructions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {medications.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="border-t border-slate-200 px-3 py-3 text-center text-slate-500">
-                  No medicines added.
-                </td>
-              </tr>
-            ) : medications.map((med, idx) => {
-              const name = med.drugName || med.name || med.medicine || "—";
-              const dose = med.dose || med.dosage || "—";
-              const frequency = med.frequency || med.frequncy || med.freq || "—";
-              const duration = med.duration || med.course || "—";
-              const instruction = med.instructions || med.instruction || "—";
-              return (
-              <tr key={`preview-med-${idx}`} className="bg-white">
-                <td className="border-t border-slate-200 px-3 py-3 text-slate-800 font-medium">
-                    {name}
-                </td>
-                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                    {dose}
-                </td>
-                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                    {frequency}
-                </td>
-                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                    {duration}
-                </td>
-                <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                    {instruction}
-                </td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="px-6 py-4 border-t border-slate-200 bg-white">
-        <div className="flex items-center gap-2 text-slate-700 text-xs font-semibold uppercase tracking-[0.2em] mb-3">
-          Tests & Follow-up
-        </div>
-        {tests.length === 0 ? (
-          <div className="text-xs text-slate-500">No tests prescribed.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border border-slate-200 rounded-lg overflow-hidden text-xs">
-              <thead className="bg-slate-100 uppercase tracking-widest text-[10px] text-slate-600">
-                <tr>
-                  <th className="border-b border-slate-200 px-3 py-3 text-left">Test Name</th>
-                  <th className="border-b border-slate-200 px-3 py-3 text-left">Instruction</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tests.map((test, idx) => (
-                  <tr key={`preview-test-${idx}`} className="bg-white">
-                    <td className="border-t border-slate-200 px-3 py-3 text-slate-800 font-medium">
-                      {test.name || "—"}
-                    </td>
-                    <td className="border-t border-slate-200 px-3 py-3 text-slate-800">
-                      {test.instruction || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="mt-4">
-          <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Follow-up Instruction</span>
-          <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
-            {prescription?.followUpInstruction || "—"}
-          </div>
-        </div>
-      </div>
-
-      <div className="px-6 pb-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Prescribed By</span>
-            <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
-              {prescription?.prescribedBy || "—"}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="border border-slate-400 px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+              Prescribed By
+            </span>
+            <div className="text-slate-800 leading-relaxed">
+              {prescribedBy}
             </div>
-            {(prescription?.preparedByCredentials || prescription?.medicalCouncilNumber) && (
-              <div className="mt-2 px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600 space-y-1">
-                {prescription?.preparedByCredentials && (
-                  <div>Credentials: {prescription.preparedByCredentials}</div>
-                )}
-                {prescription?.medicalCouncilNumber && (
-                  <div>Medical Council Reg. No.: {prescription.medicalCouncilNumber}</div>
-                )}
-              </div>
-            )}
           </div>
-          <div>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Notes</span>
-            <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
-              {prescription?.notes || prescription?.followUpInstruction || "—"}
+          <div className="border border-slate-400 px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+              Prepared By
+            </span>
+            <div className="text-slate-800 leading-relaxed space-y-1">
+              <div>{preparedBy}</div>
+              {prescription?.preparedByCredentials ? (
+                <div>{prescription.preparedByCredentials}</div>
+              ) : null}
+              {prescription?.medicalCouncilNumber ? (
+                <div>Medical Council Reg. No.: {prescription.medicalCouncilNumber}</div>
+              ) : null}
             </div>
-            <div className="mt-2">
-              <span className="block text-[10px] uppercase tracking-widest text-slate-500 mb-2">Printed By</span>
-              <div className="px-3 py-2 min-h-[38px] rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600">
-                {prescription?.printedBy || prescription?.preparedBy || "—"}
-              </div>
+          </div>
+          <div className="border border-slate-400 px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+              Printed By
+            </span>
+            <div className="text-slate-800 leading-relaxed">
+              {printedBy}
             </div>
           </div>
         </div>
-        <div className="mt-4 h-px bg-slate-200" />
-        <div className="mt-4 text-[10px] text-slate-500 uppercase tracking-[0.4em] text-right">
+
+        <div className="border border-slate-300 px-3 py-5 text-[10px] text-slate-500 uppercase tracking-[0.4em] text-right">
           Doctor Signature
         </div>
-        <div className="mt-4 text-center text-[10px] uppercase tracking-[0.2em] text-slate-400">
+        <div className="text-[10px] text-slate-500 uppercase tracking-[0.3em] text-center pt-4">
           Lifestyle • Nutrition • Physiotherapy • Allergy Care
         </div>
       </div>
@@ -304,7 +463,7 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => 
   );
 };
 
-const TABS = ["Overview", "Follow Up", "Prescription", "History", "Medications"];
+const TABS = ["Overview", "Follow Up", "History", "Medications"];
 
 const ViewProfile = () => {
   const { id } = useParams();
@@ -510,168 +669,20 @@ const ViewProfile = () => {
       return;
     }
 
-    const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-    let cursorY = 60;
-
-    const toDate = (value) => {
-      if (!value) return null;
-      const date = value instanceof Date ? value : new Date(value);
-      return Number.isNaN(date.getTime()) ? null : date;
-    };
-
-    const formatDate = (value, withTime = false) => {
-      const date = toDate(value);
-      if (!date) return '-';
-      return withTime
-        ? date.toLocaleString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        : date.toLocaleDateString('en-GB');
-    };
-
-    const medications = Array.isArray(prescription.medications) ? prescription.medications : [];
-    const tests = Array.isArray(prescription.tests) ? prescription.tests : [];
-
-    const firstFollowUp = prescription.followUpInstruction || '-';
-    const preparedBy = prescription.preparedBy || prescription.prescribedBy || '-';
-    const printedBy = prescription.printedBy || preparedBy || '-';
-    const credentials = prescription.preparedByCredentials || '';
-    const councilNumber = prescription.medicalCouncilNumber || '';
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text(mergedCenter.name, 40, cursorY);
-    cursorY += 18;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const subTitleLines = doc.splitTextToSize(mergedCenter.subTitle, 520);
-    subTitleLines.forEach((line) => {
-      doc.text(line, 40, cursorY);
-      cursorY += 14;
-    });
-    cursorY += 6;
-
-    const contactLines = [
-      mergedCenter.address,
-      `Phone: ${mergedCenter.phone || '-'}${mergedCenter.fax ? ` | Fax: ${mergedCenter.fax}` : ''}`,
-      `Email: ${mergedCenter.email || '-'}${mergedCenter.website ? ` | ${mergedCenter.website}` : ''}`,
-      `Lab: ${mergedCenter.labWebsite || '-'}${mergedCenter.missCallNumber ? ` | Missed Call: ${mergedCenter.missCallNumber}` : ''}${mergedCenter.mobileNumber ? ` | Appointment: ${mergedCenter.mobileNumber}` : ''}`,
-    ];
-
-    contactLines.forEach((line) => {
-      if (!line) return;
-      const wrapped = doc.splitTextToSize(line, 520);
-      wrapped.forEach((wrappedLine) => {
-        doc.text(wrappedLine, 40, cursorY);
-        cursorY += 14;
+    try {
+      const html = buildPrescriptionPrintHTML({
+        centerInfo: centerInfo,
+        patient,
+        prescription: {
+          ...prescription,
+          remarks: prescription.remarks || prescription.notes || DEFAULT_REMARKS,
+        },
+        fallbackRemarks: DEFAULT_REMARKS,
       });
-    });
-    cursorY += 10;
-
-    doc.setFont('helvetica', 'bold');
-    const patientInfo = [
-      `Patient Name: ${patient?.name || '-'}`,
-      `Patient ID: ${patient?.uhId || patient?._id || '-'}`,
-      `Age/Gender: ${patient?.age || '-'} ${patient?.gender ? '/ ' + patient.gender : ''}`,
-      `Diagnosis: ${prescription?.diagnosis || '-'}`,
-      `Prescribed By: ${prescription?.prescribedBy || '-'}`,
-      `Prescribed Date: ${formatDate(prescription?.prescribedDate)}`,
-      `Report Generated: ${formatDate(prescription?.reportGeneratedAt, true)}`,
-    ];
-    patientInfo.forEach((info) => {
-      doc.text(info, 40, cursorY);
-      cursorY += 16;
-    });
-
-    const head = [['Drug Name', 'Dose', 'Duration', 'Frequency', 'Instructions', 'Adverse Effect']];
-    const medsBody = medications.length > 0
-      ? medications.map((med) => [
-          med.drugName || med.name || med.medicine || '-',
-          med.dose || med.dosage || '-',
-          med.duration || '-',
-          med.frequency || med.freq || '-',
-          med.instructions || med.instruction || '-',
-          med.adverseEvent || med.adverseEffect || '-',
-        ])
-      : [['-', '-', '-', '-', '-', '-']];
-
-    autoTable(doc, {
-      head,
-      body: medsBody,
-      startY: cursorY + 10,
-      styles: { fontSize: 9, cellPadding: 6 },
-      headStyles: { fillColor: [226, 232, 240], textColor: 15, fontStyle: 'bold' },
-    });
-
-    let currentY = doc.lastAutoTable?.finalY || cursorY + 60;
-
-    if (tests.length > 0) {
-      currentY += 24;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.text('Prescribed Tests', 40, currentY);
-
-      const testsBody = tests.map((test) => [test.name || '-', test.instruction || '-']);
-      autoTable(doc, {
-        head: [['Test Name', 'Instruction']],
-        body: testsBody,
-        startY: currentY + 10,
-        styles: { fontSize: 9, cellPadding: 6 },
-        headStyles: { fillColor: [226, 232, 240], textColor: 15, fontStyle: 'bold' },
-      });
-      currentY = doc.lastAutoTable?.finalY || currentY + 40;
+      openPrintPreview(html);
+    } catch (error) {
+      toast.error(error?.message || 'Unable to open print preview. Please allow pop-ups and try again.');
     }
-
-    currentY += 24;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text('Follow-up Instruction', 40, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const followUpLines = doc.splitTextToSize(firstFollowUp, 520);
-    followUpLines.forEach((line) => {
-      currentY += 14;
-      doc.text(line, 40, currentY);
-    });
-
-    currentY += 24;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text('Prepared By', 40, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    currentY += 14;
-    doc.text(`Prepared By: ${preparedBy}`, 40, currentY);
-    if (credentials) {
-      currentY += 14;
-      doc.text(`Credentials: ${credentials}`, 40, currentY);
-    }
-    if (councilNumber) {
-      currentY += 14;
-      doc.text(`Medical Council Reg. No.: ${councilNumber}`, 40, currentY);
-    }
-    currentY += 18;
-    doc.text(`Printed By: ${printedBy}`, 40, currentY);
-
-    currentY += 28;
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(10);
-    doc.text(`For ${mergedCenter.name}`, 40, currentY);
-    doc.text('Doctor Signature', 420, currentY);
-
-    currentY += 24;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.text('Lifestyle • Nutrition • Physiotherapy • Allergy Care', 150, currentY + 12);
-
-    const fileName = `${(patient?.name || 'patient').replace(/\s+/g, '_')}_prescription.pdf`;
-    doc.save(fileName);
   };
   
   // Check if doctor can edit this patient
@@ -1304,99 +1315,8 @@ const ViewProfile = () => {
             </div>
             </div>
           )}
-          {activeTab === "Prescription" && (
-            <div className="bg-white rounded-xl shadow-sm border border-blue-100">
-              <div className="p-4 sm:p-6 border-b border-blue-100">
-                <h2 className="text-sm font-semibold text-slate-800 flex items-center">
-                  <Pill className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-blue-500" />
-                  Prescription & Medications
-                </h2>
-                <p className="text-slate-600 mt-1 text-xs">
-                  Current and past medications prescribed to the patient
-                </p>
-              </div>
-              <div className="p-4 sm:p-6">
-                {prescriptionsLoading ? (
-                  <div className="text-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                    <p className="text-slate-600 text-xs">Loading medications...</p>
-                  </div>
-                ) : prescriptionsError ? (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <p className="text-red-600 text-xs">{prescriptionsError}</p>
-                  </div>
-                ) : prescriptionList.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Pill className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                    <p className="text-slate-500 text-xs">No medications found</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Prescribed Date</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Prescribed By</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Medicines</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Instructions</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200">
-                        {prescriptionList.map((prescription, idx) => {
-                          const meds = Array.isArray(prescription.medications)
-                            ? prescription.medications
-                            : [];
-                          const firstMed = meds[0] || {};
-                          const firstMedName = firstMed.drugName || firstMed.name || firstMed.medicine || '—';
-                          const medsCount = meds.length;
-                          const displayDate = prescription.prescribedDate
-                            ? new Date(prescription.prescribedDate).toLocaleDateString()
-                            : 'N/A';
-                          const instructionPreview = meds
-                            .map((med) => med.instructions || med.instruction)
-                            .filter(Boolean)
-                            .join('; ');
-                          return (
-                            <tr key={`prescription-${idx}`} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{displayDate}</td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{prescription.prescribedBy || 'N/A'}</td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                                <div className="font-semibold text-slate-800">{firstMedName}</div>
-                                {medsCount > 1 && (
-                                  <div className="text-slate-500 text-[11px]">+ {medsCount - 1} more medicine{medsCount - 1 === 1 ? '' : 's'}</div>
-                                )}
-                              </td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                                {instructionPreview || '—'}
-                              </td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
-                                  <button
-                                    onClick={() => handleViewPrescription(prescription)}
-                                    className="inline-flex items-center justify-center px-3 py-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
-                                  >
-                                    View
-                                  </button>
-                                  <button
-                                    onClick={() => handleDownloadPrescription(prescription)}
-                                    className="inline-flex items-center justify-center px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
-                                  >
-                                    Download
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
+          
+                 
           {/* Lab Report Status Tab */}
           {activeTab === "Lab Report Status" && (
             <div className="bg-white rounded-xl shadow-sm border border-blue-100">
@@ -1538,15 +1458,75 @@ const ViewProfile = () => {
                 ) : (
                   <div className="space-y-4">
                     {(history || []).map((historyItem, idx) => {
+                      const normalizeAttachment = (doc) => {
+                        if (!doc) return null;
+                        if (typeof doc === "string") {
+                          const inferredName = doc.split(/[\\/]/).pop() || doc;
+                          return {
+                            filename: inferredName,
+                            originalName: inferredName,
+                            path: doc,
+                          };
+                        }
+
+                        const normalized = { ...doc };
+
+                        if (normalized.url && !normalized.path && !normalized.downloadPath) {
+                          normalized.path = normalized.url;
+                        }
+
+                        if (!normalized.filename) {
+                          normalized.filename =
+                            doc.filename ||
+                            doc.fileName ||
+                            doc.name ||
+                            doc.documentName ||
+                            doc.originalName ||
+                            "";
+                        }
+
+                        if (!normalized.originalName) {
+                          normalized.originalName =
+                            doc.originalName ||
+                            doc.name ||
+                            doc.fileName ||
+                            doc.filename ||
+                            doc.documentName ||
+                            normalized.filename ||
+                            "";
+                        }
+
+                        const derivedPath =
+                          doc.path ||
+                          doc.downloadPath ||
+                          doc.url ||
+                          (typeof normalized.filename === "string" && normalized.filename.includes("/") ? normalized.filename : undefined);
+
+                        if (!normalized.path && derivedPath) {
+                          normalized.path = derivedPath;
+                        }
+
+                        if (!normalized.size) {
+                          normalized.size = doc.size || doc.fileSize || doc.sizeInBytes;
+                        }
+
+                        return normalized.filename || normalized.path || normalized.downloadPath ? normalized : null;
+                      };
+
                       const attachments = [
                         ...(Array.isArray(historyItem.attachments) ? historyItem.attachments : []),
                         ...(Array.isArray(historyItem.medicalHistoryDocs) ? historyItem.medicalHistoryDocs : []),
-                      ];
+                      ]
+                        .map(normalizeAttachment)
+                        .filter(Boolean);
+
                       if (attachments.length === 0 && historyItem.reportFile) {
-                        attachments.push({
-                          filename: historyItem.reportFile,
-                          originalName: historyItem.originalName || "Medical Report",
-                        });
+                        attachments.push(
+                          normalizeAttachment({
+                            filename: historyItem.reportFile,
+                            originalName: historyItem.originalName || "Medical Report",
+                          })
+                        );
                       }
 
                       const allergicFields = [
@@ -1683,7 +1663,7 @@ const ViewProfile = () => {
                                     <button
                                       type="button"
                                       key={`${doc.documentId || doc.filename || attachmentIdx}`}
-                                      onClick={() => downloadDocument(doc, label)}
+                                      onClick={() => downloadDocument(doc)}
                                       className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-left text-slate-700 hover:border-blue-300 hover:bg-blue-50 transition-colors"
                                     >
                                       <span className="flex items-center gap-2 truncate">
@@ -1848,30 +1828,25 @@ const ViewProfile = () => {
                       </thead>
                       <tbody className="divide-y divide-slate-200">
                         {prescriptionList.map((prescription, idx) => {
-                          const meds = Array.isArray(prescription.medications)
-                            ? prescription.medications
-                            : [];
-                          const firstMedName = meds[0]?.drugName || meds[0]?.name || meds[0]?.medicine || '—';
-                          const medsCount = meds.length;
-                          const displayDate = prescription.prescribedDate
-                            ? new Date(prescription.prescribedDate).toLocaleDateString()
+                          const meds = normalizePrescriptionMedications(prescription);
+                          const { firstName, count, instructionsPreview } = summarizeMedications(meds);
+                          const displayDateRaw = resolvePrescriptionDate(prescription);
+                          const displayDate = displayDateRaw
+                            ? new Date(displayDateRaw).toLocaleDateString()
                             : 'N/A';
-                          const instructionPreview = meds
-                            .map((med) => med.instructions || med.instruction)
-                            .filter(Boolean)
-                            .join('; ');
+                          const prescribedBy = resolvePrescribedBy(prescription) || 'N/A';
                           return (
                             <tr key={`prescription-${idx}`} className="hover:bg-slate-50 transition-colors">
                               <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{displayDate}</td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{prescription.prescribedBy || 'N/A'}</td>
+                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">{prescribedBy}</td>
                               <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                                <div className="font-semibold text-slate-800">{firstMedName}</div>
-                                {medsCount > 1 && (
-                                  <div className="text-slate-500 text-[11px]">+ {medsCount - 1} more medicine{medsCount - 1 === 1 ? '' : 's'}</div>
+                                <div className="font-semibold text-slate-800">{firstName}</div>
+                                {count > 1 && (
+                                  <div className="text-slate-500 text-[11px]">+ {count - 1} more medicine{count - 1 === 1 ? '' : 's'}</div>
                                 )}
                               </td>
                               <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
-                                {instructionPreview || '—'}
+                                {instructionsPreview}
                               </td>
                               <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-600">
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
@@ -1885,7 +1860,7 @@ const ViewProfile = () => {
                                     onClick={() => handleDownloadPrescription(prescription)}
                                     className="inline-flex items-center justify-center px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
                                   >
-                                    Download
+                                    Print
                                   </button>
                                 </div>
                               </td>
@@ -1912,13 +1887,22 @@ const ViewProfile = () => {
                   {patient?.name ? `Patient: ${patient.name}` : 'Patient details'}
                 </p>
               </div>
-              <button
-                onClick={handleClosePrescriptionPreview}
-                className="rounded-full p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-200 transition-colors"
-                aria-label="Close prescription preview"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownloadPrescription(selectedPrescription)}
+                  className="inline-flex items-center gap-1 px-3 py-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors text-xs"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print
+                </button>
+                <button
+                  onClick={handleClosePrescriptionPreview}
+                  className="rounded-full p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                  aria-label="Close prescription preview"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div className="bg-slate-100/80 px-6 py-3 text-xs text-slate-600 border-b border-slate-200 flex items-center gap-2">
               {centerLoading ? (

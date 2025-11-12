@@ -7,12 +7,12 @@ import {
   createReceptionistSlitTherapyRequest,
   markReceptionistSlitTherapyPaid,
   closeReceptionistSlitTherapyRequest,
+  cancelReceptionistSlitTherapyRequest,
+  refundReceptionistSlitTherapyRequest
+} from '../../features/slitTherapy/slitTherapyThunks';
+import {
   fetchReceptionistPatients
 } from '../../features/receptionist/receptionistThunks';
-import {
-  cancelSlitTherapyRequest as cancelSlitTherapyRequestApi,
-  refundSlitTherapyRequest as refundSlitTherapyRequestApi
-} from '../../services/api';
 import { roundToNearestTen } from '../../utils/rounding';
 
 const resolveInvoiceTimestamp = (invoice, fallback) => {
@@ -89,7 +89,19 @@ const defaultPaymentDetails = {
 
 export default function SlitTherapyBilling() {
   const dispatch = useDispatch();
-  const { slitTherapyRequests, loading, patients = [] } = useSelector((state) => state.receptionist);
+  const {
+    receptionist: {
+      requests: slitTherapyRequests = [],
+      loading: slitRequestsLoading,
+      error: slitError,
+    },
+    mutation: {
+      loading: mutationLoading,
+      error: mutationError,
+    },
+  } = useSelector((state) => state.slitTherapy);
+  const { patients = [], loading: receptionistLoading } = useSelector((state) => state.receptionist);
+  const loading = slitRequestsLoading || mutationLoading || receptionistLoading;
 
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -134,6 +146,18 @@ export default function SlitTherapyBilling() {
       dispatch(fetchReceptionistPatients());
     }
   }, [dispatch]);
+
+  useEffect(() => {
+    if (slitError) {
+      toast.error(slitError);
+    }
+  }, [slitError]);
+
+  useEffect(() => {
+    if (mutationError) {
+      toast.error(mutationError);
+    }
+  }, [mutationError]);
 
   const filteredRequests = useMemo(() => {
     const list = slitTherapyRequests || [];
@@ -496,12 +520,16 @@ export default function SlitTherapyBilling() {
 
     try {
       setProcessingAction(true);
-      await cancelSlitTherapyRequestApi(selectedForCancel._id, { reason: cancelReason });
+      await dispatch(
+        cancelReceptionistSlitTherapyRequest({
+          id: selectedForCancel._id,
+          payload: { reason: cancelReason },
+        })
+      ).unwrap();
       toast.success('SLIT therapy billing cancelled');
       closeCancelModal();
-      dispatch(fetchReceptionistSlitTherapyRequests());
     } catch (error) {
-      const message = error?.response?.data?.message || error?.message || 'Failed to cancel billing';
+      const message = error?.message || error || 'Failed to cancel billing';
       toast.error(message);
     } finally {
       setProcessingAction(false);
@@ -536,16 +564,20 @@ export default function SlitTherapyBilling() {
 
     try {
       setProcessingAction(true);
-      await refundSlitTherapyRequestApi(selectedForRefund._id, {
-        amount: amountValue,
-        method: refundMethod,
-        notes: refundNotes
-      });
+      await dispatch(
+        refundReceptionistSlitTherapyRequest({
+          id: selectedForRefund._id,
+          payload: {
+            amount: amountValue,
+            method: refundMethod,
+            notes: refundNotes,
+          },
+        })
+      ).unwrap();
       toast.success('Refund processed successfully');
       closeRefundModal();
-      dispatch(fetchReceptionistSlitTherapyRequests());
     } catch (error) {
-      const message = error?.response?.data?.message || error?.message || 'Failed to process refund';
+      const message = error?.message || error || 'Failed to process refund';
       toast.error(message);
     } finally {
       setProcessingAction(false);
@@ -774,7 +806,7 @@ export default function SlitTherapyBilling() {
                                     onClick={() => openCloseModal(request)}
                                     className="px-3 py-1.5 text-xs font-semibold text-white bg-teal-600 rounded-md hover:bg-teal-700"
                                   >
-                                    Close
+                                    Received
                                   </button>
                                 )}
                               </div>
