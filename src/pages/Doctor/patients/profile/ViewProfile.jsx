@@ -142,13 +142,58 @@ const normalizePrescriptionMedications = (prescription) =>
       }))
     : [];
 
-const normalizePrescriptionTests = (prescription) =>
-  Array.isArray(prescription?.tests)
-    ? prescription.tests.map((item) => ({
-        name: item.name || item.testName || "—",
-        instruction: item.instruction || item.instructions || "—",
-      }))
-    : [];
+const normalizePrescriptionTests = (prescription) => {
+  const possibleSources = [
+    prescription?.tests,
+    prescription?.test,
+    prescription?.testDetails,
+    prescription?.testList,
+  ];
+
+  const coerceToArray = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === "object") return Object.values(value);
+    return [value];
+  };
+
+  const rawList = coerceToArray(possibleSources.find((value) => value && (Array.isArray(value) ? value.length : true)));
+
+  return rawList
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        const stringValue = String(item || "").trim();
+        return stringValue
+          ? {
+              name: stringValue,
+              instruction: "—",
+            }
+          : null;
+      }
+
+      const name =
+        item.name ||
+        item.testName ||
+        item.test_name ||
+        item.test ||
+        item.title ||
+        "—";
+
+      const instruction =
+        item.instruction ||
+        item.instructions ||
+        item.note ||
+        item.description ||
+        item.details ||
+        "—";
+
+      return {
+        name: name || "—",
+        instruction: instruction || "—",
+      };
+    })
+    .filter(Boolean);
+};
 
 const summarizeMedications = (medications) => {
   if (!Array.isArray(medications) || medications.length === 0) {
@@ -175,10 +220,7 @@ const summarizeMedications = (medications) => {
 
 const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => {
   const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
-  const ageGender = [
-    patient?.age ? `${patient.age}` : null,
-    patient?.gender || null,
-  ]
+  const ageGender = [patient?.age ? `${patient.age}` : null, patient?.gender || null]
     .filter(Boolean)
     .join(" / ");
 
@@ -202,97 +244,113 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => 
       : date.toLocaleDateString("en-GB");
   };
 
+  const contactLine = (segments) => segments.filter(Boolean).join(" | ");
+
   const medications = normalizePrescriptionMedications(prescription);
   const tests = normalizePrescriptionTests(prescription);
-  const testsSummary = tests
-    .filter((test) => test?.name || test?.instruction)
-    .map(
-      (test) =>
-        `${test?.name || "—"}${test?.instruction ? ` — ${test.instruction}` : ""}`
-    );
-  const followUpInstruction = resolveFollowUpInstruction(prescription);
-  const remarks = resolveRemarks(prescription);
+  const followUpInstruction = resolveFollowUpInstruction(prescription) || "—";
+  const remarks = resolveRemarks(prescription) || "—";
   const prescribedBy = resolvePrescribedBy(prescription) || "—";
   const preparedBy = resolvePreparedBy(prescription) || "—";
   const printedBy = resolvePrintedBy(prescription) || "—";
   const prescribedDate = formatDate(resolvePrescriptionDate(prescription));
   const reportGenerated = formatDate(resolveReportGenerated(prescription), true);
+  const printedOn = formatDate(new Date(), true);
 
   return (
     <div className="bg-white border border-slate-400 rounded-xl shadow-sm overflow-hidden">
       <div className="border-b border-slate-400 px-6 py-6 text-center space-y-1">
-        <h2 className="text-[15px] sm:text-[17px] font-semibold uppercase tracking-[0.35em] text-slate-800">
+        <h2 className="text-[16px] font-semibold uppercase tracking-[0.35em] text-slate-900">
           {mergedCenter.name}
         </h2>
-        {mergedCenter.subTitle ? (
-          <p className="text-[11px] text-slate-700 leading-relaxed">{mergedCenter.subTitle}</p>
+        {mergedCenter.address ? (
+          <p className="text-[11px] text-slate-700">{mergedCenter.address}</p>
         ) : null}
-        <p className="text-[11px] text-slate-700">{mergedCenter.address}</p>
-        <p className="text-[11px] text-slate-700">
-          {mergedCenter.phone ? `Phone: ${mergedCenter.phone}` : ""}
-          {mergedCenter.fax ? ` | Fax: ${mergedCenter.fax}` : ""}
-          {mergedCenter.code ? ` | Center Code: ${mergedCenter.code}` : ""}
-        </p>
-        <p className="text-[11px] text-slate-700">
-          {mergedCenter.email ? `Email: ${mergedCenter.email}` : ""}
-          {mergedCenter.website ? ` | ${mergedCenter.website}` : ""}
-        </p>
-        <p className="text-[11px] text-slate-700">
-          {mergedCenter.labWebsite ? `Lab: ${mergedCenter.labWebsite}` : ""}
-          {mergedCenter.missCallNumber ? ` | Missed Call: ${mergedCenter.missCallNumber}` : ""}
-          {mergedCenter.mobileNumber ? ` | Appointment: ${mergedCenter.mobileNumber}` : ""}
-        </p>
+        {contactLine([
+          mergedCenter.phone ? `Phone: ${mergedCenter.phone}` : "",
+          mergedCenter.fax ? `Fax: ${mergedCenter.fax}` : "",
+          mergedCenter.code ? `Center Code: ${mergedCenter.code}` : "",
+        ]) ? (
+          <p className="text-[11px] text-slate-700">
+            {contactLine([
+              mergedCenter.phone ? `Phone: ${mergedCenter.phone}` : "",
+              mergedCenter.fax ? `Fax: ${mergedCenter.fax}` : "",
+              mergedCenter.code ? `Center Code: ${mergedCenter.code}` : "",
+            ])}
+          </p>
+        ) : null}
+        {contactLine([mergedCenter.email ? `Email: ${mergedCenter.email}` : "", mergedCenter.website || ""]) ? (
+          <p className="text-[11px] text-slate-700">
+            {contactLine([
+              mergedCenter.email ? `Email: ${mergedCenter.email}` : "",
+              mergedCenter.website || "",
+            ])}
+          </p>
+        ) : null}
+        {contactLine([
+          mergedCenter.labWebsite ? `Lab: ${mergedCenter.labWebsite}` : "",
+          mergedCenter.missCallNumber ? `Missed Call: ${mergedCenter.missCallNumber}` : "",
+          mergedCenter.mobileNumber ? `Appointment: ${mergedCenter.mobileNumber}` : "",
+        ]) ? (
+          <p className="text-[11px] text-slate-700">
+            {contactLine([
+              mergedCenter.labWebsite ? `Lab: ${mergedCenter.labWebsite}` : "",
+              mergedCenter.missCallNumber ? `Missed Call: ${mergedCenter.missCallNumber}` : "",
+              mergedCenter.mobileNumber ? `Appointment: ${mergedCenter.mobileNumber}` : "",
+            ])}
+          </p>
+        ) : null}
       </div>
 
-      <div className="px-6 py-5 space-y-6 text-[12px] text-slate-800">
-        <table className="w-full border border-slate-400 text-[12px]">
+      <div className="px-6 py-5 text-[12px] text-slate-800 space-y-6">
+        <table className="w-full border border-slate-400">
           <tbody>
             <tr>
               <td className="border border-slate-400 px-3 py-2 align-top">
                 <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
                   Patient Name
                 </span>
-                {patient?.name || "—"}
+                <span className="block mt-1 font-semibold">{patient?.name || "—"}</span>
               </td>
               <td className="border border-slate-400 px-3 py-2 align-top">
                 <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
                   Patient ID / UHID
                 </span>
-                {patient?.uhId || patient?.patientCode || patient?._id || "—"}
+                <span className="block mt-1">
+                  {patient?.uhId || patient?.patientCode || patient?._id || "—"}
+                </span>
               </td>
               <td className="border border-slate-400 px-3 py-2 align-top">
                 <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
                   Age / Gender
                 </span>
-                {ageGender || "—"}
+                <span className="block mt-1">{ageGender || "—"}</span>
               </td>
             </tr>
             <tr>
-              <td className="border border-slate-400 px-3 py-2 align-top" colSpan={2}>
+              <td colSpan={2} className="border border-slate-400 px-3 py-2 align-top">
                 <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
                   Diagnosis
                 </span>
-                {prescription?.diagnosis || "—"}
+                <span className="block mt-1 whitespace-pre-line">
+                  {prescription?.diagnosis || "—"}
+                </span>
               </td>
               <td className="border border-slate-400 px-3 py-2 align-top">
                 <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
                   Prescribed Date
                 </span>
-                {prescribedDate}
-                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mt-3">
-                  Report Generated
-                </span>
-                {reportGenerated}
+                <span className="block mt-1">{prescribedDate}</span>
               </td>
             </tr>
           </tbody>
         </table>
 
         <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-slate-600 font-semibold mb-2">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-600">
             Medicines
           </div>
-          <table className="w-full border border-slate-400 text-[12px]">
+          <table className="w-full border border-slate-400">
             <thead>
               <tr className="bg-slate-100 text-slate-700">
                 <th className="border border-slate-400 px-3 py-2 text-left">Medicine</th>
@@ -309,44 +367,32 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => 
                   </td>
                 </tr>
               ) : (
-                medications.map((med, idx) => {
-                  const name = med.drugName || med.name || med.medicine || "—";
-                  const dosageParts = [
-                    med.dose || med.dosage || med.dosageDetails || "",
-                    med.frequency || med.freq || med.frequncy || "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ");
-                  const duration = med.duration || med.course || "—";
-                  const instruction = med.instructions || med.instruction || "—";
-
-                  return (
-                    <tr key={`preview-med-${idx}`} className="align-top">
-                      <td className="border border-slate-400 px-3 py-2 text-slate-800 font-medium">
-                        {name}
-                      </td>
-                      <td className="border border-slate-400 px-3 py-2 text-slate-800">
-                        {dosageParts || "—"}
-                      </td>
-                      <td className="border border-slate-400 px-3 py-2 text-slate-800">
-                        {duration}
-                      </td>
-                      <td className="border border-slate-400 px-3 py-2 text-slate-800">
-                        {instruction}
-                      </td>
-                    </tr>
-                  );
-                })
+                medications.map((med, idx) => (
+                  <tr key={`preview-med-${idx}`} className="align-top">
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800 font-medium">
+                      {med.name || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {[med.dosage || "", med.frequency || ""].filter(Boolean).join(" ") || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {med.duration || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {med.instruction || "—"}
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
         </div>
 
         <div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-slate-600 font-semibold mb-2">
-            Tests & Follow-up
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-600">
+            Tests &amp; Follow-up
           </div>
-          <table className="w-full border border-slate-400 text-[12px]">
+          <table className="w-full border border-slate-400">
             <thead>
               <tr className="bg-slate-100 text-slate-700">
                 <th className="border border-slate-400 px-3 py-2 text-left">Test Name</th>
@@ -376,64 +422,33 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => 
           </table>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          <div className="border border-slate-400 px-3 py-2">
-            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border border-slate-300 px-3 py-3">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
               Follow-up Instruction
             </span>
-            <div className="text-slate-800 leading-relaxed">
+            <div className="mt-2 leading-relaxed text-slate-800 whitespace-pre-line">
               {followUpInstruction || "—"}
             </div>
           </div>
-          <div className="border border-slate-400 px-3 py-2">
-            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
-              Tests Summary
-            </span>
-            <div className="text-slate-800 leading-relaxed">
-              {testsSummary.length > 0 ? (
-                <ul className="list-disc list-inside space-y-1">
-                  {testsSummary.map((item, idx) => (
-                    <li key={`summary-${idx}`}>{item}</li>
-                  ))}
-                </ul>
-              ) : (
-                "—"
-              )}
-            </div>
-          </div>
-          <div className="border border-slate-400 px-3 py-2">
-            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
+          <div className="border border-slate-300 px-3 py-3">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
               Remarks
             </span>
-            <div className="text-slate-800 leading-relaxed">
-              {remarks}
-            </div>
-          </div>
-          <div className="border border-slate-400 px-3 py-2">
-            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
-              Report Generated
-            </span>
-            <div className="text-slate-800 leading-relaxed">
-              {reportGenerated}
+            <div className="mt-2 leading-relaxed text-slate-800 whitespace-pre-line">
+              {remarks || "—"}
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          <div className="border border-slate-400 px-3 py-2">
-            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
-              Prescribed By
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border border-slate-300 px-3 py-3 space-y-1">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              Prescription Details
             </span>
-            <div className="text-slate-800 leading-relaxed">
-              {prescribedBy}
-            </div>
-          </div>
-          <div className="border border-slate-400 px-3 py-2">
-            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
-              Prepared By
-            </span>
-            <div className="text-slate-800 leading-relaxed space-y-1">
-              <div>{preparedBy}</div>
+            <div className="leading-relaxed text-slate-800">
+              <div><strong>Prescribed By:</strong> {prescribedBy}</div>
+              <div><strong>Prepared By:</strong> {preparedBy}</div>
               {prescription?.preparedByCredentials ? (
                 <div>{prescription.preparedByCredentials}</div>
               ) : null}
@@ -442,21 +457,29 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => 
               ) : null}
             </div>
           </div>
-          <div className="border border-slate-400 px-3 py-2">
-            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-1">
-              Printed By
-            </span>
-            <div className="text-slate-800 leading-relaxed">
-              {printedBy}
+          <div className="border border-slate-300 px-3 py-3 space-y-2">
+            <div>
+              <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                Printed By
+              </span>
+              <div className="mt-2 leading-relaxed text-slate-800">{printedBy}</div>
+            </div>
+            <div>
+              <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                Report Generated
+              </span>
+              <div className="mt-2 leading-relaxed text-slate-800">{reportGenerated}</div>
+            </div>
+            <div>
+              <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                Printed On
+              </span>
+              <div className="mt-2 leading-relaxed text-slate-800">{printedOn}</div>
+            </div>
+            <div className="border-t border-slate-200 pt-4 text-[10px] uppercase tracking-[0.4em] text-right text-slate-500">
+              Doctor Signature
             </div>
           </div>
-        </div>
-
-        <div className="border border-slate-300 px-3 py-5 text-[10px] text-slate-500 uppercase tracking-[0.4em] text-right">
-          Doctor Signature
-        </div>
-        <div className="text-[10px] text-slate-500 uppercase tracking-[0.3em] text-center pt-4">
-          Lifestyle • Nutrition • Physiotherapy • Allergy Care
         </div>
       </div>
     </div>

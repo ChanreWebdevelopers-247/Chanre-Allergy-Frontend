@@ -1,8 +1,12 @@
-import React, { useMemo, useState, useRef, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useSelector, useDispatch } from "react-redux";
-import { createPrescription, fetchPatientDetails, fetchPrescriptions } from "../../../../features/doctor/doctorThunks";
-import { Save, ArrowLeft, CheckCircle, Loader2, Plus, Trash2, Printer } from "lucide-react";
+import { useDispatch, useSelector } from "react-redux";
+import {
+  createPrescription,
+  fetchPatientDetails,
+  fetchPrescriptions,
+} from "../../../../features/doctor/doctorThunks";
+import { ArrowLeft, Loader2, Printer, Save } from "lucide-react";
 import API from "../../../../services/api";
 import { buildPrescriptionPrintHTML, openPrintPreview } from "../../../../utils/prescriptionPrint";
 
@@ -24,64 +28,81 @@ const DEFAULT_CENTER_INFO = {
 
 const DEFAULT_REMARKS = "Keep patient hydrated. Advise rest if fatigue worsens.";
 
+const createEmptyMedication = () => ({
+  drugName: "",
+  dose: "",
+  duration: "",
+  instructions: "",
+});
+
+const createEmptyTest = () => ({
+  name: "",
+  instruction: "",
+});
+
+const joinLine = (segments) => segments.filter(Boolean).join(" | ");
+
+const getDefaultDateTime = () => {
+  const now = new Date();
+  return {
+    date: now.toISOString().split("T")[0],
+    time: now.toTimeString().slice(0, 5),
+  };
+};
+
+const combineDateTime = (dateValue, timeValue) => {
+  if (!dateValue) return "";
+  const safeTime = timeValue && timeValue.length ? timeValue : "00:00";
+  return `${dateValue}T${safeTime}`;
+};
+
+const INITIAL_MEDICATION_ROWS = 1;
+const INITIAL_TEST_ROWS = 1;
+
 export default function AddMedications() {
   const { id } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
-  const {
-    createPrescriptionLoading,
-    patientDetails,
-    patientDetailsLoading,
-  } = useSelector(
+  const { createPrescriptionLoading, patientDetails, patientDetailsLoading } = useSelector(
     (state) => state.doctor
   );
   const { user } = useSelector((state) => state.auth);
 
   const patient = useMemo(() => {
     if (!patientDetails) return null;
-    return patientDetails?.patient || patientDetails;
+    return patientDetails.patient || patientDetails;
   }, [patientDetails]);
+
+  const defaultMedicalCouncilNumber =
+    user?.medicalCouncilNumber || user?.kmcNumber || user?.kmc || "";
+  const { date: defaultPrescribedDate, time: defaultPrescribedTime } = getDefaultDateTime();
 
   const [formData, setFormData] = useState({
     prescribedBy: user?.name || "",
-    prescribedDate: new Date().toISOString().split("T")[0],
+    prescribedDate: defaultPrescribedDate,
     patientId: id,
   });
 
-  const [medications, setMedications] = useState([
-    {
-      drugName: "",
-      dose: "",
-      frequency: "",
-      duration: "",
-      instructions: "",
-    },
-  ]);
-
-  const [tests, setTests] = useState([
-    {
-      name: "",
-      instruction: "",
-    },
-  ]);
-
   const [diagnosis, setDiagnosis] = useState("");
-  const [testFollowupInstruction, setTestFollowupInstruction] = useState(
-    "R/W with reports after 12 weeks"
-  );
   const [reportGeneratedAt, setReportGeneratedAt] = useState(
-    new Date().toISOString().slice(0, 16)
+    combineDateTime(defaultPrescribedDate, defaultPrescribedTime)
   );
   const [preparedBy, setPreparedBy] = useState(user?.name || "");
   const [preparedByCredentials, setPreparedByCredentials] = useState("MD, DNB, DM");
-  const [medicalCouncilNumber, setMedicalCouncilNumber] = useState("");
+  const [medicalCouncilNumber, setMedicalCouncilNumber] = useState(defaultMedicalCouncilNumber);
   const [printedBy, setPrintedBy] = useState(user?.name || "");
+  const [followUpInstruction, setFollowUpInstruction] = useState("R/W with reports after 12 weeks");
+  const [remarks, setRemarks] = useState(DEFAULT_REMARKS);
+  const [prescribedTime, setPrescribedTime] = useState(defaultPrescribedTime);
 
-  const [submissionState, setSubmissionState] = useState({ status: "idle", message: "" });
+  const [medications, setMedications] = useState(() =>
+    Array.from({ length: INITIAL_MEDICATION_ROWS }, createEmptyMedication)
+  );
+  const [tests, setTests] = useState(() => Array.from({ length: INITIAL_TEST_ROWS }, createEmptyTest));
+
+  const [feedback, setFeedback] = useState({ status: "idle", message: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const prescriptionRef = useRef(null);
 
   const [centerInfo, setCenterInfo] = useState(DEFAULT_CENTER_INFO);
   const [centerLoading, setCenterLoading] = useState(false);
@@ -90,12 +111,8 @@ export default function AddMedications() {
     if (!user) return null;
 
     if (user.centerId) {
-      if (typeof user.centerId === "object" && user.centerId._id) {
-        return user.centerId._id;
-      }
-      if (typeof user.centerId === "string") {
-        return user.centerId;
-      }
+      if (typeof user.centerId === "object" && user.centerId._id) return user.centerId._id;
+      if (typeof user.centerId === "string") return user.centerId;
     }
 
     if (user.centerID) return user.centerID;
@@ -105,13 +122,21 @@ export default function AddMedications() {
     return null;
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (id) {
       dispatch(fetchPatientDetails(id));
     }
   }, [dispatch, id]);
 
-  React.useEffect(() => {
+  useEffect(() => {
+    const defaultNumber =
+      user?.medicalCouncilNumber || user?.kmcNumber || user?.kmc || "";
+    if (defaultNumber && !medicalCouncilNumber) {
+      setMedicalCouncilNumber(defaultNumber);
+    }
+  }, [user?.medicalCouncilNumber, user?.kmcNumber, user?.kmc, medicalCouncilNumber]);
+
+  useEffect(() => {
     const fetchCenterInfo = async () => {
       if (!user) return;
 
@@ -132,17 +157,14 @@ export default function AddMedications() {
       try {
         const response = await API.get(`/centers/${centerId}`);
         const center = response.data || {};
-
-        const formattedAddress = [center.address, center.location]
-          .filter(Boolean)
-          .join(", ");
+        const formattedAddress = [center.address, center.location].filter(Boolean).join(", ");
 
         setCenterInfo((prev) => ({
           ...prev,
           name: center.name || prev.name,
           subTitle: prev.subTitle,
           address: formattedAddress || prev.address,
-          location: center.location || prev.location || prev.address,
+          location: center.location || prev.location,
           email: center.email || prev.email,
           phone: center.phone || prev.phone,
           fax: center.fax || prev.fax,
@@ -152,8 +174,8 @@ export default function AddMedications() {
           labWebsite: center.labWebsite || prev.labWebsite,
           code: center.code || prev.code,
         }));
-      } catch (centerError) {
-        console.error("Failed to fetch center info", centerError);
+      } catch (error) {
+        console.error("Failed to fetch center info", error);
       } finally {
         setCenterLoading(false);
       }
@@ -163,194 +185,155 @@ export default function AddMedications() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setFormData((prev) => ({ ...prev, patientId: id }));
   }, [id]);
 
-  React.useEffect(() => {
-    if (user?.name && !formData.prescribedBy) {
-      setFormData((prev) => ({ ...prev, prescribedBy: user.name }));
-    }
-    if (user?.name && !preparedBy) {
-      setPreparedBy(user.name);
-    }
-    if (user?.name && !printedBy) {
-      setPrintedBy(user.name);
-    }
-  }, [user?.name, formData.prescribedBy, preparedBy, printedBy]);
-
-  React.useEffect(() => {
+  useEffect(() => {
     if (patient?.diagnosis && !diagnosis) {
       setDiagnosis(patient.diagnosis);
     }
   }, [patient, diagnosis]);
 
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
+  useEffect(() => {
+    if (user?.name) {
+      setFormData((prev) => ({ ...prev, prescribedBy: prev.prescribedBy || user.name }));
+      setPreparedBy((prev) => prev || user.name);
+      setPrintedBy((prev) => prev || user.name);
+    }
+  }, [user?.name]);
 
-  const handleMedicationChange = (index, field, value) => {
+  const updateMedication = (index, field, value) => {
     setMedications((prev) =>
-      prev.map((med, medIndex) =>
-        medIndex === index
+      prev.map((item, rowIndex) =>
+        rowIndex === index
           ? {
-              ...med,
+              ...item,
               [field]: value,
             }
-          : med
+          : item
       )
     );
   };
 
-  const handleAddMedicationRow = () => {
-    setMedications((prev) => [
-      ...prev,
-      { drugName: "", dose: "", frequency: "", duration: "", instructions: "" },
-    ]);
-  };
-
-  const handleRemoveMedicationRow = (index) => {
-    setMedications((prev) => {
-      if (prev.length === 1) {
-        return prev;
-      }
-      return prev.filter((_, medIndex) => medIndex !== index);
-    });
-  };
-
-  const handleTestChange = (index, field, value) => {
+  const updateTest = (index, field, value) => {
     setTests((prev) =>
-      prev.map((test, testIndex) =>
-        testIndex === index
+      prev.map((item, rowIndex) =>
+        rowIndex === index
           ? {
-              ...test,
+              ...item,
               [field]: value,
             }
-          : test
+          : item
       )
     );
   };
 
-  const handleAddTestRow = () => {
-    setTests((prev) => [...prev, { name: "", instruction: "" }]);
+  const addMedicationRow = () => {
+    setMedications((prev) => [...prev, createEmptyMedication()]);
   };
 
-  const handleRemoveTestRow = (index) => {
-    setTests((prev) => {
-      if (prev.length === 1) {
-        return prev;
-      }
-      return prev.filter((_, testIndex) => testIndex !== index);
-    });
+  const addTestRow = () => {
+    setTests((prev) => [...prev, createEmptyTest()]);
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
 
     const trimmedMedications = medications
-      .map((med) => ({
-        ...med,
-        drugName: med.drugName.trim(),
-        dose: med.dose.trim(),
-        frequency: med.frequency.trim(),
-        duration: med.duration.trim(),
-        instructions: med.instructions.trim(),
+      .map((item) => ({
+        drugName: item.drugName.trim(),
+        dose: item.dose.trim(),
+        duration: item.duration.trim(),
+        instructions: item.instructions.trim(),
       }))
-      .filter((med) => med.drugName || med.dose || med.duration || med.instructions);
+      .filter((item) => item.drugName || item.dose || item.duration || item.instructions);
 
     if (trimmedMedications.length === 0) {
-      setSubmissionState({
+      setFeedback({
         status: "error",
-        message: "Add at least one medication before saving the prescription.",
+        message: "Please fill at least one medicine row before saving.",
       });
       return;
     }
 
     const invalidMedication = trimmedMedications.find(
-      (med) => !med.drugName || !med.dose || !med.duration
+      (item) => !item.drugName || !item.dose || !item.duration
     );
 
     if (invalidMedication) {
-      setSubmissionState({
+      setFeedback({
         status: "error",
-        message: "Please fill in the medicine name, dose, and duration for each entry.",
+        message: "Medicine name, dosage, and duration are required for each medicine row.",
       });
       return;
     }
 
     const trimmedTests = tests
-      .map((test) => ({
-        name: test.name.trim(),
-        instruction: test.instruction.trim(),
+      .map((item) => ({
+        name: item.name.trim(),
+        instruction: item.instruction.trim(),
       }))
-      .filter((test) => test.name || test.instruction);
+      .filter((item) => item.name || item.instruction);
 
-    const normalizedMedicationsForApi = trimmedMedications.map((med) => ({
-      medicationName: med.drugName,
-      dosage: med.dose,
-      duration: med.duration,
-      frequency: med.frequency,
-      instructions: med.instructions,
-    }));
-
-    const prescriptionPayload = {
+    const payload = {
       patientId: formData.patientId,
       doctorId: user?._id || null,
       centerId: resolveCenterId(),
       prescribedBy: formData.prescribedBy,
       prescribedDate: formData.prescribedDate,
       date: formData.prescribedDate,
-      medications: normalizedMedicationsForApi,
+      medications: trimmedMedications.map((item) => ({
+        medicationName: item.drugName,
+        dosage: item.dose,
+        duration: item.duration,
+        instructions: item.instructions,
+      })),
       tests: trimmedTests,
       diagnosis: diagnosis.trim(),
-      followUpInstruction: testFollowupInstruction.trim(),
-      followUp: testFollowupInstruction.trim(),
+      followUpInstruction: followUpInstruction.trim(),
+      followUp: followUpInstruction.trim(),
       reportGeneratedAt,
       preparedBy: preparedBy.trim(),
       preparedByCredentials: preparedByCredentials.trim(),
       medicalCouncilNumber: medicalCouncilNumber.trim(),
       printedBy: printedBy.trim(),
-      instructions: DEFAULT_REMARKS,
-      remarks: DEFAULT_REMARKS,
+      instructions: remarks.trim(),
+      remarks: remarks.trim(),
     };
 
     setIsSubmitting(true);
-    setSubmissionState({ status: "idle", message: "" });
+    setFeedback({ status: "idle", message: "" });
 
     try {
-      await dispatch(createPrescription(prescriptionPayload)).unwrap();
+      await dispatch(createPrescription(payload)).unwrap();
       await dispatch(fetchPrescriptions(formData.patientId));
 
-      setSubmissionState({
+      setFeedback({
         status: "success",
-        message: "Prescription created successfully!",
+        message: "Prescription saved successfully.",
       });
 
-      setMedications([
-        { drugName: "", dose: "", frequency: "", duration: "", instructions: "" },
-      ]);
-
-      setTests([{ name: "", instruction: "" }]);
-
+      setMedications(Array.from({ length: INITIAL_MEDICATION_ROWS }, createEmptyMedication));
+      setTests(Array.from({ length: INITIAL_TEST_ROWS }, createEmptyTest));
       setDiagnosis("");
-      setTestFollowupInstruction("R/W with reports after 12 weeks");
-      setReportGeneratedAt(new Date().toISOString().slice(0, 16));
+      setFollowUpInstruction("R/W with reports after 12 weeks");
+      setRemarks(DEFAULT_REMARKS);
+      setMedicalCouncilNumber(user?.medicalCouncilNumber || user?.kmcNumber || user?.kmc || "");
+      const { date: nextDate, time: nextTime } = getDefaultDateTime();
+      setFormData((prev) => ({ ...prev, prescribedDate: nextDate }));
+      setPrescribedTime(nextTime);
+      setReportGeneratedAt(combineDateTime(nextDate, nextTime));
       setPreparedBy(user?.name || "");
-      setPreparedByCredentials("MD, DNB, DM");
-      setMedicalCouncilNumber("");
       setPrintedBy(user?.name || "");
 
       setTimeout(() => {
         navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${id}?tab=Prescription`);
-      }, 1500);
-    } catch (submitError) {
-      const errorMessage =
-        typeof submitError === "string"
-          ? submitError
-          : submitError?.message || "Failed to create prescription. Please try again.";
-
-      setSubmissionState({ status: "error", message: errorMessage });
+      }, 1200);
+    } catch (error) {
+      const message =
+        typeof error === "string" ? error : error?.message || "Failed to save prescription.";
+      setFeedback({ status: "error", message });
     } finally {
       setIsSubmitting(false);
     }
@@ -368,8 +351,8 @@ export default function AddMedications() {
       medications,
       tests,
       diagnosis,
-      followUpInstruction: testFollowupInstruction,
-      remarks: DEFAULT_REMARKS,
+      followUpInstruction,
+      remarks,
     }),
     [
       diagnosis,
@@ -380,8 +363,9 @@ export default function AddMedications() {
       preparedByCredentials,
       printedBy,
       reportGeneratedAt,
-      testFollowupInstruction,
+      followUpInstruction,
       tests,
+      remarks,
     ]
   );
 
@@ -400,22 +384,38 @@ export default function AddMedications() {
     }
   }, [centerInfo, patient, printablePrescription]);
 
+  const contactLineOne = joinLine([
+    centerInfo.phone ? `Phone: ${centerInfo.phone}` : "",
+    centerInfo.fax ? `Fax: ${centerInfo.fax}` : "",
+    centerInfo.code ? `Center Code: ${centerInfo.code}` : "",
+  ]);
+  const contactLineTwo = joinLine([
+    centerInfo.email ? `Email: ${centerInfo.email}` : "",
+    centerInfo.website || "",
+  ]);
+  const contactLineThree = joinLine([
+    centerInfo.labWebsite ? `Lab: ${centerInfo.labWebsite}` : "",
+    centerInfo.missCallNumber ? `Missed Call: ${centerInfo.missCallNumber}` : "",
+    centerInfo.mobileNumber ? `Appointment: ${centerInfo.mobileNumber}` : "",
+  ]);
+
   return (
     <div className="min-h-screen bg-slate-100 py-6 px-4 sm:px-6">
-      <div className="max-w-5xl mx-auto space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <button
+            type="button"
             onClick={() => navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${id}`)}
-            className="inline-flex items-center gap-2 text-xs text-slate-600 hover:text-slate-800 transition-colors"
+            className="inline-flex items-center gap-2 text-xs text-slate-600 transition-colors hover:text-slate-900"
           >
             <ArrowLeft className="h-4 w-4" />
             Back to Patient
           </button>
-          <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg bg-white hover:bg-slate-100 transition-colors text-xs"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs text-slate-700 transition-colors hover:bg-slate-100"
             >
               <Printer className="h-4 w-4" />
               Print Preview
@@ -423,376 +423,313 @@ export default function AddMedications() {
           </div>
         </div>
 
-        {submissionState.status === "success" && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center text-xs text-green-700">
-            <CheckCircle className="h-4 w-4 text-green-500 mr-3" />
-            {submissionState.message}
+        {feedback.status !== "idle" ? (
+          <div
+            className={`rounded-lg border px-3 py-2 text-xs ${
+              feedback.status === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+          >
+            {feedback.message}
           </div>
-        )}
-
-        {submissionState.status === "error" && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center text-xs text-red-700">
-            <CheckCircle className="h-4 w-4 text-red-500 mr-3" />
-            {submissionState.message}
-          </div>
-        )}
+        ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div
-            ref={prescriptionRef}
-            className="bg-white border border-slate-400 rounded-xl shadow-sm overflow-hidden"
-          >
-            <div className="px-6 py-6 border-b border-slate-400 text-center space-y-1">
-              <h1 className="text-[15px] sm:text-[17px] font-semibold uppercase tracking-[0.35em] text-slate-800">
-                {centerInfo.name}
-              </h1>
-              {centerInfo.subTitle ? (
-                <p className="text-[11px] text-slate-700 leading-relaxed">{centerInfo.subTitle}</p>
-              ) : null}
-              <p className="text-[11px] text-slate-700">
-                {centerInfo.address}
-                {centerInfo.location && !centerInfo.address?.includes(centerInfo.location)
-                  ? `, ${centerInfo.location}`
-                  : ""}
-              </p>
-              <p className="text-[11px] text-slate-700">
-                {centerInfo.phone ? `Phone: ${centerInfo.phone}` : ""}
-                {centerInfo.fax ? ` | Fax: ${centerInfo.fax}` : ""}
-                {centerInfo.code ? ` | Center Code: ${centerInfo.code}` : ""}
-              </p>
-              <p className="text-[11px] text-slate-700">
-                {centerInfo.email ? `Email: ${centerInfo.email}` : ""}
-                {centerInfo.website ? ` | ${centerInfo.website}` : ""}
-              </p>
-              <p className="text-[11px] text-slate-700">
-                {centerInfo.labWebsite ? `Lab: ${centerInfo.labWebsite}` : ""}
-                {centerInfo.missCallNumber ? ` | Missed Call: ${centerInfo.missCallNumber}` : ""}
-                {centerInfo.mobileNumber ? ` | Appointment: ${centerInfo.mobileNumber}` : ""}
-              </p>
-              {centerLoading && (
-                <div className="flex items-center justify-center gap-2 text-[11px] text-slate-500 pt-2">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Refreshing center details…
-                </div>
-              )}
+          <div className="rounded-xl border border-slate-400 bg-white shadow-sm">
+            <div className="border-b border-slate-400 px-6 py-6">
+              <div className="space-y-1 text-center">
+                <h1 className="text-[16px] font-semibold uppercase tracking-[0.35em] text-slate-900">
+                  {centerInfo.name}
+                </h1>
+                {centerInfo.address ? (
+                  <div className="text-[11px] text-slate-700">{centerInfo.address}</div>
+                ) : null}
+                {contactLineOne ? (
+                  <div className="text-[11px] text-slate-700">{contactLineOne}</div>
+                ) : null}
+                {contactLineTwo ? (
+                  <div className="text-[11px] text-slate-700">{contactLineTwo}</div>
+                ) : null}
+                {contactLineThree ? (
+                  <div className="text-[11px] text-slate-700">{contactLineThree}</div>
+                ) : null}
+                {centerLoading ? (
+                  <div className="flex items-center justify-center gap-2 pt-1 text-[11px] text-slate-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Refreshing center information…
+                  </div>
+                ) : null}
+              </div>
             </div>
 
-            <div className="px-6 py-5 space-y-6">
-              <table className="w-full text-[12px] text-slate-800 border border-slate-400">
-                <tbody>
-                  <tr>
-                    <td className="border border-slate-400 px-3 py-2 align-top">
-                      <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
-                        Patient Name
-                      </span>
-                      <span className="block mt-1 font-semibold">
-                        {patientDetailsLoading ? "Loading..." : patient?.name || "—"}
-                      </span>
-                    </td>
-                    <td className="border border-slate-400 px-3 py-2 align-top">
-                      <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
-                        Patient ID / UHID
-                      </span>
-                      <span className="block mt-1">
-                        {patient?.uhId || patient?.patientCode || patient?._id || "—"}
-                      </span>
-                    </td>
-                    <td className="border border-slate-400 px-3 py-2 align-top">
-                      <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
-                        Age / Gender
-                      </span>
-                      <span className="block mt-1">
-                        {patient?.age ? `${patient.age}` : "—"}
-                        {patient?.gender ? ` / ${patient.gender}` : ""}
-                      </span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="border border-slate-400 px-3 py-2 align-top" colSpan={2}>
-                      <label className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-2">
-                        Diagnosis
-                      </label>
-                      <textarea
-                        value={diagnosis}
-                        onChange={(event) => setDiagnosis(event.target.value)}
-                        rows={2}
-                        placeholder="Enter diagnosis"
-                        className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500 resize-y"
-                      />
-                    </td>
-                    <td className="border border-slate-400 px-3 py-2 align-top">
-                      <label className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-2">
-                        Prescribed Date
-                      </label>
-                      <input
-                        type="date"
-                        name="prescribedDate"
-                        value={formData.prescribedDate}
-                        onChange={handleChange}
-                        required
-                        className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                      />
-                      <label className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mt-3 mb-2">
-                        Report Generated At
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={reportGeneratedAt}
-                        onChange={(event) => setReportGeneratedAt(event.target.value)}
-                        className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                      />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div className="px-6 py-6">
+              <div className="overflow-x-auto">
+                <table className="w-full border border-slate-400 text-left text-[12px] text-slate-800">
+                  <tbody>
+                    <tr>
+                      <td className="w-1/3 border border-slate-400 px-3 py-2 align-top">
+                        <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                          Patient Name
+                        </span>
+                        <span className="mt-1 block font-semibold">
+                          {patientDetailsLoading ? "Loading..." : patient?.name || "—"}
+                        </span>
+                      </td>
+                      <td className="w-1/3 border border-slate-400 px-3 py-2 align-top">
+                        <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                          Patient ID / UHID
+                        </span>
+                        <span className="mt-1 block">
+                          {patient?.uhId || patient?.patientCode || patient?._id || "—"}
+                        </span>
+                      </td>
+                      <td className="w-1/3 border border-slate-400 px-3 py-2 align-top">
+                        <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                          Age / Gender
+                        </span>
+                        <span className="mt-1 block">
+                          {patient?.age ? `${patient.age}` : "—"}
+                          {patient?.gender ? ` / ${patient.gender}` : ""}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border border-slate-400 px-3 py-2 align-top" colSpan={3}>
+                        <label className="mb-2 block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                          Diagnosis
+                        </label>
+                        <textarea
+                          value={diagnosis}
+                          onChange={(event) => setDiagnosis(event.target.value)}
+                          rows={2}
+                          placeholder="Enter diagnosis"
+                          className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                        />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
 
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.35em] text-slate-600 font-semibold mb-2">
+              <div className="mt-6">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-600">
                   Medicines
                 </div>
-                <table className="w-full text-[12px] text-slate-800 border border-slate-400">
-                  <thead>
-                    <tr className="bg-slate-100 text-slate-700">
-                      <th className="border border-slate-400 px-3 py-2 text-left">Medicine</th>
-                      <th className="border border-slate-400 px-3 py-2 text-left">Dosage</th>
-                      <th className="border border-slate-400 px-3 py-2 text-left">Duration</th>
-                      <th className="border border-slate-400 px-3 py-2 text-left">Instruction</th>
-                      <th className="border border-slate-400 px-3 py-2 text-left">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {medications.map((medication, index) => (
-                      <tr key={`med-${index}`} className="align-top">
-                        <td className="border border-slate-400 px-3 py-2">
-                          <input
-                            type="text"
-                            name="drugName"
-                            value={medication.drugName}
-                            onChange={(event) =>
-                              handleMedicationChange(index, "drugName", event.target.value)
-                            }
-                            required
-                            placeholder="T-Folitrax 15mg"
-                            className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                          />
-                        </td>
-                        <td className="border border-slate-400 px-3 py-2">
-                          <input
-                            type="text"
-                            name="dose"
-                            value={medication.dose}
-                            onChange={(event) =>
-                              handleMedicationChange(index, "dose", event.target.value)
-                            }
-                            required
-                            placeholder="1 TAB/WEEK (MONDAY)"
-                            className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                          />
-                        </td>
-                        <td className="border border-slate-400 px-3 py-2">
-                          <input
-                            type="text"
-                            name="duration"
-                            value={medication.duration}
-                            onChange={(event) =>
-                              handleMedicationChange(index, "duration", event.target.value)
-                            }
-                            required
-                            placeholder="12 weeks"
-                            className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                          />
-                        </td>
-                        <td className="border border-slate-400 px-3 py-2">
-                          <textarea
-                            name="instructions"
-                            value={medication.instructions}
-                            onChange={(event) =>
-                              handleMedicationChange(index, "instructions", event.target.value)
-                            }
-                            rows={2}
-                            placeholder="For itching"
-                            className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500 resize-y"
-                          />
-                        </td>
-                        <td className="border border-slate-400 px-3 py-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveMedicationRow(index)}
-                            disabled={medications.length === 1}
-                            className="inline-flex items-center justify-center gap-1 px-3 py-1.5 border border-red-200 text-red-600 rounded-md text-[11px] hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Remove
-                          </button>
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full border border-slate-400 text-left text-[12px] text-slate-800">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700">
+                        <th className="border border-slate-400 px-3 py-2 font-medium">Medicine</th>
+                        <th className="border border-slate-400 px-3 py-2 font-medium">Dosage</th>
+                        <th className="border border-slate-400 px-3 py-2 font-medium">Duration</th>
+                        <th className="border border-slate-400 px-3 py-2 font-medium">Instruction</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="flex justify-end pt-3">
+                    </thead>
+                    <tbody>
+                      {medications.map((item, index) => (
+                        <tr key={`medication-${index}`} className="align-top">
+                          <td className="border border-slate-400 px-3 py-2">
+                            <input
+                              type="text"
+                              value={item.drugName}
+                              onChange={(event) => updateMedication(index, "drugName", event.target.value)}
+                              placeholder="T-Folitrax 15mg"
+                              className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                            />
+                          </td>
+                          <td className="border border-slate-400 px-3 py-2">
+                            <input
+                              type="text"
+                              value={item.dose}
+                              onChange={(event) => updateMedication(index, "dose", event.target.value)}
+                              placeholder="1 tab/week (Monday)"
+                              className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                            />
+                          </td>
+                          <td className="border border-slate-400 px-3 py-2">
+                            <input
+                              type="text"
+                              value={item.duration}
+                              onChange={(event) => updateMedication(index, "duration", event.target.value)}
+                              placeholder="12 weeks"
+                              className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                            />
+                          </td>
+                          <td className="border border-slate-400 px-3 py-2">
+                            <textarea
+                              value={item.instructions}
+                              onChange={(event) => updateMedication(index, "instructions", event.target.value)}
+                              rows={2}
+                              placeholder="For itching"
+                              className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex justify-end">
                   <button
                     type="button"
-                    onClick={handleAddMedicationRow}
-                    className="inline-flex items-center gap-2 px-4 py-2 border border-slate-400 text-slate-700 rounded-md text-xs hover:bg-slate-100 transition-colors"
+                    onClick={addMedicationRow}
+                    className="inline-flex items-center justify-center rounded-md border border-slate-400 px-4 py-2 text-xs text-slate-700 transition-colors hover:bg-slate-100"
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add Medicine
+                    Add Medicine Row
                   </button>
                 </div>
               </div>
 
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.35em] text-slate-600 font-semibold mb-2">
-                  Tests & Follow-up
+              <div className="mt-6">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-600">
+                  Tests &amp; Follow-up
                 </div>
-                <table className="w-full text-[12px] text-slate-800 border border-slate-400">
-                  <thead>
-                    <tr className="bg-slate-100 text-slate-700">
-                      <th className="border border-slate-400 px-3 py-2 text-left">Test Name</th>
-                      <th className="border border-slate-400 px-3 py-2 text-left">Instruction</th>
-                      <th className="border border-slate-400 px-3 py-2 text-left">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tests.map((test, index) => (
-                      <tr key={`test-${index}`} className="align-top">
-                        <td className="border border-slate-400 px-3 py-2">
-                          <input
-                            type="text"
-                            value={test.name}
-                            onChange={(event) => handleTestChange(index, "name", event.target.value)}
-                            placeholder="RAFU"
-                            className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                          />
-                        </td>
-                        <td className="border border-slate-400 px-3 py-2">
-                          <textarea
-                            value={test.instruction}
-                            onChange={(event) =>
-                              handleTestChange(index, "instruction", event.target.value)
-                            }
-                            rows={2}
-                            placeholder="R/W with reports after 12 weeks"
-                            className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500 resize-y"
-                          />
-                        </td>
-                        <td className="border border-slate-400 px-3 py-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveTestRow(index)}
-                            disabled={tests.length === 1}
-                            className="inline-flex items-center justify-center gap-1 px-3 py-1.5 border border-red-200 text-red-600 rounded-md text-[11px] hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Remove
-                          </button>
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full border border-slate-400 text-left text-[12px] text-slate-800">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700">
+                        <th className="border border-slate-400 px-3 py-2 font-medium">Test Name</th>
+                        <th className="border border-slate-400 px-3 py-2 font-medium">Instruction</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="flex justify-end pt-3">
+                    </thead>
+                    <tbody>
+                      {tests.map((item, index) => (
+                        <tr key={`test-${index}`} className="align-top">
+                          <td className="border border-slate-400 px-3 py-2">
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(event) => updateTest(index, "name", event.target.value)}
+                              placeholder="RAFU"
+                              className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                            />
+                          </td>
+                          <td className="border border-slate-400 px-3 py-2">
+                            <textarea
+                              value={item.instruction}
+                              onChange={(event) => updateTest(index, "instruction", event.target.value)}
+                              rows={2}
+                              placeholder="R/W with reports after 12 weeks"
+                              className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex justify-end">
                   <button
                     type="button"
-                    onClick={handleAddTestRow}
-                    className="inline-flex items-center gap-2 px-4 py-2 border border-slate-400 text-slate-700 rounded-md text-xs hover:bg-slate-100 transition-colors"
+                    onClick={addTestRow}
+                    className="inline-flex items-center justify-center rounded-md border border-slate-400 px-4 py-2 text-xs text-slate-700 transition-colors hover:bg-slate-100"
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add Test
+                    Add Test Row
                   </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="border border-slate-400 px-3 py-2">
-                  <label className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-2">
+              <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                <div className="border border-slate-400 px-3 py-3">
+                  <label className="mb-2 block text-[10px] uppercase tracking-[0.25em] text-slate-500">
                     Follow-up Instruction
                   </label>
                   <textarea
-                    value={testFollowupInstruction}
-                    onChange={(event) => setTestFollowupInstruction(event.target.value)}
-                    rows={3}
-                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500 resize-y"
+                    value={followUpInstruction}
+                    onChange={(event) => setFollowUpInstruction(event.target.value)}
+                    rows={5}
+                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
                   />
                 </div>
-                <div className="border border-slate-400 px-3 py-2">
-                  <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-2">
+                <div className="border border-slate-400 px-3 py-3">
+                  <label className="mb-2 block text-[10px] uppercase tracking-[0.25em] text-slate-500">
                     Remarks
-                  </span>
-                  <div className="text-[12px] text-slate-700 leading-relaxed">
-                    {DEFAULT_REMARKS}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                <div className="border border-slate-400 px-3 py-2 space-y-2">
-                  <label className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
-                    Prescribed By
                   </label>
-                  <input
-                    type="text"
-                    name="prescribedBy"
-                    value={formData.prescribedBy}
-                    readOnly
-                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-600 bg-slate-100 cursor-not-allowed"
-                  />
-                  <label className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
-                    Prepared By
-                  </label>
-                  <input
-                    type="text"
-                    value={preparedBy}
-                    onChange={(event) => setPreparedBy(event.target.value)}
-                    placeholder="Doctor's name"
-                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                  />
-                  <input
-                    type="text"
-                    value={preparedByCredentials}
-                    onChange={(event) => setPreparedByCredentials(event.target.value)}
-                    placeholder="MD, DNB, DM"
-                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                  />
-                  <input
-                    type="text"
-                    value={medicalCouncilNumber}
-                    onChange={(event) => setMedicalCouncilNumber(event.target.value)}
-                    placeholder="Medical Council Reg. No."
-                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                  <textarea
+                    value={remarks}
+                    onChange={(event) => setRemarks(event.target.value)}
+                    rows={5}
+                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
                   />
                 </div>
-                <div className="border border-slate-400 px-3 py-2 space-y-2">
-                  <label className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
-                    Printed By
-                  </label>
-                  <input
-                    type="text"
-                    value={printedBy}
-                    onChange={(event) => setPrintedBy(event.target.value)}
-                    placeholder="Name"
-                    className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                  />
-                  <div className="border border-slate-300 px-3 py-5 text-[10px] text-slate-500 uppercase tracking-[0.4em] text-right">
-                    Doctor Signature
+                <div className="border border-slate-400 px-3 py-3 space-y-3">
+                  <div>
+                    <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                      Prescribed Date &amp; Time
+                    </span>
+                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <input
+                        type="date"
+                        value={formData.prescribedDate}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setFormData((prev) => ({ ...prev, prescribedDate: value }));
+                          setReportGeneratedAt(combineDateTime(value, prescribedTime));
+                        }}
+                        required
+                        className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                      />
+                      <input
+                        type="time"
+                        value={prescribedTime}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setPrescribedTime(value);
+                          setReportGeneratedAt(combineDateTime(formData.prescribedDate, value));
+                        }}
+                        className="w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                      />
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-500 uppercase tracking-[0.3em] text-center pt-4">
-                    Lifestyle • Nutrition • Physiotherapy • Allergy Care
+                  <div>
+                    <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                      Prescription Prepared By
+                    </span>
+                    <input
+                      type="text"
+                      value={preparedBy}
+                      onChange={(event) => setPreparedBy(event.target.value)}
+                      placeholder="Dr. Chandrashekara S"
+                      className="mt-2 w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                    />
+                    <input
+                      type="text"
+                      value={preparedByCredentials}
+                      onChange={(event) => setPreparedByCredentials(event.target.value)}
+                      placeholder="MD, DNB, DM"
+                      className="mt-2 w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                    />
+                    <input
+                      type="text"
+                      value={medicalCouncilNumber}
+                      onChange={(event) => setMedicalCouncilNumber(event.target.value)}
+                      placeholder="Medical Council Reg. No."
+                      className="mt-2 w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                    />
                   </div>
-                  <div className="text-[11px] text-slate-600">
-                    <span className="font-semibold">Report Generated:</span>{" "}
-                    {reportGeneratedAt ? new Date(reportGeneratedAt).toLocaleString() : "—"}
+                  <div>
+                    <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                      Printed By
+                    </span>
+                    <input
+                      type="text"
+                      value={printedBy}
+                      onChange={(event) => setPrintedBy(event.target.value)}
+                      placeholder="Dr. Devaraj Kori"
+                      className="mt-2 w-full border border-slate-300 px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-slate-500"
+                    />
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:justify-end gap-3 pt-2">
+          <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={() => navigate(`/dashboard/Doctor/patients/profile/ViewProfile/${id}`)}
-              className="px-6 py-3 border border-slate-300 text-slate-700 rounded-lg bg-white hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 text-xs"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-6 py-3 text-xs text-slate-700 transition-colors hover:bg-slate-100"
             >
               <ArrowLeft className="h-4 w-4" />
               Cancel
@@ -800,12 +737,12 @@ export default function AddMedications() {
             <button
               type="submit"
               disabled={createPrescriptionLoading || isSubmitting}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-xs"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-xs text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {createPrescriptionLoading || isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Saving Prescription…
+                  Saving…
                 </>
               ) : (
                 <>

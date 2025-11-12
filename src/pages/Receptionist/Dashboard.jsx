@@ -21,7 +21,8 @@ import {
   MapPin,
   UserCheck,
   Activity,
-  Building
+  Building,
+  IndianRupee
 } from 'lucide-react';
 
 export default function ReceptionistDashboard() {
@@ -108,7 +109,7 @@ export default function ReceptionistDashboard() {
     switch (status) {
       case 'Completed': return <CheckCircle className="h-4 w-4" />;
       case 'Tests Done': return <TestTube className="h-4 w-4" />;
-      case 'Payment Done': return <DollarSign className="h-4 w-4" />;
+      case 'Payment Done': return <IndianRupee className="h-4 w-4" />;
       case 'Tests Pending': return <Clock className="h-4 w-4" />;
       case 'Payment Pending': return <AlertCircle className="h-4 w-4" />;
       case 'Tests & Payment Pending': return <AlertCircle className="h-4 w-4" />;
@@ -208,7 +209,7 @@ export default function ReceptionistDashboard() {
     {
       title: 'Consultation Fee',
       description: 'Collect doctor consultation fees',
-      icon: <DollarSign className="h-6 w-6" />,
+      icon: <IndianRupee className="h-6 w-6" />,
       color: 'bg-orange-500',
       hoverColor: 'hover:bg-orange-600',
       onClick: () => navigate('/dashboard/receptionist/consultation-billing')
@@ -469,7 +470,7 @@ export default function ReceptionistDashboard() {
                             {/* Billing Status */}
                             {patient.billing && patient.billing.length > 0 && (
                               <span className="flex items-center gap-1 text-xs text-slate-600">
-                                <DollarSign className="h-3 w-3" />
+                                <IndianRupee className="h-3 w-3" />
                                 {patient.billing.filter(b => b.status === 'paid').length}/{patient.billing.length} Bills Paid
                               </span>
                             )}

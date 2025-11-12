@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import {
@@ -34,14 +34,423 @@ import {
   Edit,
   Clock,
   Paperclip,
-  Download
+  Download,
+  Printer,
+  X
 } from 'lucide-react';
 import { SERVER_CONFIG } from '../../../config/environment';
 import API from '../../../services/api';
 import { toast } from 'react-toastify';
 import { openDocumentWithFallback } from '../../../utils/documentHelpers';
+import { buildPrescriptionPrintHTML, openPrintPreview } from '../../../utils/prescriptionPrint';
 
-const TABS = ["Overview", "Tests", "Medications", "Lab Reports", "Follow Up", "Prescription"];
+const TABS = ["Overview", "Tests",  "Lab Reports", "Follow Up", "Prescription"];
+
+const DEFAULT_CENTER_INFO = {
+  name: "CHANRE RHEUMATOLOGY & IMMUNOLOGY CENTER & RESEARCH",
+  address: "No. 414/5&6, 20th Main, West of Chord Road, 1st Block, Rajajinagar, Bengaluru - 560 010.",
+  email: "info@chanreclinic.com",
+  phone: "080-42516699",
+  fax: "080-42516600",
+  missCallNumber: "080-42516666",
+  mobileNumber: "9532333122",
+  website: "www.chanreicr.com | www.mychanreclinic.com",
+  labWebsite: "www.chanrelabresults.com",
+  code: "",
+};
+
+const DEFAULT_REMARKS = "Keep patient hydrated. Advise rest if fatigue worsens.";
+
+const resolvePrescriptionDate = (prescription) =>
+  prescription?.prescribedDate || prescription?.date || prescription?.createdAt || null;
+
+const resolveReportGenerated = (prescription) =>
+  prescription?.reportGeneratedAt || prescription?.updatedAt || null;
+
+const resolvePrescribedBy = (prescription) =>
+  prescription?.prescribedBy ||
+  prescription?.doctorName ||
+  prescription?.doctor ||
+  prescription?.doctorId?.name ||
+  prescription?.updatedBy?.name ||
+  "";
+
+const resolvePreparedBy = (prescription) =>
+  prescription?.preparedBy ||
+  prescription?.prepared_by ||
+  resolvePrescribedBy(prescription) ||
+  "";
+
+const resolvePrintedBy = (prescription) =>
+  prescription?.printedBy ||
+  prescription?.printed_by ||
+  prescription?.preparedBy ||
+  prescription?.updatedBy?.name ||
+  prescription?.doctorId?.name ||
+  "";
+
+const resolveFollowUpInstruction = (prescription) =>
+  prescription?.followUpInstruction ||
+  prescription?.testFollowupInstruction ||
+  prescription?.followUp ||
+  prescription?.instructions ||
+  "";
+
+const resolveRemarks = (prescription) =>
+  prescription?.remarks || prescription?.notes || prescription?.instructions || DEFAULT_REMARKS;
+
+const normalizePrescriptionMedications = (prescription) =>
+  Array.isArray(prescription?.medications)
+    ? prescription.medications.map((item) => ({
+        name:
+          item.drugName ||
+          item.medicine ||
+          item.name ||
+          item.medicationName ||
+          "—",
+        dosage: [
+          item.dose ||
+            item.dosage ||
+            item.dosageDetails ||
+            item.medicineDose ||
+            "",
+          item.frequency || item.freq || item.medicineFrequency || "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim(),
+        duration: item.duration || item.period || item.medicineDuration || item.course || "—",
+        instruction: item.instructions || item.instruction || "—",
+      }))
+    : [];
+
+const normalizePrescriptionTests = (prescription) => {
+  const possibleSources = [
+    prescription?.tests,
+    prescription?.test,
+    prescription?.testDetails,
+    prescription?.testList,
+  ];
+
+  const coerceToArray = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === "object") return Object.values(value);
+    return [value];
+  };
+
+  const rawList = coerceToArray(
+    possibleSources.find((value) =>
+      value && (Array.isArray(value) ? value.length > 0 : typeof value === "object" || value)
+    )
+  );
+
+  return rawList
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        const stringValue = String(item || "").trim();
+        return stringValue
+          ? {
+              name: stringValue,
+              instruction: "—",
+            }
+          : null;
+      }
+
+      const name =
+        item.name ||
+        item.testName ||
+        item.test_name ||
+        item.test ||
+        item.title ||
+        "—";
+
+      const instruction =
+        item.instruction ||
+        item.instructions ||
+        item.note ||
+        item.description ||
+        item.details ||
+        "—";
+
+      return {
+        name: name || "—",
+        instruction: instruction || "—",
+      };
+    })
+    .filter(Boolean);
+};
+
+const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => {
+  const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
+  const ageGender = [patient?.age ? `${patient.age}` : null, patient?.gender || null]
+    .filter(Boolean)
+    .join(" / ");
+
+  const toDate = (value) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const formatDate = (value, withTime = false) => {
+    const date = toDate(value);
+    if (!date) return "—";
+    return withTime
+      ? date.toLocaleString("en-GB", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : date.toLocaleDateString("en-GB");
+  };
+
+  const contactLine = (segments) => segments.filter(Boolean).join(" | ");
+
+  const medications = normalizePrescriptionMedications(prescription);
+  const tests = normalizePrescriptionTests(prescription);
+  const followUpInstruction = resolveFollowUpInstruction(prescription) || "—";
+  const remarks = resolveRemarks(prescription) || "—";
+  const prescribedBy = resolvePrescribedBy(prescription) || "—";
+  const preparedBy = resolvePreparedBy(prescription) || "—";
+  const printedBy = resolvePrintedBy(prescription) || "—";
+  const prescribedDate = formatDate(resolvePrescriptionDate(prescription));
+  const reportGenerated = formatDate(resolveReportGenerated(prescription), true);
+  const printedOn = formatDate(new Date(), true);
+
+  return (
+    <div className="bg-white border border-slate-400 rounded-xl shadow-sm overflow-hidden">
+      <div className="border-b border-slate-400 px-6 py-6 text-center space-y-1">
+        <h2 className="text-[16px] font-semibold uppercase tracking-[0.35em] text-slate-900">
+          {mergedCenter.name}
+        </h2>
+        {mergedCenter.address ? (
+          <p className="text-[11px] text-slate-700">{mergedCenter.address}</p>
+        ) : null}
+        {contactLine([
+          mergedCenter.phone ? `Phone: ${mergedCenter.phone}` : "",
+          mergedCenter.fax ? `Fax: ${mergedCenter.fax}` : "",
+          mergedCenter.code ? `Center Code: ${mergedCenter.code}` : "",
+        ]) ? (
+          <p className="text-[11px] text-slate-700">
+            {contactLine([
+              mergedCenter.phone ? `Phone: ${mergedCenter.phone}` : "",
+              mergedCenter.fax ? `Fax: ${mergedCenter.fax}` : "",
+              mergedCenter.code ? `Center Code: ${mergedCenter.code}` : "",
+            ])}
+          </p>
+        ) : null}
+        {contactLine([
+          mergedCenter.email ? `Email: ${mergedCenter.email}` : "",
+          mergedCenter.website || "",
+        ]) ? (
+          <p className="text-[11px] text-slate-700">
+            {contactLine([
+              mergedCenter.email ? `Email: ${mergedCenter.email}` : "",
+              mergedCenter.website || "",
+            ])}
+          </p>
+        ) : null}
+        {contactLine([
+          mergedCenter.labWebsite ? `Lab: ${mergedCenter.labWebsite}` : "",
+          mergedCenter.missCallNumber ? `Missed Call: ${mergedCenter.missCallNumber}` : "",
+          mergedCenter.mobileNumber ? `Appointment: ${mergedCenter.mobileNumber}` : "",
+        ]) ? (
+          <p className="text-[11px] text-slate-700">
+            {contactLine([
+              mergedCenter.labWebsite ? `Lab: ${mergedCenter.labWebsite}` : "",
+              mergedCenter.missCallNumber ? `Missed Call: ${mergedCenter.missCallNumber}` : "",
+              mergedCenter.mobileNumber ? `Appointment: ${mergedCenter.mobileNumber}` : "",
+            ])}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="px-6 py-5 text-[12px] text-slate-800 space-y-6">
+        <table className="w-full border border-slate-400">
+          <tbody>
+            <tr>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Patient Name
+                </span>
+                <span className="block mt-1 font-semibold">{patient?.name || "—"}</span>
+              </td>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Patient ID / UHID
+                </span>
+                <span className="block mt-1">
+                  {patient?.uhId || patient?.patientCode || patient?._id || "—"}
+                </span>
+              </td>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Age / Gender
+                </span>
+                <span className="block mt-1">{ageGender || "—"}</span>
+              </td>
+            </tr>
+            <tr>
+              <td colSpan={2} className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Diagnosis
+                </span>
+                <span className="block mt-1 whitespace-pre-line">
+                  {prescription?.diagnosis || "—"}
+                </span>
+              </td>
+              <td className="border border-slate-400 px-3 py-2 align-top">
+                <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                  Prescribed Date
+                </span>
+                <span className="block mt-1">{prescribedDate}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-600">
+            Medicines
+          </div>
+          <table className="w-full border border-slate-400">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700">
+                <th className="border border-slate-400 px-3 py-2 text-left">Medicine</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Dosage</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Duration</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Instruction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {medications.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="border border-slate-400 px-3 py-3 text-center text-slate-500">
+                    No medicines added.
+                  </td>
+                </tr>
+              ) : (
+                medications.map((med, idx) => (
+                  <tr key={`preview-med-${idx}`} className="align-top">
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800 font-medium">
+                      {med.name || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {med.dosage || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {med.duration || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {med.instruction || "—"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-600">
+            Tests &amp; Follow-up
+          </div>
+          <table className="w-full border border-slate-400">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700">
+                <th className="border border-slate-400 px-3 py-2 text-left">Test Name</th>
+                <th className="border border-slate-400 px-3 py-2 text-left">Instruction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tests.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="border border-slate-400 px-3 py-3 text-center text-slate-500">
+                    No tests prescribed.
+                  </td>
+                </tr>
+              ) : (
+                tests.map((test, idx) => (
+                  <tr key={`preview-test-${idx}`} className="align-top">
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800 font-medium">
+                      {test.name || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 text-slate-800">
+                      {test.instruction || "—"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border border-slate-300 px-3 py-3">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              Follow-up Instruction
+            </span>
+            <div className="mt-2 leading-relaxed text-slate-800 whitespace-pre-line">
+              {followUpInstruction || "—"}
+            </div>
+          </div>
+          <div className="border border-slate-300 px-3 py-3">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              Remarks
+            </span>
+            <div className="mt-2 leading-relaxed text-slate-800 whitespace-pre-line">
+              {remarks || "—"}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border border-slate-300 px-3 py-3 space-y-1">
+            <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              Prescription Details
+            </span>
+            <div className="leading-relaxed text-slate-800">
+              <div><strong>Prescribed By:</strong> {prescribedBy}</div>
+              <div><strong>Prepared By:</strong> {preparedBy}</div>
+              {prescription?.preparedByCredentials ? (
+                <div>{prescription.preparedByCredentials}</div>
+              ) : null}
+              {prescription?.medicalCouncilNumber ? (
+                <div>Medical Council Reg. No.: {prescription.medicalCouncilNumber}</div>
+              ) : null}
+            </div>
+          </div>
+          <div className="border border-slate-300 px-3 py-3 space-y-2">
+            <div>
+              <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                Printed By
+              </span>
+              <div className="mt-2 leading-relaxed text-slate-800">{printedBy}</div>
+            </div>
+            <div>
+              <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                Report Generated
+              </span>
+              <div className="mt-2 leading-relaxed text-slate-800">{reportGenerated}</div>
+            </div>
+            <div>
+              <span className="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
+                Printed On
+              </span>
+              <div className="mt-2 leading-relaxed text-slate-800">{printedOn}</div>
+            </div>
+            <div className="border-t border-slate-200 pt-4 text-[10px] uppercase tracking-[0.4em] text-right text-slate-500">
+              Doctor Signature
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ViewProfile = () => {
   const { id } = useParams();
@@ -51,6 +460,8 @@ const ViewProfile = () => {
   const [activeTab, setActiveTab] = useState("Overview");
   const [dataFetched, setDataFetched] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
+  const [selectedPrescription, setSelectedPrescription] = useState(null);
 
   const formatFileSize = (bytes) => {
     if (!bytes || Number.isNaN(bytes)) return '';
@@ -127,8 +538,6 @@ const ViewProfile = () => {
     return { hours: remainingHours, minutes: remainingMinutes };
   };
 
-
-
   const {
     singlePatient: patient,
     medications,
@@ -149,6 +558,29 @@ const ViewProfile = () => {
     historyLoading,
     historyError
   } = useSelector(state => state.receptionist);
+  const { user } = useSelector((state) => state.auth);
+
+  const resolvedCenterInfo = useMemo(() => {
+    const center = patient?.centerId;
+    if (!center || typeof center !== "object") {
+      return DEFAULT_CENTER_INFO;
+    }
+
+    const formattedAddress = [center.address, center.location].filter(Boolean).join(", ");
+
+    return {
+      name: center.name || DEFAULT_CENTER_INFO.name,
+      address: formattedAddress || DEFAULT_CENTER_INFO.address,
+      email: center.email || DEFAULT_CENTER_INFO.email,
+      phone: center.phone || DEFAULT_CENTER_INFO.phone,
+      fax: center.fax || DEFAULT_CENTER_INFO.fax,
+      missCallNumber: center.missCallNumber || DEFAULT_CENTER_INFO.missCallNumber,
+      mobileNumber: center.mobileNumber || DEFAULT_CENTER_INFO.mobileNumber,
+      website: center.website || DEFAULT_CENTER_INFO.website,
+      labWebsite: center.labWebsite || DEFAULT_CENTER_INFO.labWebsite,
+      code: center.code || DEFAULT_CENTER_INFO.code,
+    };
+  }, [patient?.centerId]);
 
   useEffect(() => {
     // Check if ID is valid (not undefined, null, or empty string)
@@ -1289,14 +1721,26 @@ const ViewProfile = () => {
                             {typeof prescription.updatedBy === 'string' ? prescription.updatedBy :
                               typeof prescription.updatedBy === 'object' && prescription.updatedBy?.name ? prescription.updatedBy.name : 'N/A'}
                           </td>
-                                                      <td className="px-4 py-3 text-xs text-slate-800">
+                          <td className="px-4 py-3 text-xs text-slate-800">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                               <button
-                                onClick={() => navigate(`/dashboard/receptionist/view-prescription/${prescription._id}`)}
-                                className="text-blue-600 hover:text-blue-900 font-medium"
+                                type="button"
+                                onClick={() => handleViewPrescription(prescription)}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50"
                               >
+                                <Eye className="h-4 w-4" />
                                 View
                               </button>
-                            </td>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadPrescription(prescription)}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                              >
+                                <Printer className="h-4 w-4" />
+                                Print
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))
                     ) : (
