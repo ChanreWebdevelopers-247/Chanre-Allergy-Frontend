@@ -582,6 +582,89 @@ const ViewProfile = () => {
     };
   }, [patient?.centerId]);
 
+  const printedByName = useMemo(() => {
+    if (!user || typeof user !== "object") return null;
+    return (
+      user.name ||
+      user.fullName ||
+      user.username ||
+      user.email ||
+      (typeof user.getFullName === "function" ? user.getFullName() : null) ||
+      null
+    );
+  }, [user]);
+
+  const enrichPrescriptionForPrint = useCallback(
+    (prescription) => {
+      if (!prescription) return null;
+      if (!printedByName) return prescription;
+
+      const updatedBy =
+        prescription.updatedBy && typeof prescription.updatedBy === "object"
+          ? prescription.updatedBy
+          : prescription.updatedBy
+          ? { name: prescription.updatedBy }
+          : undefined;
+
+      return {
+        ...prescription,
+        printedBy: printedByName,
+        printed_by: printedByName,
+        printedByOverride: true,
+        updatedBy,
+      };
+    },
+    [printedByName]
+  );
+
+  const handleViewPrescription = useCallback(
+    (prescription) => {
+      if (!prescription) {
+        toast.error("Unable to open this prescription. Please try again.");
+        return;
+      }
+
+      const prepared = enrichPrescriptionForPrint(prescription) || prescription;
+      setSelectedPrescription(prepared);
+      setShowPrescriptionModal(true);
+    },
+    [enrichPrescriptionForPrint]
+  );
+
+  const handleClosePrescriptionModal = useCallback(() => {
+    setShowPrescriptionModal(false);
+    setSelectedPrescription(null);
+  }, [setSelectedPrescription, setShowPrescriptionModal]);
+
+  const handleDownloadPrescription = useCallback(
+    (prescription) => {
+      if (!prescription) {
+        toast.error("Prescription data unavailable for printing.");
+        return;
+      }
+
+      try {
+        const prepared = enrichPrescriptionForPrint(prescription) || prescription;
+        const html = buildPrescriptionPrintHTML({
+          centerInfo: resolvedCenterInfo,
+          patient,
+          prescription: prepared,
+          fallbackRemarks: DEFAULT_REMARKS,
+        });
+
+        openPrintPreview(html, {
+          onClose: () => {
+            console.log("🖨️ Print preview closed");
+          },
+        });
+      } catch (printError) {
+        console.error("❌ Failed to open prescription print preview:", printError);
+        toast.error("Unable to open the print preview. Please try again.");
+      }
+    },
+    [patient, resolvedCenterInfo, enrichPrescriptionForPrint]
+  );
+
   useEffect(() => {
     // Check if ID is valid (not undefined, null, or empty string)
     if (!id || id === 'undefined' || id === 'null' || id === '') {
@@ -1760,6 +1843,49 @@ const ViewProfile = () => {
         )}
       </div>
     </div>
+      {showPrescriptionModal && selectedPrescription ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8"
+          onClick={handleClosePrescriptionModal}
+        >
+          <div
+            className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={handleClosePrescriptionModal}
+              className="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow hover:text-slate-900 focus:outline-none focus:ring focus:ring-blue-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <PrescriptionPreviewCard
+              centerInfo={resolvedCenterInfo}
+              patient={patient}
+              prescription={selectedPrescription}
+            />
+
+            <div className="mt-4 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => handleDownloadPrescription(selectedPrescription)}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-600 focus:outline-none focus:ring focus:ring-blue-200"
+              >
+                <Printer className="h-4 w-4" />
+                Print
+              </button>
+              <button
+                type="button"
+                onClick={handleClosePrescriptionModal}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 focus:outline-none focus:ring focus:ring-slate-200"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ReceptionistLayout>
   );
 };

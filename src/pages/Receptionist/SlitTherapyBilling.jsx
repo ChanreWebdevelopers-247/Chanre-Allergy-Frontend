@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import ReceptionistLayout from './ReceptionistLayout';
+import API from '../../services/api';
+import { API_CONFIG } from '../../config/environment';
 import {
   fetchReceptionistSlitTherapyRequests,
   createReceptionistSlitTherapyRequest,
@@ -66,6 +68,22 @@ const formatDateTime = (value) => {
 
 const formatStatus = (value) => (value ? value.replace(/_/g, ' ') : '—');
 
+const resolveLogoUrl = (value) => {
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
+    return value;
+  }
+  const normalized = value.startsWith('/') ? value : `/${value}`;
+  return `${API_CONFIG.BASE_URL}${normalized}`;
+};
+
+const resolveCenterLogo = (data, previous = '') => {
+  if (!data || !Object.prototype.hasOwnProperty.call(data, 'logoUrl')) {
+    return previous;
+  }
+  return data.logoUrl ? resolveLogoUrl(data.logoUrl) : '';
+};
+
 const defaultNewRequest = {
   patientId: '',
   patientName: '',
@@ -101,6 +119,7 @@ export default function SlitTherapyBilling() {
     },
   } = useSelector((state) => state.slitTherapy);
   const { patients = [], loading: receptionistLoading } = useSelector((state) => state.receptionist);
+  const { user } = useSelector((state) => state.auth);
   const loading = slitRequestsLoading || mutationLoading || receptionistLoading;
 
   const [statusFilter, setStatusFilter] = useState('all');
@@ -118,6 +137,59 @@ export default function SlitTherapyBilling() {
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [activeSuggestionField, setActiveSuggestionField] = useState(null);
   const [invoiceRequest, setInvoiceRequest] = useState(null);
+  const [centerInfo, setCenterInfo] = useState({
+    name: 'ChanRe Allergy Center',
+    address: 'Rajajinagar, Bengaluru',
+    phone: '080-42516699',
+    fax: '080-42516600',
+    website: 'www.chanreallergy.com',
+    labWebsite: 'www.chanrelabresults.com',
+    missCallNumber: '080-42516666',
+    mobileNumber: '9686197153',
+    logoUrl: ''
+  });
+
+  const getCenterId = () => {
+    if (user?.centerId) {
+      if (typeof user.centerId === 'object' && user.centerId._id) {
+        return user.centerId._id;
+      }
+      if (typeof user.centerId === 'string') {
+        return user.centerId;
+      }
+    }
+    const storedCenterId = typeof window !== 'undefined' ? localStorage.getItem('centerId') : null;
+    if (storedCenterId) return storedCenterId;
+    return null;
+  };
+
+  useEffect(() => {
+    const fetchCenterInfo = async () => {
+      const centerId = getCenterId();
+      if (!centerId) return;
+
+      try {
+        const response = await API.get(`/centers/${centerId}`);
+        const center = response.data?.data || response.data || response;
+        setCenterInfo((prev) => ({
+          ...prev,
+          name: center?.name || prev.name,
+          address: center?.address || prev.address,
+          phone: center?.phone || prev.phone,
+          fax: center?.fax || prev.fax,
+          website: center?.website || prev.website,
+          labWebsite: center?.labWebsite || prev.labWebsite,
+          missCallNumber: center?.missCallNumber || prev.missCallNumber,
+          mobileNumber: center?.mobileNumber || prev.mobileNumber,
+          logoUrl: resolveCenterLogo(center, prev.logoUrl)
+        }));
+      } catch (error) {
+        console.error('Error fetching center info:', error);
+      }
+    };
+
+    fetchCenterInfo();
+  }, [user]);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [selectedForCancel, setSelectedForCancel] = useState(null);
   const [cancelReason, setCancelReason] = useState('');
@@ -434,6 +506,17 @@ export default function SlitTherapyBilling() {
     const paidAmount = roundToNearestTen(rawPaidAmount).toFixed(2);
     const balance = Math.max(0, roundToNearestTen(rawTotalAmount) - roundToNearestTen(rawPaidAmount)).toFixed(2);
 
+    const centerName = centerInfo.name || 'ChanRe Allergy Center';
+    const centerAddress = centerInfo.address || '';
+    const centerPhone = centerInfo.phone || '';
+    const centerFax = centerInfo.fax || '';
+    const centerWebsite = centerInfo.website || '';
+    const centerMissCall = centerInfo.missCallNumber || '';
+    const centerMobile = centerInfo.mobileNumber || '';
+    const logoTag = centerInfo.logoUrl
+      ? `<img src="${centerInfo.logoUrl}" alt="${centerName} logo" style="height:64px;width:64px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;padding:6px;background:#fff;" />`
+      : '';
+
     invoiceWindow.document.write(`<!DOCTYPE html>
       <html>
         <head>
@@ -446,25 +529,37 @@ export default function SlitTherapyBilling() {
             .section { margin-top: 16px; }
           </style>
         </head>
-        <body>
-          <h1>SLIT Therapy Invoice</h1>
-          <div class="section">
-            <h2>Invoice Details</h2>
-            <p><strong>Invoice Number:</strong> ${invoiceData.billing?.invoiceNumber || 'Pending'}</p>
-            <p><strong>Created At:</strong> ${createdAt}</p>
-            <p><strong>Status:</strong> ${invoiceData.status || 'Billing_Generated'}</p>
+        <body style="font-family: Arial, sans-serif;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;border-bottom:1px solid #e5e7eb;padding-bottom:12px;margin-bottom:20px;">
+            <div style="display:flex;align-items:center;gap:16px;">
+              ${logoTag}
+              <div>
+                <h1 style="margin:0;font-size:22px;color:#0f172a;text-transform:uppercase;letter-spacing:1px;">${centerName}</h1>
+                ${centerAddress ? `<p style="margin:4px 0;font-size:14px;color:#475569;">${centerAddress}</p>` : ''}
+                <p style="margin:2px 0;font-size:12px;color:#475569;">
+                  <strong>Phone:</strong> ${centerPhone || '—'}${centerFax ? ` | <strong>Fax:</strong> ${centerFax}` : ''}
+                </p>
+                ${centerWebsite ? `<p style="margin:2px 0;font-size:12px;color:#475569;"><strong>Website:</strong> ${centerWebsite}</p>` : ''}
+              </div>
+            </div>
+            <div style="text-align:right;font-size:12px;color:#1f2937;">
+              <p style="margin:0;font-size:18px;font-weight:600;text-transform:uppercase;color:#2563eb;">SLIT Therapy Invoice</p>
+              <p style="margin:4px 0;"><strong>No:</strong> ${invoiceData.billing?.invoiceNumber || 'Pending'}</p>
+              <p style="margin:4px 0;"><strong>Created:</strong> ${createdAt}</p>
+              <p style="margin:4px 0;"><strong>Status:</strong> ${invoiceData.status || 'Billing_Generated'}</p>
+            </div>
           </div>
-          <div class="section">
-            <h2>Patient Details</h2>
-            <p><strong>Name:</strong> ${invoiceData.patientName || '-'}</p>
-            <p><strong>Phone:</strong> ${invoiceData.patientPhone || '-'}</p>
-            <p><strong>Email:</strong> ${invoiceData.patientEmail || '-'}</p>
-            <p><strong>Patient Code:</strong> ${invoiceData.patientCode || '-'}</p>
+          <div class="section" style="margin-top:16px;">
+            <h2 style="font-size:16px;margin-bottom:8px;color:#0f172a;">Patient Details</h2>
+            <p style="margin:2px 0;font-size:13px;color:#1f2937;"><strong>Name:</strong> ${invoiceData.patientName || '-'}</p>
+            <p style="margin:2px 0;font-size:13px;color:#1f2937;"><strong>Phone:</strong> ${invoiceData.patientPhone || '-'}</p>
+            <p style="margin:2px 0;font-size:13px;color:#1f2937;"><strong>Email:</strong> ${invoiceData.patientEmail || '-'}</p>
+            <p style="margin:2px 0;font-size:13px;color:#1f2937;"><strong>Patient Code:</strong> ${invoiceData.patientCode || '-'}</p>
           </div>
-          <div class="section">
-            <h2>Order Details</h2>
-            <p><strong>Delivery Method:</strong> ${invoiceData.deliveryMethod || 'pickup'}</p>
-            <p><strong>Courier Required:</strong> ${courierText}</p>
+          <div class="section" style="margin-top:16px;">
+            <h2 style="font-size:16px;margin-bottom:8px;color:#0f172a;">Order Details</h2>
+            <p style="margin:2px 0;font-size:13px;color:#1f2937;"><strong>Delivery Method:</strong> ${invoiceData.deliveryMethod || 'pickup'}</p>
+            <p style="margin:2px 0;font-size:13px;color:#1f2937;"><strong>Courier Required:</strong> ${courierText}</p>
           </div>
           <table>
             <thead>
@@ -480,17 +575,18 @@ export default function SlitTherapyBilling() {
               ${rows}
             </tbody>
           </table>
-          <div class="section">
-            <p><strong>Total Amount:</strong> ₹${totalAmount}</p>
-            <p><strong>Paid Amount:</strong> ₹${paidAmount}</p>
-            <p><strong>Balance:</strong> ₹${balance}</p>
-            <p><strong>Paid At:</strong> ${paidAt}</p>
-            <p><strong>Payment Method:</strong> ${invoiceData.billing?.paymentMethod || '-'}</p>
-            <p><strong>Transaction ID:</strong> ${invoiceData.billing?.transactionId || '-'}</p>
+          <div class="section" style="margin-top:16px;font-size:13px;color:#1f2937;">
+            <p style="margin:2px 0;"><strong>Total Amount:</strong> ₹${totalAmount}</p>
+            <p style="margin:2px 0;"><strong>Paid Amount:</strong> ₹${paidAmount}</p>
+            <p style="margin:2px 0;"><strong>Balance:</strong> ₹${balance}</p>
+            <p style="margin:2px 0;"><strong>Paid At:</strong> ${paidAt}</p>
+            <p style="margin:2px 0;"><strong>Payment Method:</strong> ${invoiceData.billing?.paymentMethod || '-'}</p>
+            <p style="margin:2px 0;"><strong>Transaction ID:</strong> ${invoiceData.billing?.transactionId || '-'}</p>
           </div>
           ${invoiceData.billing?.refundAmount ? `<div class="section"><h2>Refund Details</h2><p><strong>Refund Amount:</strong> ₹${Number(invoiceData.billing.refundAmount).toFixed(2)}</p><p><strong>Refund Method:</strong> ${invoiceData.billing?.refundMethod || '-'}</p><p><strong>Refund Notes:</strong> ${invoiceData.billing?.refundNotes || '-'}</p><p><strong>Refunded At:</strong> ${invoiceData.billing?.refundedAt ? new Date(invoiceData.billing.refundedAt).toLocaleString() : '-'}</p></div>` : ''}
-          <div class="section" style="margin-top:32px;">
-            <p>Generated by ChanRe Allergy Center</p>
+          <div class="section" style="margin-top:32px;font-size:12px;color:#475569;">
+            <p>Generated by ${centerName}</p>
+            ${(centerMissCall || centerMobile) ? `<p style="margin-top:4px;">Missed Call: ${centerMissCall || '—'}${centerMobile ? ` | Mobile: ${centerMobile}` : ''}</p>` : ''}
           </div>
         </body>
       </html>`);
@@ -613,9 +709,20 @@ export default function SlitTherapyBilling() {
     <ReceptionistLayout>
       <div className="p-6 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800">SLIT Therapy Billing</h1>
-            <p className="text-slate-500">Create and track SLIT therapy billing requests and deliveries.</p>
+          <div className="flex items-start gap-3">
+            {centerInfo.logoUrl && (
+              <div className="hidden md:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                <img
+                  src={centerInfo.logoUrl}
+                  alt={`${centerInfo.name || 'Center'} logo`}
+                  className="object-contain max-h-full max-w-full p-1"
+                />
+              </div>
+            )}
+            <div>
+              <h1 className="text-3xl font-bold text-slate-800">SLIT Therapy Billing</h1>
+              <p className="text-slate-500">Create and track SLIT therapy billing requests and deliveries.</p>
+            </div>
           </div>
           <button
             onClick={() => setShowNewRequestModal(true)}
@@ -1060,11 +1167,33 @@ export default function SlitTherapyBilling() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 overflow-y-auto max-h-[90vh]">
             <div className="flex items-start justify-between mb-4">
-              <div>
-                <h2 className="text-2xl font-semibold text-slate-800">Invoice Details</h2>
-                <p className="text-sm text-slate-500">
-                Invoice {invoiceRequest.billing?.invoiceNumber || 'Pending'} • Created {formatDateTime(resolveInvoiceTimestamp(invoiceRequest, invoiceRequest?.createdAt))}
-                </p>
+              <div className="flex items-start gap-3">
+                {/* {centerInfo.logoUrl && (
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                    <img
+                      src={centerInfo.logoUrl}
+                      alt={`${centerInfo.name || 'Center'} logo`}
+                      className="object-contain max-h-full max-w-full p-1"
+                    />
+                  </div>
+                )} */}
+                <div>
+                  <h2 className="text-2xl font-semibold text-slate-800">
+                    {centerInfo.name || 'Invoice Details'}
+                  </h2>
+                  {centerInfo.address && (
+                    <p className="text-xs text-slate-500 mt-1">{centerInfo.address}</p>
+                  )}
+                  <p className="text-xs text-slate-500 mt-1">
+                    Phone: {centerInfo.phone || '—'}
+                    {centerInfo.fax ? ` • Fax: ${centerInfo.fax}` : ''}
+                    {centerInfo.website ? ` • ${centerInfo.website}` : ''}
+                  </p>
+                  <p className="text-sm text-slate-500 mt-2">
+                    Invoice {invoiceRequest.billing?.invoiceNumber || 'Pending'} • Created{' '}
+                    {formatDateTime(resolveInvoiceTimestamp(invoiceRequest, invoiceRequest?.createdAt))}
+                  </p>
+                </div>
               </div>
               <button onClick={closeInvoiceModal} className="text-slate-500 hover:text-slate-700">✕</button>
             </div>
@@ -1144,7 +1273,7 @@ export default function SlitTherapyBilling() {
 
             <div className="mt-6 flex flex-col md:flex-row md:justify-between gap-3">
               <div className="text-xs text-slate-500">
-                Generated by ChanRe Allergy Center • This invoice is valid without signature.
+                Generated by {centerInfo.name || 'ChanRe Allergy Center'} • This invoice is valid without signature.
               </div>
               <div className="flex gap-2 justify-end">
                 <button

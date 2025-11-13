@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { ArrowLeft, Calendar, FileText, User, CheckCircle, AlertCircle } from "lucide-react";
+import { ArrowLeft, Calendar, FileText, User, CheckCircle, AlertCircle, Paperclip, Eye } from "lucide-react";
+import { openDocumentWithFallback } from "../../../../utils/documentHelpers";
+import { toast } from "react-toastify";
 import { fetchPatientHistory } from "../../../../features/doctor/doctorThunks";
 
 const ViewHistory = () => {
@@ -825,7 +827,11 @@ const ViewHistory = () => {
                       <FileText className="h-5 w-5 text-blue-600" />
                       <span className="text-xs font-medium text-blue-800">{historyRecord.reportFile}</span>
                       <button
-                        onClick={() => window.open(`https://api.chanreallergyclinic.com/api/files/${historyRecord.reportFile}`, '_blank')}
+                        onClick={() => openDocumentWithFallback({ doc: {
+                          filename: historyRecord.reportFile,
+                          originalName: historyRecord.originalName || historyRecord.reportFile,
+                          path: historyRecord.reportFile
+                        }, toast })}
                         className="ml-auto bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
                       >
                         View File

@@ -40,6 +40,7 @@ import { toast } from 'react-toastify';
 import API from '../../services/api';
 import { getPatientAppointment } from '../../services/api';
 import { applyRoundingAdjustment } from '../../utils/rounding';
+import { API_CONFIG } from '../../config/environment';
 
 const resolveTimestamp = (...values) => {
   for (const value of values) {
@@ -96,6 +97,22 @@ const formatServerDateTimeLabel = (value) => {
   return `${datePart} at ${timePart}`;
 };
 
+const resolveLogoUrl = (value) => {
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
+    return value;
+  }
+  const normalized = value.startsWith('/') ? value : `/${value}`;
+  return `${API_CONFIG.BASE_URL}${normalized}`;
+};
+
+const resolveCenterLogo = (data, previous = '') => {
+  if (!data || !Object.prototype.hasOwnProperty.call(data, 'logoUrl')) {
+    return previous;
+  }
+  return data.logoUrl ? resolveLogoUrl(data.logoUrl) : '';
+};
+
 export default function ReassignPatient() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -111,7 +128,8 @@ export default function ReassignPatient() {
     website: 'www.chanreallergy.com',
     labWebsite: 'www.chanrelabresults.com',
     missCallNumber: '080-42516666',
-    mobileNumber: '9686197153'
+    mobileNumber: '9686197153',
+    logoUrl: ''
   });
   
   // Search and filter states
@@ -316,19 +334,21 @@ export default function ReassignPatient() {
     if (centerId) {
       try {
         const response = await API.get(`/centers/${centerId}`);
-        const center = response.data;
+        const center = response.data?.data || response.data || response;
         
         // Always update center info with fresh data from API to ensure consistency
-        setCenterInfo({
-          name: center.name || 'CHANRE ALLERGY CENTER',
-          address: center.address || 'No.414/65, 20th Main, West of Chord Road, 1st Block, Rajajinagara, Bangalore-560010',
-          phone: center.phone || '080-42516699',
-          fax: center.fax || '080-42516600',
-          website: center.website || 'www.chanreallergy.com',
-          labWebsite: center.labWebsite || 'www.chanrelabresults.com',
-          missCallNumber: center.missCallNumber || '080-42516666',
-          mobileNumber: center.mobileNumber || '9686197153'
-        });
+        setCenterInfo((prev) => ({
+          ...prev,
+          name: center?.name || prev.name || 'CHANRE ALLERGY CENTER',
+          address: center?.address || prev.address || 'No.414/65, 20th Main, West of Chord Road, 1st Block, Rajajinagara, Bangalore-560010',
+          phone: center?.phone || prev.phone || '080-42516699',
+          fax: center?.fax || prev.fax || '080-42516600',
+          website: center?.website || prev.website || 'www.chanreallergy.com',
+          labWebsite: center?.labWebsite || prev.labWebsite || 'www.chanrelabresults.com',
+          missCallNumber: center?.missCallNumber || prev.missCallNumber || '080-42516666',
+          mobileNumber: center?.mobileNumber || prev.mobileNumber || '9686197153',
+          logoUrl: resolveCenterLogo(center, prev.logoUrl)
+        }));
         if (center?.fees?.discountSettings || center?.discountSettings) {
           setCenterDiscountSettings(prev => ({
             ...prev,
@@ -1043,13 +1063,24 @@ export default function ReassignPatient() {
           {/* Header */}
           <div className="mb-8">
             <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-md font-bold text-slate-800 mb-2">
-                  Patient Reassignment & Billing
-                </h1>
-                <p className="text-slate-600 text-sm">
-                  Reassign patients who have completed their first consultation. First reassignment within 7 days is free.
-                </p>
+              <div className="flex items-start gap-3">
+                {centerInfo.logoUrl && (
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                    <img
+                      src={centerInfo.logoUrl}
+                      alt={`${centerInfo.name || 'Center'} logo`}
+                      className="object-contain max-h-full max-w-full p-1"
+                    />
+                  </div>
+                )}
+                <div>
+                  <h1 className="text-md font-bold text-slate-800 mb-2">
+                    Patient Reassignment & Billing
+                  </h1>
+                  <p className="text-slate-600 text-sm">
+                    Reassign patients who have completed their first consultation. First reassignment within 7 days is free.
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-3">
                     <button
@@ -2753,19 +2784,30 @@ export default function ReassignPatient() {
                 <div className="bg-white p-6 max-w-4xl mx-auto relative">
                   {/* Header */}
                   <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h1 className="text-2xl font-bold text-slate-900 mb-1">
-                        {centerInfo.name}
-                      </h1>
-                      <p className="text-sm text-slate-700 mb-0.5">
-                        {centerInfo.address}
-                      </p>
-                      <p className="text-sm text-slate-700 mb-0.5">
-                        <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
-                      </p>
-                      <p className="text-sm text-slate-700">
-                        <span className="font-medium">Website:</span> {centerInfo.website}
-                      </p>
+                    <div className="flex items-start gap-3">
+                      {/* {centerInfo.logoUrl && (
+                        <div className="h-16 w-16 border border-slate-200 rounded-lg flex items-center justify-center bg-white shadow-sm">
+                          <img
+                            src={centerInfo.logoUrl}
+                            alt={`${centerInfo.name || 'Center'} logo`}
+                            className="object-contain max-h-full max-w-full p-1"
+                          />
+                        </div>
+                      )} */}
+                      <div>
+                        <h1 className="text-2xl font-bold text-slate-900 mb-1">
+                          {centerInfo.name}
+                        </h1>
+                        <p className="text-sm text-slate-700 mb-0.5">
+                          {centerInfo.address}
+                        </p>
+                        <p className="text-sm text-slate-700 mb-0.5">
+                          <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
+                        </p>
+                        <p className="text-sm text-slate-700">
+                          <span className="font-medium">Website:</span> {centerInfo.website}
+                        </p>
+                      </div>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-medium text-slate-700">

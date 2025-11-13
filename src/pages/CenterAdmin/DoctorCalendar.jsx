@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import API from '../../services/api';
 import { toast } from 'react-toastify';
@@ -77,6 +77,19 @@ export default function DoctorCalendar() {
   const [bulkHolidayNameBulk, setBulkHolidayNameBulk] = useState('');
   const [expandedMonthForDays, setExpandedMonthForDays] = useState(null); // Track which month is expanded for day selection
   const [selectedDaysInMonth, setSelectedDaysInMonth] = useState({}); // Track selected days per month: { monthIndex: [dates] }
+  const weekdayOptions = [
+    { label: 'Sunday', value: 0 },
+    { label: 'Monday', value: 1 },
+    { label: 'Tuesday', value: 2 },
+    { label: 'Wednesday', value: 3 },
+    { label: 'Thursday', value: 4 },
+    { label: 'Friday', value: 5 },
+    { label: 'Saturday', value: 6 }
+  ];
+  const [yearlyHolidayWeekdays, setYearlyHolidayWeekdays] = useState([]);
+  const [yearlyHolidayName, setYearlyHolidayName] = useState('Weekly Holiday');
+  const [markingSundays, setMarkingSundays] = useState(false);
+  const [settingWeekdayHolidays, setSettingWeekdayHolidays] = useState(false);
 
   // Helper function to format dates consistently (YYYY-MM-DD)
   const formatDateString = (date) => {
@@ -226,11 +239,48 @@ export default function DoctorCalendar() {
     }
     try {
       setLoading(true);
-      await API.post('/doctor-calendar/availability', {
+      const payload = {
         doctorId: selectedDoctor,
         date: editingDate,
         ...availability
-      });
+      };
+
+      if (payload.isHoliday) {
+        payload.isAvailable = false;
+        payload.holidayName = (payload.holidayName || '').trim();
+      } else {
+        payload.isHoliday = false;
+        payload.isAvailable = payload.isAvailable !== false;
+        payload.holidayName = '';
+      }
+
+      if (payload.notes !== undefined) {
+        payload.notes = payload.notes?.trim() || '';
+      }
+
+      const response = await API.post('/doctor-calendar/availability', payload);
+      const updatedAvailability = response?.data?.availability;
+
+      if (updatedAvailability) {
+        const dateKey = formatDateString(updatedAvailability.date) || editingDate;
+        setMonthData((prev) => ({
+          ...prev,
+          [dateKey]: {
+            ...(prev[dateKey] || {}),
+            ...updatedAvailability,
+            date: dateKey
+          }
+        }));
+      } else {
+        setMonthData((prev) => ({
+          ...prev,
+          [editingDate]: {
+            ...(prev[editingDate] || {}),
+            ...payload,
+            date: editingDate
+          }
+        }));
+      }
       toast.success('Availability saved successfully');
       setShowEditModal(false);
       fetchYearAvailability();
@@ -334,6 +384,44 @@ export default function DoctorCalendar() {
     return weeks;
   };
 
+  const getDatesForWeekdaysInYear = (year, weekdayNumbers) => {
+    if (!year || !Array.isArray(weekdayNumbers) || weekdayNumbers.length === 0) {
+      return [];
+    }
+
+    const normalizedWeekdays = [...new Set(weekdayNumbers)]
+      .map((day) => Number(day))
+      .filter((day) => day >= 0 && day <= 6);
+
+    if (normalizedWeekdays.length === 0) {
+      return [];
+    }
+
+    const dates = [];
+    for (let month = 0; month < 12; month++) {
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        if (normalizedWeekdays.includes(date.getDay())) {
+          dates.push(formatDateString(date));
+        }
+      }
+    }
+
+    return dates;
+  };
+
+  const weekdayHolidayDateCount = useMemo(
+    () => getDatesForWeekdaysInYear(currentYear, yearlyHolidayWeekdays).length,
+    [currentYear, yearlyHolidayWeekdays]
+  );
+
+  const handleToggleYearlyHolidayWeekday = (value) => {
+    setYearlyHolidayWeekdays((prev) =>
+      prev.includes(value) ? prev.filter((day) => day !== value) : [...prev, value]
+    );
+  };
+
   const handleBulkSetAvailability = async (type, availabilityType) => {
     if (!selectedDoctor) {
       toast.error('Please select a doctor');
@@ -380,6 +468,12 @@ export default function DoctorCalendar() {
       return;
     }
     
+    const trimmedHolidayName = bulkHolidayNameBulk.trim();
+    if (availabilityType === 'holiday' && !trimmedHolidayName) {
+      toast.error('Please provide a holiday name');
+      return;
+    }
+
     try {
       setLoading(true);
       const payload = {
@@ -387,17 +481,17 @@ export default function DoctorCalendar() {
         dates: dates,
         year: currentYear
       };
-      
+
       if (availabilityType === 'holiday') {
-        if (!bulkHolidayNameBulk.trim()) {
-          toast.error('Please provide a holiday name');
-          return;
-        }
-        payload.holidayName = bulkHolidayNameBulk;
+        payload.holidayName = trimmedHolidayName;
+        payload.isHoliday = true;
+        payload.isAvailable = false;
         await API.post('/doctor-calendar/bulk-holidays', payload);
       } else {
         // Set isAvailable based on availabilityType
         payload.isAvailable = availabilityType === 'available';
+        payload.isHoliday = false;
+        delete payload.holidayName;
         await API.post('/doctor-calendar/bulk-availability', payload);
       }
       
@@ -433,17 +527,97 @@ export default function DoctorCalendar() {
     }
   };
 
+  const handleMarkAllSundaysAsHolidays = async () => {
+    if (!selectedDoctor) {
+      toast.error('Please select a doctor');
+      return;
+    }
+
+    if (!currentYear || Number.isNaN(currentYear)) {
+      toast.error('Please enter a valid year');
+      return;
+    }
+
+    try {
+      setMarkingSundays(true);
+      const response = await API.post('/doctor-calendar/mark-sundays', {
+        doctorId: selectedDoctor,
+        year: currentYear
+      });
+      toast.success(response?.data?.message || 'All Sundays marked as holidays');
+      fetchYearAvailability();
+    } catch (error) {
+      console.error('Error marking Sundays as holidays:', error);
+      toast.error(error.response?.data?.message || 'Failed to mark Sundays as holidays');
+    } finally {
+      setMarkingSundays(false);
+    }
+  };
+
+  const handleSetYearlyWeekdayHolidays = async () => {
+    if (!selectedDoctor) {
+      toast.error('Please select a doctor');
+      return;
+    }
+
+    if (!currentYear || Number.isNaN(currentYear)) {
+      toast.error('Please enter a valid year');
+      return;
+    }
+
+    if (!yearlyHolidayWeekdays.length) {
+      toast.error('Please select at least one weekday');
+      return;
+    }
+
+    const trimmedName = yearlyHolidayName.trim();
+    if (!trimmedName) {
+      toast.error('Please provide a holiday name');
+      return;
+    }
+
+    const dates = getDatesForWeekdaysInYear(currentYear, yearlyHolidayWeekdays);
+
+    if (!dates.length) {
+      toast.error('No dates found for the selected weekdays');
+      return;
+    }
+
+    try {
+      setSettingWeekdayHolidays(true);
+      await API.post('/doctor-calendar/bulk-holidays', {
+        doctorId: selectedDoctor,
+        dates,
+        holidayName: trimmedName,
+        year: currentYear
+      });
+      toast.success(`Marked ${dates.length} dates as holidays`);
+      setYearlyHolidayWeekdays([]);
+      fetchYearAvailability();
+    } catch (error) {
+      console.error('Error setting yearly weekday holidays:', error);
+      toast.error(
+        error.response?.data?.message || 'Failed to set selected weekdays as holidays'
+      );
+    } finally {
+      setSettingWeekdayHolidays(false);
+    }
+  };
+
   const handleBulkSetHolidays = async () => {
-    if (!selectedDoctor || selectedDates.length === 0 || !bulkHolidayName) {
+    if (!selectedDoctor || selectedDates.length === 0 || !bulkHolidayName.trim()) {
       toast.error('Please select dates and provide a holiday name');
       return;
     }
     try {
       setLoading(true);
+      const trimmedHolidayName = bulkHolidayName.trim();
       await API.post('/doctor-calendar/bulk-holidays', {
         doctorId: selectedDoctor,
         dates: selectedDates,
-        holidayName: bulkHolidayName
+        holidayName: trimmedHolidayName,
+        isHoliday: true,
+        isAvailable: false
       });
       toast.success(`Successfully set ${selectedDates.length} holidays`);
       setShowHolidayModal(false);
@@ -756,6 +930,100 @@ export default function DoctorCalendar() {
                 </div>
               </div>
 
+              <div className="bg-white rounded-xl border border-blue-100 p-6 space-y-6">
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                    Yearly Holiday Helpers
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    Quickly mark recurring weekly holidays for{' '}
+                    <span className="font-semibold text-blue-600">{getSelectedDoctorName()}</span>{' '}
+                    in <span className="font-semibold text-blue-600">{currentYear}</span>.
+                  </p>
+                </div>
+
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-orange-900">Mark all Sundays</p>
+                    <p className="text-xs text-orange-700">
+                      Automatically marks every Sunday in {currentYear} as a holiday with a single
+                      click.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleMarkAllSundaysAsHolidays}
+                    disabled={markingSundays || loading}
+                    className="px-5 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                  >
+                    {markingSundays ? 'Marking Sundays...' : 'Mark Sundays as Holidays'}
+                  </button>
+                </div>
+
+                <div className="border border-gray-200 rounded-lg p-5 space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700 mb-2">
+                      Select other weekdays to mark as holidays for the entire year
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Choose the days and provide a holiday name (e.g., Weekend, Half-day). We will
+                      mark every matching date in {currentYear}.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {weekdayOptions.map((option) => (
+                      <label
+                        key={option.value}
+                        className={`flex items-center space-x-2 p-2 rounded-lg border-2 ${
+                          yearlyHolidayWeekdays.includes(option.value)
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-blue-300'
+                        } cursor-pointer transition-all`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={yearlyHolidayWeekdays.includes(option.value)}
+                          onChange={() => handleToggleYearlyHolidayWeekday(option.value)}
+                          className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">
+                          {option.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex flex-col md:flex-row gap-3 md:items-center">
+                    <input
+                      type="text"
+                      value={yearlyHolidayName}
+                      onChange={(e) => setYearlyHolidayName(e.target.value)}
+                      placeholder="Holiday name (e.g., Weekend Off)"
+                      className="flex-1 border-2 border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      onClick={handleSetYearlyWeekdayHolidays}
+                      disabled={
+                        settingWeekdayHolidays ||
+                        loading ||
+                        yearlyHolidayWeekdays.length === 0 ||
+                        !yearlyHolidayName.trim()
+                      }
+                      className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-semibold shadow-md hover:shadow-lg transition-all"
+                    >
+                      {settingWeekdayHolidays
+                        ? 'Setting Holidays...'
+                        : yearlyHolidayWeekdays.length > 0
+                        ? `Set Holidays (${weekdayHolidayDateCount})`
+                        : 'Set Holidays'}
+                    </button>
+                  </div>
+                  {yearlyHolidayWeekdays.length > 0 && (
+                    <p className="text-xs text-blue-600 font-medium">
+                      {weekdayHolidayDateCount} date(s) will be marked as holidays in {currentYear}.
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <button
                 onClick={handleSetDefaultHours}
                 disabled={loading}
@@ -915,11 +1183,14 @@ export default function DoctorCalendar() {
                             }
                             try {
                               setLoading(true);
+                              const trimmedHolidayName = bulkHolidayNameBulk.trim();
                               await API.post('/doctor-calendar/bulk-holidays', {
                                 doctorId: selectedDoctor,
                                 dates: allSelectedDays,
-                                holidayName: bulkHolidayNameBulk,
-                                year: currentYear
+                                holidayName: trimmedHolidayName,
+                                year: currentYear,
+                                isHoliday: true,
+                                isAvailable: false
                               });
                               toast.success(`Successfully set ${allSelectedDays.length} days as holidays`);
                               setSelectedDaysInMonth({});
@@ -956,12 +1227,14 @@ export default function DoctorCalendar() {
                             }
                             try {
                               setLoading(true);
-                              await API.post('/doctor-calendar/bulk-availability', {
+                              const payload = {
                                 doctorId: selectedDoctor,
                                 dates: allSelectedDays,
                                 isAvailable: false,
-                                year: currentYear
-                              });
+                                year: currentYear,
+                                isHoliday: false
+                              };
+                              await API.post('/doctor-calendar/bulk-availability', payload);
                               toast.success(`Successfully set ${allSelectedDays.length} days as unavailable`);
                               setSelectedDaysInMonth({});
                               setSelectedHolidayMonths([]);
@@ -996,12 +1269,14 @@ export default function DoctorCalendar() {
                             }
                             try {
                               setLoading(true);
-                              await API.post('/doctor-calendar/bulk-availability', {
+                              const payload = {
                                 doctorId: selectedDoctor,
                                 dates: allSelectedDays,
                                 isAvailable: true,
-                                year: currentYear
-                              });
+                                year: currentYear,
+                                isHoliday: false
+                              };
+                              await API.post('/doctor-calendar/bulk-availability', payload);
                               toast.success(`Successfully set ${allSelectedDays.length} days as available`);
                               setSelectedDaysInMonth({});
                               setSelectedHolidayMonths([]);
@@ -1236,7 +1511,14 @@ export default function DoctorCalendar() {
                     type="radio"
                     name="availabilityStatus"
                     checked={availability.isAvailable && !availability.isHoliday}
-                    onChange={() => setAvailability({ ...availability, isAvailable: true, isHoliday: false })}
+                    onChange={() =>
+                      setAvailability({
+                        ...availability,
+                        isAvailable: true,
+                        isHoliday: false,
+                        holidayName: ''
+                      })
+                    }
                     className="w-4 h-4"
                   />
                   <span className="text-sm font-medium">Available on this date</span>
@@ -1246,7 +1528,13 @@ export default function DoctorCalendar() {
                     type="radio"
                     name="availabilityStatus"
                     checked={availability.isHoliday}
-                    onChange={() => setAvailability({ ...availability, isHoliday: true, isAvailable: false })}
+                    onChange={() =>
+                      setAvailability({
+                        ...availability,
+                        isHoliday: true,
+                        isAvailable: false
+                      })
+                    }
                     className="w-4 h-4"
                   />
                   <span className="text-sm font-medium">Mark as Holiday</span>
@@ -1256,7 +1544,14 @@ export default function DoctorCalendar() {
                     type="radio"
                     name="availabilityStatus"
                     checked={!availability.isAvailable && !availability.isHoliday}
-                    onChange={() => setAvailability({ ...availability, isAvailable: false, isHoliday: false })}
+                    onChange={() =>
+                      setAvailability({
+                        ...availability,
+                        isAvailable: false,
+                        isHoliday: false,
+                        holidayName: ''
+                      })
+                    }
                     className="w-4 h-4"
                   />
                   <span className="text-sm font-medium">Unavailable</span>
@@ -1490,7 +1785,7 @@ export default function DoctorCalendar() {
               <div className="flex space-x-4">
                 <button
                   onClick={handleBulkSetHolidays}
-                  disabled={loading || selectedDates.length === 0 || !bulkHolidayName}
+                  disabled={loading || selectedDates.length === 0 || !bulkHolidayName.trim()}
                   className="px-6 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50"
                 >
                   Set Holidays

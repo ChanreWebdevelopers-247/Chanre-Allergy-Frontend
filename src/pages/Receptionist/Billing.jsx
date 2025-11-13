@@ -177,6 +177,13 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
     promotion: 10,
     charity: 100
   });
+  const [centerBranding, setCenterBranding] = useState({
+    name: '',
+    phone: '',
+    fax: '',
+    website: '',
+    logoUrl: ''
+  });
   
   // ✅ NEW: Lab test search state
   const [testSearchTerm, setTestSearchTerm] = useState('');
@@ -238,6 +245,21 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
         const response = await API.get(`/centers/${centerId}/fees`);
         if (response.data?.discountSettings) {
           setCenterDiscountSettings(response.data.discountSettings);
+        }
+        if (response.data) {
+          const derivedName =
+            typeof user?.centerId === 'object' && user?.centerId?.name
+              ? user.centerId.name
+              : centerBranding.name;
+
+          setCenterBranding((prev) => ({
+            ...prev,
+            name: derivedName || prev.name || 'Center',
+            phone: response.data.mobileNumber || prev.phone,
+            fax: response.data.fax || prev.fax,
+            website: response.data.website || prev.website,
+            logoUrl: resolveLogoUrl(response.data.logoUrl) || prev.logoUrl
+          }));
         }
       } catch (error) {
         console.error('Error fetching center discount settings:', error);
@@ -802,6 +824,15 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
     }
   };
 
+  const resolveLogoUrl = (value) => {
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
+      return value;
+    }
+    const normalized = value.startsWith('/') ? value : `/${value}`;
+    return `${API_CONFIG.BASE_URL}${normalized}`;
+  };
+
   // ✅ NEW: Remove item from edit bill
   const removeEditBillItem = (idx) => {
     setEditBillItems(prev => {
@@ -1327,18 +1358,29 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
             <div className="max-w-7xl mx-auto">
                              {/* Professional Header */}
                <div className="mb-8">
-                 <div className="flex items-center justify-between mb-4">
-                   <div>
-                     <h1 className="text-2xl font-bold text-slate-800 mb-2">Billing Management</h1>
-                     <p className="text-slate-600 text-sm">Generate bills, track payments, and manage test request workflow</p>
-                     {user?.centerId && (
-                       <div className="mt-2">
-                         <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                           <Building className="mr-1 h-4 w-4" />
-                           {user?.centerId?.name || 'Center'}
-                         </span>
+                <div className="flex items-center justify-between mb-4">
+                   <div className="flex items-start gap-4">
+                     {centerBranding.logoUrl && (
+                       <div className="hidden sm:flex h-14 w-14 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                         <img
+                           src={centerBranding.logoUrl}
+                           alt={`${centerBranding.name || 'Center'} logo`}
+                           className="object-contain max-h-full max-w-full p-1"
+                         />
                        </div>
                      )}
+                     <div>
+                       <h1 className="text-2xl font-bold text-slate-800 mb-2">Billing Management</h1>
+                       <p className="text-slate-600 text-sm">Generate bills, track payments, and manage test request workflow</p>
+                       {(centerBranding.name || user?.centerId) && (
+                         <div className="mt-2">
+                           <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                             <Building className="mr-1 h-4 w-4" />
+                             {centerBranding.name || user?.centerId?.name || 'Center'}
+                           </span>
+                         </div>
+                       )}
+                     </div>
                    </div>
                                      <div className="flex items-center space-x-3">
                      <button 
@@ -2030,20 +2072,31 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm overflow-y-auto">
               <div className="bg-white w-full max-w-6xl max-h-[95vh] rounded-xl shadow-2xl border border-slate-200 flex flex-col my-4">
                 <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
-                  <div>
-                    <div className="text-sm text-slate-500 font-medium">Generate Invoice</div>
-                    <div className="text-xl font-bold text-slate-800 mt-1">
-                      {ultraSafeRender(selected.patientName) || ultraSafeRender(selected.patientId?.name)} - {ultraSafeRender(selected.testType)}
-                    </div>
-                    <div className="text-sm text-slate-600 mt-2">
-                      <span className="font-medium">Doctor:</span> {ultraSafeRender(selected.doctorName) || ultraSafeRender(selected.doctorId?.name)} | 
-                      <span className="font-medium ml-2">Center:</span> {ultraSafeRender(selected.centerName)}
-                    </div>
-                    {selected?.billing?.invoiceNumber && formattedSelectedBillingTimestamp && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        Bill generated on {formattedSelectedBillingTimestamp}
+                  <div className="flex items-start gap-4">
+                    {centerBranding.logoUrl && (
+                      <div className="hidden sm:flex h-16 w-16 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                        <img
+                          src={centerBranding.logoUrl}
+                          alt={`${centerBranding.name || 'Center'} logo`}
+                          className="object-contain max-h-full max-w-full p-1"
+                        />
                       </div>
                     )}
+                    <div>
+                      <div className="text-sm text-slate-500 font-medium">Generate Invoice</div>
+                      <div className="text-xl font-bold text-slate-800 mt-1">
+                        {ultraSafeRender(selected.patientName) || ultraSafeRender(selected.patientId?.name)} - {ultraSafeRender(selected.testType)}
+                      </div>
+                      <div className="text-sm text-slate-600 mt-2">
+                        <span className="font-medium">Doctor:</span> {ultraSafeRender(selected.doctorName) || ultraSafeRender(selected.doctorId?.name)} | 
+                        <span className="font-medium ml-2">Center:</span> {centerBranding.name || ultraSafeRender(selected.centerName)}
+                      </div>
+                      {selected?.billing?.invoiceNumber && formattedSelectedBillingTimestamp && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          Bill generated on {formattedSelectedBillingTimestamp}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <button onClick={closeBillModal} className="p-2 rounded-lg hover:bg-white/50 transition-colors duration-200">
                     <X className="h-6 w-6 text-slate-600" />
@@ -2479,19 +2532,30 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
             <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
               <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-lg shadow-lg flex flex-col">
                 <div className="p-4 border-b flex items-center justify-between flex-shrink-0">
-                  <div>
-                    <div className="text-sm text-slate-500">Record Payment</div>
-                    <div className="font-semibold text-slate-800">
-                      {ultraSafeRender(selectedForPayment.patientName) || ultraSafeRender(selectedForPayment.patientId?.name)} - {ultraSafeRender(selectedForPayment.testType)}
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      Amount: {currencySymbol}{selectedForPayment.billing?.amount?.toFixed(2) || '0.00'} | Center: {ultraSafeRender(selectedForPayment.centerName)}
-                    </div>
-                    {selectedForPayment?.billing?.invoiceNumber && formattedSelectedForPaymentTimestamp && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        Bill generated on {formattedSelectedForPaymentTimestamp}
+                  <div className="flex items-start gap-3">
+                    {centerBranding.logoUrl && (
+                      <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                        <img
+                          src={centerBranding.logoUrl}
+                          alt={`${centerBranding.name || 'Center'} logo`}
+                          className="object-contain max-h-full max-w-full p-1"
+                        />
                       </div>
                     )}
+                    <div>
+                      <div className="text-sm text-slate-500">Record Payment</div>
+                      <div className="font-semibold text-slate-800">
+                        {ultraSafeRender(selectedForPayment.patientName) || ultraSafeRender(selectedForPayment.patientId?.name)} - {ultraSafeRender(selectedForPayment.testType)}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        Amount: {currencySymbol}{selectedForPayment.billing?.amount?.toFixed(2) || '0.00'} | Center: {centerBranding.name || ultraSafeRender(selectedForPayment.centerName)}
+                      </div>
+                      {selectedForPayment?.billing?.invoiceNumber && formattedSelectedForPaymentTimestamp && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          Bill generated on {formattedSelectedForPaymentTimestamp}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <button onClick={closePaymentModal} className="p-1 rounded hover:bg-slate-100">
                     <X className="h-5 w-5" />
@@ -2765,19 +2829,30 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
             <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
               <div className="bg-white w-full max-w-2xl rounded-lg shadow-lg">
                 <div className="p-6 border-b flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-semibold text-slate-800">Cancel Bill</h2>
-                    <p className="text-sm text-slate-600 mt-1">
-                      Patient: {ultraSafeRender(selectedForCancel.patientName) || ultraSafeRender(selectedForCancel.patientId?.name)}
-                    </p>
-                    <p className="text-sm text-slate-600">
-                      Amount: {currencySymbol}{selectedForCancel.billing?.amount?.toFixed(2) || '0.00'}
-                    </p>
-                    {selectedForCancel?.billing?.invoiceNumber && formattedSelectedForCancelTimestamp && (
-                      <p className="text-xs text-slate-500 mt-1">
-                        Bill generated on {formattedSelectedForCancelTimestamp}
-                      </p>
+                  <div className="flex items-start gap-3">
+                    {centerBranding.logoUrl && (
+                      <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                        <img
+                          src={centerBranding.logoUrl}
+                          alt={`${centerBranding.name || 'Center'} logo`}
+                          className="object-contain max-h-full max-w-full p-1"
+                        />
+                      </div>
                     )}
+                    <div>
+                      <h2 className="text-xl font-semibold text-slate-800">Cancel Bill</h2>
+                      <p className="text-sm text-slate-600 mt-1">
+                        Patient: {ultraSafeRender(selectedForCancel.patientName) || ultraSafeRender(selectedForCancel.patientId?.name)}
+                      </p>
+                      <p className="text-sm text-slate-600">
+                        Amount: {currencySymbol}{selectedForCancel.billing?.amount?.toFixed(2) || '0.00'}
+                      </p>
+                      {selectedForCancel?.billing?.invoiceNumber && formattedSelectedForCancelTimestamp && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Bill generated on {formattedSelectedForCancelTimestamp}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <button onClick={closeCancelModal} className="p-2 rounded-lg hover:bg-slate-100">
                     <X className="h-5 w-5" />
@@ -2861,19 +2936,30 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
             <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
               <div className="bg-white w-full max-w-2xl rounded-lg shadow-lg">
                 <div className="p-6 border-b flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-semibold text-slate-800">Process Refund</h2>
-                    <p className="text-sm text-slate-600 mt-1">
-                      Patient: {ultraSafeRender(selectedForRefund.patientName) || ultraSafeRender(selectedForRefund.patientId?.name)}
-                    </p>
-                    <p className="text-sm text-slate-600">
-                      Original Amount: {currencySymbol}{selectedForRefund.billing?.amount?.toFixed(2) || '0.00'}
-                    </p>
-                    {selectedForRefund?.billing?.invoiceNumber && formattedSelectedForRefundTimestamp && (
-                      <p className="text-xs text-slate-500 mt-1">
-                        Bill generated on {formattedSelectedForRefundTimestamp}
-                      </p>
+                  <div className="flex items-start gap-3">
+                    {centerBranding.logoUrl && (
+                      <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                        <img
+                          src={centerBranding.logoUrl}
+                          alt={`${centerBranding.name || 'Center'} logo`}
+                          className="object-contain max-h-full max-w-full p-1"
+                        />
+                      </div>
                     )}
+                    <div>
+                      <h2 className="text-xl font-semibold text-slate-800">Process Refund</h2>
+                      <p className="text-sm text-slate-600 mt-1">
+                        Patient: {ultraSafeRender(selectedForRefund.patientName) || ultraSafeRender(selectedForRefund.patientId?.name)}
+                      </p>
+                      <p className="text-sm text-slate-600">
+                        Original Amount: {currencySymbol}{selectedForRefund.billing?.amount?.toFixed(2) || '0.00'}
+                      </p>
+                      {selectedForRefund?.billing?.invoiceNumber && formattedSelectedForRefundTimestamp && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Bill generated on {formattedSelectedForRefundTimestamp}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <button onClick={closeRefundModal} className="p-2 rounded-lg hover:bg-slate-100">
                     <X className="h-5 w-5" />
@@ -2995,20 +3081,31 @@ const [customDiscountReason, setCustomDiscountReason] = useState('');
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm overflow-y-auto">
               <div className="bg-white w-full max-w-6xl max-h-[95vh] rounded-xl shadow-2xl border border-slate-200 flex flex-col my-4">
                 <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-orange-50 to-amber-50">
-                  <div>
-                    <div className="text-sm text-slate-500 font-medium">Edit Paid Bill & Process Refund</div>
-                    <div className="text-xl font-bold text-slate-800 mt-1">
-                      {ultraSafeRender(selectedForEdit.patientName) || ultraSafeRender(selectedForEdit.patientId?.name)} - {ultraSafeRender(selectedForEdit.testType)}
-                    </div>
-                    <div className="text-sm text-slate-600 mt-2">
-                      <span className="font-medium">Original Amount:</span> {currencySymbol}{selectedForEdit.billing?.amount?.toFixed(2) || '0.00'} | 
-                      <span className="font-medium ml-2">Paid:</span> {currencySymbol}{selectedForEdit.billing?.paidAmount?.toFixed(2) || '0.00'}
-                    </div>
-                    {selectedForEdit?.billing?.invoiceNumber && formattedSelectedForEditTimestamp && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        Bill generated on {formattedSelectedForEditTimestamp}
+                  <div className="flex items-start gap-4">
+                    {/* {centerBranding.logoUrl && (
+                      <div className="hidden sm:flex h-16 w-16 items-center justify-center rounded-lg border border-orange-100 bg-white shadow-sm">
+                        <img
+                          src={centerBranding.logoUrl}
+                          alt={`${centerBranding.name || 'Center'} logo`}
+                          className="object-contain max-h-full max-w-full p-1"
+                        />
                       </div>
-                    )}
+                    )} */}
+                    <div>
+                      <div className="text-sm text-slate-500 font-medium">Edit Paid Bill & Process Refund</div>
+                      <div className="text-xl font-bold text-slate-800 mt-1">
+                        {ultraSafeRender(selectedForEdit.patientName) || ultraSafeRender(selectedForEdit.patientId?.name)} - {ultraSafeRender(selectedForEdit.testType)}
+                      </div>
+                      <div className="text-sm text-slate-600 mt-2">
+                        <span className="font-medium">Original Amount:</span> {currencySymbol}{selectedForEdit.billing?.amount?.toFixed(2) || '0.00'} | 
+                        <span className="font-medium ml-2">Paid:</span> {currencySymbol}{selectedForEdit.billing?.paidAmount?.toFixed(2) || '0.00'}
+                      </div>
+                      {selectedForEdit?.billing?.invoiceNumber && formattedSelectedForEditTimestamp && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          Bill generated on {formattedSelectedForEditTimestamp}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <button onClick={closeEditBillModal} className="p-2 rounded-lg hover:bg-white/50 transition-colors duration-200">
                     <X className="h-6 w-6 text-slate-600" />

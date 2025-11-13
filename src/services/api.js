@@ -49,17 +49,19 @@ API.interceptors.response.use(
     return response;
   },
   (error) => {
-    // Handle specific error cases
-    if (error.response?.status === 401) {
-      // Clear stored authentication data
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      // Optionally redirect to login
-      // window.location.href = '/login';
-    } else if (error.response?.status === 403) {
-      console.error('Access denied:', error.response.data?.message || 'Forbidden');
-    } else if (error.response?.status >= 500) {
-      console.error('Server error:', error.response.data?.message || 'Internal server error');
+    const status = error.response?.status;
+    const shouldPreserveAuth = error.config?.preserveAuthOn401;
+
+    if (status === 401) {
+      if (!shouldPreserveAuth) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        // Optional redirect could go here
+      }
+    } else if (status === 403) {
+      console.error('Access denied:', error.response?.data?.message || 'Forbidden');
+    } else if (status >= 500) {
+      console.error('Server error:', error.response?.data?.message || 'Internal server error');
     } else if (!error.response) {
       console.error('Network error:', error.message || 'Unable to connect to server');
     }

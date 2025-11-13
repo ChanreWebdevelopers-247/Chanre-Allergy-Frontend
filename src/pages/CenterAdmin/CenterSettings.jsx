@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import API from '../../services/api';
@@ -11,8 +11,10 @@ import {
   Building,
   Phone,
   Mail,
-  Info
+  Info,
+  Image
 } from 'lucide-react';
+import { API_CONFIG } from '../../config/environment';
 
 const CenterSettings = () => {
   const navigate = useNavigate();
@@ -43,8 +45,22 @@ const CenterSettings = () => {
     },
     fax: '080-42516600',
     missCallNumber: '080-42516666',
-    mobileNumber: '9686197153'
+    mobileNumber: '9686197153',
+    logoUrl: ''
   });
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const buildLogoUrl = (value) => {
+    if (!value) return null;
+    if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
+      return value;
+    }
+    const normalized = value.startsWith('/') ? value : `/${value}`;
+    return `${API_CONFIG.BASE_URL}${normalized}`;
+  };
 
   // Get center ID from user
   const getCenterId = () => {
@@ -62,6 +78,14 @@ const CenterSettings = () => {
 
   const centerId = getCenterId();
 
+  useEffect(() => {
+    return () => {
+      if (logoPreview) {
+        URL.revokeObjectURL(logoPreview);
+      }
+    };
+  }, [logoPreview]);
+
   // Fetch current settings
   useEffect(() => {
     if (centerId) {
@@ -73,20 +97,22 @@ const CenterSettings = () => {
     try {
       const response = await API.get(`/centers/${centerId}/fees`);
       if (response.data) {
-        setSettings({
+        setSettings((prev) => ({
+          ...prev,
           fees: {
-            ...settings.fees,
-            ...response.data.fees,
+            ...prev.fees,
+            ...(response.data.fees || {}),
             superconsultantFees: {
-              ...settings.fees.superconsultantFees,
+              ...prev.fees.superconsultantFees,
               ...(response.data.fees?.superconsultantFees || {})
             }
           },
-          discountSettings: response.data.discountSettings || settings.discountSettings,
-          fax: response.data.fax || settings.fax,
-          missCallNumber: response.data.missCallNumber || settings.missCallNumber,
-          mobileNumber: response.data.mobileNumber || settings.mobileNumber
-        });
+          discountSettings: response.data.discountSettings || prev.discountSettings,
+          fax: response.data.fax || prev.fax,
+          missCallNumber: response.data.missCallNumber || prev.missCallNumber,
+          mobileNumber: response.data.mobileNumber || prev.mobileNumber,
+          logoUrl: response.data.logoUrl ?? prev.logoUrl ?? ''
+        }));
       }
     } catch (error) {
       console.error('Error fetching center settings:', error);
@@ -147,6 +173,72 @@ const CenterSettings = () => {
     }
   };
 
+  const handleLogoFileChange = (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const allowedTypes = [
+      'image/png',
+      'image/jpeg',
+      'image/jpg',
+      'image/webp',
+      'image/gif',
+      'image/svg+xml'
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Please choose a valid image file (PNG, JPG, WEBP, GIF, or SVG).');
+      event.target.value = '';
+      return;
+    }
+
+    const maxSizeInBytes = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxSizeInBytes) {
+      toast.error('Logo size must be 2MB or less.');
+      event.target.value = '';
+      return;
+    }
+
+    if (logoPreview) {
+      URL.revokeObjectURL(logoPreview);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setLogoFile(file);
+    setLogoPreview(previewUrl);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    toast.success('Logo selected. Save settings to upload.');
+  };
+
+  const handleRemoveLogo = () => {
+    if (logoPreview) {
+      URL.revokeObjectURL(logoPreview);
+    }
+
+    if (logoFile) {
+      setLogoFile(null);
+      setLogoPreview(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      toast.info('Logo selection cleared.');
+      return;
+    }
+
+    if (settings.logoUrl) {
+      setSettings((prev) => ({
+        ...prev,
+        logoUrl: ''
+      }));
+      toast.info('Current logo marked for removal. Save settings to confirm.');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -156,16 +248,61 @@ const CenterSettings = () => {
     }
 
     setLoading(true);
+    let logoUrlToSave = settings.logoUrl || '';
+
+    if (logoFile) {
+      setLogoUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('logo', logoFile);
+        const uploadResponse = await API.put(`/centers/${centerId}/logo`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        logoUrlToSave = uploadResponse.data?.logoUrl || '';
+      } catch (error) {
+        console.error('Error uploading center logo:', error);
+        toast.error(error.response?.data?.message || 'Failed to upload logo. Please try again.');
+        setLogoUploading(false);
+        setLoading(false);
+        return;
+      } finally {
+        setLogoUploading(false);
+      }
+    }
+
     try {
-      await API.put(`/centers/${centerId}/fees`, settings);
+      const payload = {
+        ...settings,
+        logoUrl: logoUrlToSave
+      };
+
+      await API.put(`/centers/${centerId}/fees`, payload);
+      setSettings((prev) => ({
+        ...prev,
+        logoUrl: logoUrlToSave
+      }));
+
+      if (logoPreview) {
+        URL.revokeObjectURL(logoPreview);
+      }
+      setLogoFile(null);
+      setLogoPreview(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
       toast.success('Center settings updated successfully!');
     } catch (error) {
       console.error('Error updating center settings:', error);
-      toast.error('Failed to update center settings');
+      toast.error(error.response?.data?.message || 'Failed to update center settings');
     } finally {
       setLoading(false);
     }
   };
+
+  const resolvedLogoUrl = logoPreview || buildLogoUrl(settings.logoUrl);
 
   if (!user || user.role !== 'centeradmin') {
     return (
@@ -516,6 +653,76 @@ const CenterSettings = () => {
             </div>
           </div>
 
+        {/* Branding Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-blue-100">
+          <div className="p-6 border-b border-blue-100">
+            <h2 className="text-lg font-semibold text-slate-800 flex items-center">
+              <Image className="h-5 w-5 mr-2 text-blue-500" />
+              Center Branding
+            </h2>
+            <p className="text-slate-600 mt-1 text-sm">
+              Upload your center logo. It will appear on invoices and prescriptions generated by your team.
+            </p>
+          </div>
+          <div className="p-6">
+            <div className="flex flex-col sm:flex-row items-start gap-6">
+              <div className="w-full sm:w-40 sm:h-40 h-36 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center bg-slate-50 overflow-hidden">
+                {resolvedLogoUrl ? (
+                  <img
+                    src={resolvedLogoUrl}
+                    alt="Center logo preview"
+                    className="object-contain w-full h-full"
+                  />
+                ) : (
+                  <div className="text-xs text-slate-500 text-center px-4">
+                    No logo uploaded yet. Recommended square PNG or SVG up to 2MB.
+                  </div>
+                )}
+              </div>
+              <div className="space-y-3 w-full sm:flex-1">
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml"
+                  ref={fileInputRef}
+                  className="hidden"
+                  onChange={handleLogoFileChange}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    Choose Logo
+                  </button>
+                  {(logoFile || settings.logoUrl) && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors"
+                    >
+                      {logoFile ? 'Clear Selection' : 'Remove Current Logo'}
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500">
+                  Allowed formats: PNG, JPG, WEBP, GIF, SVG. Maximum size 2MB. Square images look best.
+                </p>
+                {logoFile && (
+                  <p className="text-xs text-blue-600 font-medium">
+                    New logo ready to upload. Save settings to apply changes.
+                  </p>
+                )}
+                {!logoFile && !settings.logoUrl && (
+                  <p className="text-xs text-slate-500">
+                    Logo will be included on all future invoices and prescription printouts.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
           {/* Contact Information Section */}
           <div className="bg-white rounded-xl shadow-sm border border-blue-100">
             <div className="p-6 border-b border-blue-100">
@@ -585,7 +792,7 @@ const CenterSettings = () => {
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || logoUploading}
               className="flex-1 px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (

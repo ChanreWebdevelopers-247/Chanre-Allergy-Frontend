@@ -10,6 +10,7 @@ import {
 import API from '../../../../services/api';
 import { openDocumentWithFallback } from '../../../../utils/documentHelpers';
 import { buildPrescriptionPrintHTML, openPrintPreview } from "../../../../utils/prescriptionPrint";
+import { API_CONFIG } from "../../../../config/environment";
 
 const DEFAULT_CENTER_INFO = {
   name: "CHANRE RHEUMATOLOGY & IMMUNOLOGY CENTER & RESEARCH",
@@ -24,6 +25,7 @@ const DEFAULT_CENTER_INFO = {
   website: "www.chanreicr.com | www.mychanreclinic.com",
   labWebsite: "www.chanrelabresults.com",
   code: "",
+  logoUrl: "",
 };
 
 const DEFAULT_REMARKS = "Keep patient hydrated. Advise rest if fatigue worsens.";
@@ -37,6 +39,22 @@ const displayValue = (value, fallback = "N/A") => {
 const formatDuration = (duration, unit = "months") => {
   if (duration === undefined || duration === null || duration === "") return null;
   return `Duration: ${duration} ${unit}`;
+};
+
+const resolveLogoUrl = (value) => {
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value) || value.startsWith("data:")) {
+    return value;
+  }
+  const normalized = value.startsWith("/") ? value : `/${value}`;
+  return `${API_CONFIG.BASE_URL}${normalized}`;
+};
+
+const resolveCenterLogo = (entity, previous = "") => {
+  if (!entity || !Object.prototype.hasOwnProperty.call(entity, "logoUrl")) {
+    return previous;
+  }
+  return entity.logoUrl ? resolveLogoUrl(entity.logoUrl) : "";
 };
 
 const formatFileSize = (bytes) => {
@@ -148,6 +166,16 @@ const normalizePrescriptionTests = (prescription) => {
     prescription?.test,
     prescription?.testDetails,
     prescription?.testList,
+    prescription?.selectedTests,
+    prescription?.testsRequested,
+    prescription?.requestedTests,
+    prescription?.testItems,
+    prescription?.orderedTests,
+    prescription?.testOrders,
+    prescription?.testRequest?.selectedTests,
+    prescription?.testRequestDetails?.tests,
+    prescription?.testRequestDetails?.selectedTests,
+    prescription?.testRequestData?.selectedTests,
   ];
 
   const coerceToArray = (value) => {
@@ -195,6 +223,171 @@ const normalizePrescriptionTests = (prescription) => {
     .filter(Boolean);
 };
 
+const coerceRequestList = (input) => {
+  const results = [];
+
+  const pushCandidate = (candidate) => {
+    if (!candidate) return;
+
+    if (Array.isArray(candidate)) {
+      candidate.forEach((item) => pushCandidate(item));
+      return;
+    }
+
+    if (typeof candidate === "object") {
+      results.push(candidate);
+      const nestedCandidates = [
+        candidate.testRequests,
+        candidate.requests,
+        candidate.data,
+        candidate.items,
+        candidate.results,
+        candidate.list,
+        candidate.records,
+        candidate.rows,
+        candidate.entries,
+      ];
+      nestedCandidates.forEach((nested) => pushCandidate(nested));
+    }
+  };
+
+  pushCandidate(input);
+
+  return results;
+};
+
+const normalizePatientTestRequests = (requests = [], { fallbackInstruction } = {}) => {
+  const requestList = coerceRequestList(requests);
+
+  const instructionSet = new Set();
+  const items = [];
+
+  const recordInstruction = (value) => {
+    if (!value) return;
+    const normalized = String(value).trim();
+    if (!normalized) return;
+    instructionSet.add(normalized);
+  };
+
+  const coerceToArray = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === "object") return Object.values(value);
+    if (typeof value === "string") {
+      return value
+        .split(/[\n,;]+/)
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+    }
+    return [value];
+  };
+
+  const pushItem = (name, instruction, fallback) => {
+    const resolvedName = name && String(name).trim() ? String(name).trim() : "—";
+    const resolvedInstruction =
+      instruction && String(instruction).trim()
+        ? String(instruction).trim()
+        : fallback && String(fallback).trim()
+        ? String(fallback).trim()
+        : "";
+
+    recordInstruction(resolvedInstruction);
+    items.push({
+      name: resolvedName,
+      instruction: resolvedInstruction || "—",
+    });
+  };
+
+  requestList.forEach((request) => {
+    if (!request || typeof request !== "object") {
+      return;
+    }
+
+    const perRequestFallback =
+      request.testDescription ||
+      request.followUpInstruction ||
+      request.instructions ||
+      request.notes ||
+      request.remark ||
+      request.remarks ||
+      fallbackInstruction ||
+      "";
+
+    if (Array.isArray(request.selectedTests) && request.selectedTests.length > 0) {
+      request.selectedTests.forEach((test) => {
+        if (!test) return;
+        pushItem(
+          test.testName || test.name || test.testCode || test.code || "—",
+          test.instructions || test.instruction,
+          perRequestFallback
+        );
+      });
+      return;
+    }
+
+    const possibleSources = [
+      request.tests,
+      request.testList,
+      request.testDetails,
+      request.testInfo,
+      request.testNames,
+      request.testsRequested,
+      request.requestedTests,
+      request.testsRequestedExtended,
+      request.testOrder,
+      request.testOrderDetails,
+    ];
+
+    let rawSource = possibleSources.find((value) =>
+      value && (Array.isArray(value) ? value.length > 0 : typeof value === "object" || value)
+    );
+
+    let normalizedEntries = coerceToArray(rawSource);
+
+    if (normalizedEntries.length === 0) {
+      normalizedEntries = coerceToArray(request.testType);
+    }
+
+    if (normalizedEntries.length === 0 && request.testNamesString) {
+      normalizedEntries = coerceToArray(request.testNamesString);
+    }
+
+    if (normalizedEntries.length === 0 && request.testName) {
+      normalizedEntries = coerceToArray(request.testName);
+    }
+
+    if (normalizedEntries.length === 0 && perRequestFallback) {
+      pushItem(request.testType || request.testName || "—", "", perRequestFallback);
+      return;
+    }
+
+    normalizedEntries.forEach((entry) => {
+      if (!entry) return;
+      if (typeof entry === "object") {
+        pushItem(
+          entry.name ||
+            entry.testName ||
+            entry.test_name ||
+            entry.title ||
+            entry.test ||
+            entry.testCode ||
+            entry.code ||
+            "—",
+          entry.instruction || entry.instructions || entry.note || entry.description || entry.details,
+          perRequestFallback
+        );
+      } else {
+        pushItem(entry, "", perRequestFallback);
+      }
+    });
+  });
+
+  return {
+    items,
+    instructions: Array.from(instructionSet),
+  };
+};
+
 const summarizeMedications = (medications) => {
   if (!Array.isArray(medications) || medications.length === 0) {
     return {
@@ -218,7 +411,7 @@ const summarizeMedications = (medications) => {
   };
 };
 
-const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => {
+const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription, testRequests = [] }) => {
   const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
   const ageGender = [patient?.age ? `${patient.age}` : null, patient?.gender || null]
     .filter(Boolean)
@@ -247,8 +440,18 @@ const PrescriptionPreviewCard = ({ centerInfo = {}, patient, prescription }) => 
   const contactLine = (segments) => segments.filter(Boolean).join(" | ");
 
   const medications = normalizePrescriptionMedications(prescription);
-  const tests = normalizePrescriptionTests(prescription);
-  const followUpInstruction = resolveFollowUpInstruction(prescription) || "—";
+  const prescriptionTests = useMemo(() => normalizePrescriptionTests(prescription), [prescription]);
+  const requestDerived = useMemo(() => {
+    const normalized = normalizePatientTestRequests(testRequests, {
+      fallbackInstruction: resolveFollowUpInstruction(prescription),
+    });
+    return normalized;
+  }, [testRequests, prescription]);
+  const tests = prescriptionTests.length > 0 ? prescriptionTests : requestDerived.items;
+  const followUpInstruction =
+    resolveFollowUpInstruction(prescription) ||
+    (requestDerived.instructions.length > 0 ? requestDerived.instructions.join("\n") : "") ||
+    "—";
   const remarks = resolveRemarks(prescription) || "—";
   const prescribedBy = resolvePrescribedBy(prescription) || "—";
   const preparedBy = resolvePreparedBy(prescription) || "—";
@@ -553,7 +756,12 @@ const ViewProfile = () => {
       phone: center.phone || DEFAULT_CENTER_INFO.phone,
       fax: center.fax || DEFAULT_CENTER_INFO.fax,
       email: center.email || DEFAULT_CENTER_INFO.email,
-      website: center.website || DEFAULT_CENTER_INFO.website,
+    website: center.website || DEFAULT_CENTER_INFO.website,
+    labWebsite: center.labWebsite || DEFAULT_CENTER_INFO.labWebsite,
+    missCallNumber: center.missCallNumber || DEFAULT_CENTER_INFO.missCallNumber,
+    mobileNumber: center.mobileNumber || DEFAULT_CENTER_INFO.mobileNumber,
+    code: center.code || DEFAULT_CENTER_INFO.code,
+    logoUrl: resolveCenterLogo(center, DEFAULT_CENTER_INFO.logoUrl),
     };
   }, [patient?.centerId]);
 
@@ -638,6 +846,12 @@ const ViewProfile = () => {
             ...prev,
             code: user.centerCode || prev.code,
             name: user.hospitalName || prev.name,
+            logoUrl:
+              typeof user.centerLogo !== "undefined"
+                ? user.centerLogo
+                  ? resolveLogoUrl(user.centerLogo)
+                  : ""
+                : prev.logoUrl,
           }));
         }
         return;
@@ -646,7 +860,7 @@ const ViewProfile = () => {
       setCenterLoading(true);
       try {
         const response = await API.get(`/centers/${centerId}`);
-        const center = response.data || {};
+        const center = response.data?.data || response.data || {};
         const formattedAddress = [center.address, center.location]
           .filter(Boolean)
           .join(', ');
@@ -663,6 +877,7 @@ const ViewProfile = () => {
           website: center.website || prev.website,
           labWebsite: center.labWebsite || prev.labWebsite,
           code: center.code || prev.code,
+          logoUrl: resolveCenterLogo(center, prev.logoUrl),
         }));
       } catch (centerError) {
         console.error('Failed to fetch center info', centerError);
@@ -675,8 +890,91 @@ const ViewProfile = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
+  const preparePrescriptionForContext = useCallback(
+    (prescription) => {
+      if (!prescription) return null;
+
+      const normalizedTests = normalizePrescriptionTests(prescription);
+      const allRequests = coerceRequestList(testRequests);
+
+      const resolveRequestId = (value) => {
+        if (!value) return null;
+        if (typeof value === "string") return value;
+        if (typeof value === "object") {
+          return value._id || value.id || value.requestId || null;
+        }
+        return null;
+      };
+
+      const prescriptionRequestId =
+        resolveRequestId(prescription.testRequestId) ||
+        resolveRequestId(prescription.latestTestRequest) ||
+        resolveRequestId(prescription.testRequest);
+
+      const relevantRequests = allRequests.filter((request) => {
+        if (!request || typeof request !== "object") return false;
+
+        const requestId =
+          request._id ||
+          request.id ||
+          request.requestId ||
+          (request.testRequest && (request.testRequest._id || request.testRequest.id));
+
+        if (prescriptionRequestId && requestId) {
+          return requestId === prescriptionRequestId;
+        }
+
+        if (prescription.visit && request.visit) {
+          return String(request.visit).toLowerCase() === String(prescription.visit).toLowerCase();
+        }
+
+        if (request.patientId && prescription.patientId) {
+          const reqPatientId =
+            typeof request.patientId === "object"
+              ? request.patientId._id || request.patientId.id
+              : request.patientId;
+          const presPatientId =
+            typeof prescription.patientId === "object"
+              ? prescription.patientId._id || prescription.patientId.id
+              : prescription.patientId;
+          if (reqPatientId && presPatientId && reqPatientId === presPatientId) {
+            return true;
+          }
+        }
+
+        return !prescriptionRequestId;
+      });
+
+      const matchableRequests =
+        relevantRequests && relevantRequests.length > 0 ? relevantRequests : allRequests;
+
+      const derivedRequests = normalizePatientTestRequests(matchableRequests, {
+        fallbackInstruction: resolveFollowUpInstruction(prescription),
+      });
+      const combinedTests = normalizedTests.length > 0 ? normalizedTests : derivedRequests.items;
+
+      const followUpFromPrescription = resolveFollowUpInstruction(prescription);
+      const fallbackFollowUp =
+        derivedRequests.instructions.length > 0 ? derivedRequests.instructions.join("\n") : "";
+
+      return {
+        ...prescription,
+        tests: combinedTests,
+        followUpInstruction:
+          (followUpFromPrescription && followUpFromPrescription.trim()) ||
+          fallbackFollowUp ||
+          prescription.followUpInstruction ||
+          "",
+        remarks: resolveRemarks(prescription),
+      };
+    },
+    [testRequests]
+  );
+
   const handleViewPrescription = (prescription) => {
-    setSelectedPrescription(prescription);
+    const prepared = preparePrescriptionForContext(prescription);
+    if (!prepared) return;
+    setSelectedPrescription(prepared);
     setShowPrescriptionModal(true);
   };
 
@@ -693,12 +991,18 @@ const ViewProfile = () => {
     }
 
     try {
+      const prepared = preparePrescriptionForContext(prescription);
+      if (!prepared) {
+        toast.error('Unable to prepare prescription for printing.');
+        return;
+      }
+
       const html = buildPrescriptionPrintHTML({
         centerInfo: centerInfo,
         patient,
         prescription: {
-          ...prescription,
-          remarks: prescription.remarks || prescription.notes || DEFAULT_REMARKS,
+          ...prepared,
+          remarks: prepared.remarks || DEFAULT_REMARKS,
         },
         fallbackRemarks: DEFAULT_REMARKS,
       });
@@ -1576,6 +1880,12 @@ const ViewProfile = () => {
                         { label: "Pets at Home", value: historyItem.petsAtHome, duration: formatDuration(historyItem.petsAtHomeDuration) },
                       ];
 
+                      const generalExaminationFields = [
+                        { label: "Blood Pressure", value: historyItem.bloodPressure },
+                        { label: "Pulse Rate", value: historyItem.pulseRate },
+                        { label: "SpO2", value: historyItem.spo2 },
+                      ];
+
                       const clinicalFields = [
                         { label: "Family History", value: historyItem.familyHistory },
                         { label: "Other Findings", value: historyItem.otherFindings },
@@ -1604,6 +1914,7 @@ const ViewProfile = () => {
                       };
 
                       const sections = [
+                        renderSection("General Examination", generalExaminationFields, "grid grid-cols-1 sm:grid-cols-3 gap-3"),
                         renderSection("Allergic Conditions", allergicFields),
                         renderSection("Respiratory & Triggers", respiratoryFields),
                         renderSection("Medical History", medicalHistoryFields),
@@ -1901,13 +2212,19 @@ const ViewProfile = () => {
       </div>
 
       {showPrescriptionModal && selectedPrescription && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8"
+          onClick={handleClosePrescriptionPreview}
+        >
+          <div
+            className="relative flex w-full max-w-4xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
               <div>
                 <h3 className="text-sm font-semibold text-slate-800">Prescription Preview</h3>
                 <p className="text-xs text-slate-500">
-                  {patient?.name ? `Patient: ${patient.name}` : 'Patient details'}
+                  {patient?.name ? `Patient: ${patient.name}` : "Patient details"}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -1934,11 +2251,12 @@ const ViewProfile = () => {
                 <span>Center information auto-filled from registered profile.</span>
               )}
             </div>
-            <div className="p-6 bg-slate-50">
+            <div className="flex-1 overflow-y-auto bg-slate-50 px-6 py-6">
               <PrescriptionPreviewCard
                 centerInfo={centerInfo}
                 patient={patient}
                 prescription={selectedPrescription}
+                testRequests={testRequests}
               />
             </div>
           </div>

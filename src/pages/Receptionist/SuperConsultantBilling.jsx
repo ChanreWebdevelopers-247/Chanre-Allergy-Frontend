@@ -32,6 +32,7 @@ import API from '../../services/api';
 import { store } from '../../redux/store';
 import Pagination from '../../components/Pagination';
 import { roundToNearestTen, applyRoundingAdjustment } from '../../utils/rounding';
+import { API_CONFIG } from '../../config/environment';
 
 const resolveInvoiceTimestamp = (invoice, fallback) => {
   if (!invoice) return fallback || null;
@@ -90,6 +91,8 @@ export default function SuperConsultantBilling() {
     appointmentTime: '',
     notes: ''
   });
+  const [selectedPatientOriginalDoctorId, setSelectedPatientOriginalDoctorId] = useState('');
+  const [selectedPatientOriginalDoctorName, setSelectedPatientOriginalDoctorName] = useState('');
 
   // Invoice preview state
   const [showInvoicePreviewModal, setShowInvoicePreviewModal] = useState(false);
@@ -131,6 +134,15 @@ export default function SuperConsultantBilling() {
     const parsed = new Date(dateTimeStr);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   };
+
+const resolveEntityId = (entity) => {
+  if (!entity) return '';
+  if (typeof entity === 'object') {
+    if (entity._id) return entity._id;
+    if (entity.id) return entity.id;
+  }
+  return entity;
+};
 
   // Function to fetch payment history for a patient
   const fetchPaymentHistory = async (patientId) => {
@@ -218,6 +230,22 @@ export default function SuperConsultantBilling() {
     return numberToWords(Math.floor(num / 10000000)) + ' Crore' + (num % 10000000 !== 0 ? ' ' + numberToWords(num % 10000000) : '');
   };
 
+const resolveLogoUrl = (value) => {
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
+    return value;
+  }
+  const normalized = value.startsWith('/') ? value : `/${value}`;
+  return `${API_CONFIG.BASE_URL}${normalized}`;
+};
+
+const resolveCenterLogo = (data, previous = '') => {
+  if (!data || !Object.prototype.hasOwnProperty.call(data, 'logoUrl')) {
+    return previous;
+  }
+  return data.logoUrl ? resolveLogoUrl(data.logoUrl) : '';
+};
+
   // Center info
   const [centerInfo, setCenterInfo] = useState({
     name: '',
@@ -226,7 +254,8 @@ export default function SuperConsultantBilling() {
     fax: '',
     website: '',
     missCallNumber: '',
-    mobileNumber: ''
+    mobileNumber: '',
+    logoUrl: ''
   });
 
   // Get center ID from user
@@ -252,28 +281,32 @@ export default function SuperConsultantBilling() {
         const center = response.data;
         
         if (center) {
-        setCenterInfo({
-          name: center.name || 'Chanre Hospital',
-          address: center.address || 'Rajajinagar, Bengaluru',
-          phone: center.phone || '08040810611',
-          fax: center.fax || '080-42516600',
-          website: center.website || 'www.chanreallergy.com',
-          missCallNumber: center.missCallNumber || '080-42516666',
-          mobileNumber: center.mobileNumber || '9686197153'
-        });
+          setCenterInfo((prev) => ({
+            ...prev,
+            name: center.name || prev.name || 'Chanre Hospital',
+            address: center.address || prev.address || 'Rajajinagar, Bengaluru',
+            phone: center.phone || prev.phone || '08040810611',
+            fax: center.fax || prev.fax || '080-42516600',
+            website: center.website || prev.website || 'www.chanreallergy.com',
+            missCallNumber: center.missCallNumber || prev.missCallNumber || '080-42516666',
+            mobileNumber: center.mobileNumber || prev.mobileNumber || '9686197153',
+            logoUrl: resolveCenterLogo(center, prev.logoUrl)
+          }));
         }
       } catch (error) {
         console.error('Error fetching center info:', error);
         // Set default values on error
-        setCenterInfo({
-          name: 'Chanre Hospital',
-          address: 'Rajajinagar, Bengaluru',
-          phone: '08040810611',
-          fax: '080-42516600',
-          website: 'www.chanreallergy.com',
-          missCallNumber: '080-42516666',
-          mobileNumber: '9686197153'
-        });
+        setCenterInfo((prev) => ({
+          ...prev,
+          name: prev.name || 'Chanre Hospital',
+          address: prev.address || 'Rajajinagar, Bengaluru',
+          phone: prev.phone || '08040810611',
+          fax: prev.fax || '080-42516600',
+          website: prev.website || 'www.chanreallergy.com',
+          missCallNumber: prev.missCallNumber || '080-42516666',
+          mobileNumber: prev.mobileNumber || '9686197153',
+          logoUrl: prev.logoUrl
+        }));
       }
     };
 
@@ -1130,11 +1163,27 @@ export default function SuperConsultantBilling() {
     }
 
     setSelectedPatient(patient);
-    const assignedDoctor = patient.assignedDoctor;
-    const currentDoctorId = typeof assignedDoctor === 'object' && assignedDoctor?._id
-      ? assignedDoctor._id
-      : assignedDoctor || '';
-    setSelectedDoctorId(currentDoctorId);
+    const existingSuperConsultantId =
+      resolveEntityId(patient.superConsultantDoctor) ||
+      resolveEntityId(patient.superconsultantDoctor) ||
+      resolveEntityId(consultationBill?.superConsultantDoctor) ||
+      resolveEntityId(consultationBill?.superconsultantDoctor);
+    const fallbackDoctorId =
+      resolveEntityId(patient.assignedDoctor) ||
+      resolveEntityId(patient.currentDoctor) ||
+      '';
+    const initialDoctorId = existingSuperConsultantId || fallbackDoctorId;
+    setSelectedDoctorId(initialDoctorId);
+    const originalDoctorId =
+      resolveEntityId(patient.assignedDoctor) ||
+      resolveEntityId(patient.currentDoctor) ||
+      '';
+    const originalDoctorName =
+      getAssignedDoctorName(patient) ||
+      getAssignedDoctorNameFromBilling(patient) ||
+      '';
+    setSelectedPatientOriginalDoctorId(originalDoctorId);
+    setSelectedPatientOriginalDoctorName(originalDoctorName);
 
     await fetchDoctorsList();
     
@@ -1187,14 +1236,44 @@ export default function SuperConsultantBilling() {
     }
 
     try {
-      const assignedDoctor = selectedPatient.assignedDoctor;
-      const currentDoctorId = typeof assignedDoctor === 'object' && assignedDoctor?._id
-        ? assignedDoctor._id
-        : assignedDoctor || '';
+      const currentSuperConsultantId = resolveEntityId(
+        selectedPatient.superConsultantDoctor ||
+        selectedPatient.superconsultantDoctor
+      );
+      const currentSuperConsultantName =
+        selectedPatient.superConsultantDoctorName ||
+        selectedPatient.superconsultantDoctorName ||
+        '';
 
-      if (selectedDoctorId !== currentDoctorId) {
-        await API.put(`/patients/${selectedPatient._id}`, {
-          assignedDoctor: selectedDoctorId
+      const selectedSuperConsultant =
+        doctors.find((doctor) => doctor._id === selectedDoctorId) || null;
+      const selectedSuperConsultantName =
+        selectedSuperConsultant?.name ||
+        currentSuperConsultantName;
+
+      const needsSuperConsultantUpdate =
+        selectedDoctorId &&
+        (selectedDoctorId !== currentSuperConsultantId ||
+          (selectedSuperConsultantName &&
+            selectedSuperConsultantName !== currentSuperConsultantName));
+
+      if (needsSuperConsultantUpdate) {
+        const updatePayload = {
+          superConsultantDoctor: selectedDoctorId,
+          superConsultantDoctorName: selectedSuperConsultantName
+        };
+
+        await API.put(`/patients/${selectedPatient._id}`, updatePayload);
+
+        setSelectedPatient((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            superConsultantDoctor: selectedDoctorId,
+            superconsultantDoctor: selectedDoctorId,
+            superConsultantDoctorName: selectedSuperConsultantName,
+            superconsultantDoctorName: selectedSuperConsultantName
+          };
         });
       }
 
@@ -1219,8 +1298,25 @@ export default function SuperConsultantBilling() {
       
       if (response.data.success) {
         toast.success('Payment processed successfully! Report sent to Superconsultant for review.');
+        try {
+          if (
+            selectedPatientOriginalDoctorId &&
+            selectedPatientOriginalDoctorId !== selectedDoctorId &&
+            resolveEntityId(selectedPatient?.assignedDoctor) !== selectedPatientOriginalDoctorId
+          ) {
+            await API.put(`/patients/${selectedPatient._id}`, {
+              assignedDoctor: selectedPatientOriginalDoctorId,
+              assignedDoctorName: selectedPatientOriginalDoctorName
+            });
+          }
+        } catch (reassignError) {
+          console.error('Failed to restore original doctor assignment:', reassignError);
+          toast.warn('Payment completed, but restoring original doctor failed. Please check assignment.');
+        }
         setShowPaymentModal(false);
         setSelectedDoctorId('');
+        setSelectedPatientOriginalDoctorId('');
+        setSelectedPatientOriginalDoctorName('');
         await dispatch(fetchReceptionistPatients());
       } else {
         toast.error(response.data.message || 'Failed to process payment');
@@ -1413,13 +1509,24 @@ export default function SuperConsultantBilling() {
           {/* Header */}
           <div className="mb-8">
             <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-2xl font-bold text-slate-800 mb-2">
-                  Superconsultant Billing
-                </h1>
-                <p className="text-slate-600 text-sm">
-                  Manage billing for Superconsultant consultations. Reports are sent to Superconsultant for review after payment.
-                </p>
+              <div className="flex items-start gap-3">
+                {centerInfo.logoUrl && (
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                    <img
+                      src={centerInfo.logoUrl}
+                      alt={`${centerInfo.name || 'Center'} logo`}
+                      className="object-contain max-h-full max-w-full p-1"
+                    />
+                  </div>
+                )}
+                <div>
+                  <h1 className="text-2xl font-bold text-slate-800 mb-2">
+                    Superconsultant Billing
+                  </h1>
+                  <p className="text-slate-600 text-sm">
+                    Manage billing for Superconsultant consultations. Reports are sent to Superconsultant for review after payment.
+                  </p>
+                </div>
               </div>
                 <button
                   onClick={() => dispatch(fetchReceptionistPatients())}
@@ -2061,6 +2168,8 @@ export default function SuperConsultantBilling() {
                 onClick={() => {
                   setShowPaymentModal(false);
                   setSelectedDoctorId('');
+                  setSelectedPatientOriginalDoctorId('');
+                  setSelectedPatientOriginalDoctorName('');
                 }}
                 className="text-slate-400 hover:text-slate-600"
               >
@@ -2191,6 +2300,8 @@ export default function SuperConsultantBilling() {
                     onClick={() => {
                       setShowPaymentModal(false);
                       setSelectedDoctorId('');
+                    setSelectedPatientOriginalDoctorId('');
+                    setSelectedPatientOriginalDoctorName('');
                     }}
                     className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
                   >
@@ -2279,16 +2390,27 @@ export default function SuperConsultantBilling() {
                 <div id="invoice-print-content" className="bg-white p-6 max-w-4xl mx-auto">
                   {/* Header */}
                   <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h1 className="text-2xl font-bold text-slate-900 mb-1">Invoice</h1>
-                      <h2 className="text-xl font-bold text-slate-900 mb-1">{centerInfo.name}</h2>
-                      <p className="text-sm text-slate-700 mb-0.5">{centerInfo.address}</p>
-                      <p className="text-sm text-slate-700 mb-0.5">
-                        <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
-                      </p>
-                      <p className="text-sm text-slate-700">
-                        <span className="font-medium">Website:</span> {centerInfo.website}
-                      </p>
+                    <div className="flex items-start gap-3">
+                      {/* {centerInfo.logoUrl && (
+                        <div className="h-16 w-16 border border-slate-200 rounded-lg flex items-center justify-center bg-white shadow-sm">
+                          <img
+                            src={centerInfo.logoUrl}
+                            alt={`${centerInfo.name || 'Center'} logo`}
+                            className="object-contain max-h-full max-w-full p-1"
+                          />
+                        </div>
+                      )} */}
+                      <div>
+                        <h1 className="text-2xl font-bold text-slate-900 mb-1">Invoice</h1>
+                        <h2 className="text-xl font-bold text-slate-900 mb-1">{centerInfo.name}</h2>
+                        <p className="text-sm text-slate-700 mb-0.5">{centerInfo.address}</p>
+                        <p className="text-sm text-slate-700 mb-0.5">
+                          <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
+                        </p>
+                        <p className="text-sm text-slate-700">
+                          <span className="font-medium">Website:</span> {centerInfo.website}
+                        </p>
+                      </div>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-medium text-slate-700">

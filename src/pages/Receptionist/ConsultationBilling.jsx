@@ -30,6 +30,7 @@ import {
   Settings,
   UserPlus,
   Bell,
+  Building,
   Edit3,
   Trash2,
   Ban,
@@ -39,6 +40,7 @@ import {
   Receipt as ReceiptIcon,
   Paperclip
 } from 'lucide-react';
+import { API_CONFIG } from '../../config/environment';
 import { toast } from 'react-toastify';
 import API from '../../services/api';
 import { getPatientAppointment, getPatientPaymentHistory } from '../../services/api';
@@ -82,9 +84,26 @@ export default function ConsultationBilling() {
     website: 'www.chanreallergy.com',
     labWebsite: 'www.chanrelabresults.com',
     missCallNumber: '080-42516666',
-    mobileNumber: '9686197153'
+  mobileNumber: '9686197153',
+  logoUrl: ''
   });
   
+  const resolveLogoUrl = (value) => {
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
+      return value;
+    }
+    const normalized = value.startsWith('/') ? value : `/${value}`;
+    return `${API_CONFIG.BASE_URL}${normalized}`;
+  };
+
+  const resolveCenterLogo = (value, previous = '') => {
+    if (typeof value === 'undefined') {
+      return previous;
+    }
+    return value ? resolveLogoUrl(value) : '';
+  };
+
   // Invoice creation time state
 
   const isDateToday = (dateStr) => {
@@ -138,6 +157,146 @@ export default function ConsultationBilling() {
       return slotDateTime > now;
     });
   };
+
+const resolveEntityId = (entity) => {
+  if (!entity) return '';
+  if (typeof entity === 'object') {
+    if (entity._id) return entity._id;
+    if (entity.id) return entity.id;
+  }
+  return entity;
+};
+
+const extractDoctorName = (candidate) => {
+  if (!candidate) return null;
+  if (typeof candidate === 'string') return candidate;
+  if (typeof candidate === 'object') {
+    if (candidate.name) return candidate.name;
+    if (candidate.fullName) return candidate.fullName;
+    if (candidate.firstName || candidate.lastName) {
+      return [candidate.firstName, candidate.lastName].filter(Boolean).join(' ');
+    }
+    if (candidate.doctorName) return candidate.doctorName;
+  }
+  return null;
+};
+
+const getAssignedDoctorNameFromBilling = (patient) => {
+  if (!patient?.billing) return null;
+  for (const bill of patient.billing) {
+    if (bill?.consultationType?.startsWith('superconsultant_')) {
+      continue;
+    }
+    const billCandidates = [
+      bill.doctorName,
+      bill.assignedDoctorName,
+      bill.consultantName,
+      bill.customData?.doctorName,
+      bill.customData?.consultantName,
+      bill.assignedDoctor,
+      bill.doctor,
+      bill.doctorId,
+    ];
+    for (const candidate of billCandidates) {
+      const name = extractDoctorName(candidate);
+      if (name) return name;
+    }
+  }
+  return null;
+};
+
+const getAssignedDoctorName = (patient) => {
+  if (!patient) return null;
+  const candidates = [
+    patient.assignedDoctor,
+    patient.currentDoctor,
+    patient.assignedDoctorInfo,
+    patient.assignedDoctorDetails,
+    patient.assignedDoctorData,
+    patient.doctor,
+    patient.doctorDetails,
+    patient.primaryDoctor,
+    patient.recentDoctor,
+    patient.lastAssignedDoctor,
+    patient.reassignmentHistory?.[patient.reassignmentHistory.length - 1]?.newDoctorName,
+    patient.reassignmentHistory?.[patient.reassignmentHistory.length - 1]?.newDoctor,
+    patient.initialDoctor,
+    patient.doctorName,
+    patient.customDoctorName
+  ];
+
+  for (const candidate of candidates) {
+    const name = extractDoctorName(candidate);
+    if (name) return name;
+  }
+
+  const billingName = getAssignedDoctorNameFromBilling(patient);
+  if (billingName) return billingName;
+
+  if (patient.superConsultantDoctorName && !patient.consultationType?.startsWith('superconsultant_')) {
+    return patient.superConsultantDoctorName;
+  }
+
+  return null;
+};
+
+const getAssignedDoctorIdFromBilling = (patient) => {
+  if (!Array.isArray(patient?.billing)) return '';
+  for (const bill of patient.billing) {
+    if (bill?.consultationType?.startsWith('superconsultant_')) {
+      continue;
+    }
+    const idCandidates = [
+      bill.doctorId,
+      bill.assignedDoctor,
+      bill.assignedDoctorId,
+      bill.customData?.doctorId,
+      bill.customData?.consultantId
+    ];
+    for (const candidate of idCandidates) {
+      const id = resolveEntityId(candidate);
+      if (id) return id;
+    }
+  }
+  return '';
+};
+
+const getAssignedDoctorId = (patient) => {
+  if (!patient) return '';
+  const candidates = [
+    patient.assignedDoctor,
+    patient.currentDoctor,
+    patient.assignedDoctorId,
+    patient.assignedDoctorInfo,
+    patient.doctor,
+    patient.doctorDetails,
+    patient.primaryDoctor,
+    patient.recentDoctor,
+    patient.lastAssignedDoctor
+  ];
+
+  for (const candidate of candidates) {
+    const id = resolveEntityId(candidate);
+    if (id) return id;
+  }
+
+  const reassignmentHistory = patient.reassignmentHistory || [];
+  for (let i = reassignmentHistory.length - 1; i >= 0; i -= 1) {
+    const history = reassignmentHistory[i];
+    const id = resolveEntityId(history?.newDoctor);
+    if (id) return id;
+  }
+
+  const billingId = getAssignedDoctorIdFromBilling(patient);
+  if (billingId) return billingId;
+
+  if (!patient.consultationType?.startsWith('superconsultant_')) {
+    const superId = resolveEntityId(patient.superConsultantDoctor);
+    if (superId) return superId;
+  }
+
+  return '';
+};
 
   const formatFileSize = (bytes) => {
     if (!bytes || Number.isNaN(bytes)) return '';
@@ -329,16 +488,18 @@ export default function ConsultationBilling() {
       console.log('🏥 Parsed center data:', center);
       
       if (center) {
-        setCenterInfo({
-          name: center.name || 'Chanre Hospital',
-          address: center.address || 'Rajajinagar, Bengaluru',
-          phone: center.phone || '08040810611',
-          fax: center.fax || '080-42516600',
-          website: center.website || 'www.chanreallergy.com',
-          labWebsite: center.labWebsite || 'www.chanrelabresults.com',
-          missCallNumber: center.missCallNumber || '080-42516666',
-          mobileNumber: center.mobileNumber || '9686197153'
-        });
+        setCenterInfo((prev) => ({
+          ...prev,
+          name: center.name || prev.name || 'Chanre Hospital',
+          address: center.address || prev.address || 'Rajajinagar, Bengaluru',
+          phone: center.phone || prev.phone || '08040810611',
+          fax: center.fax || prev.fax || '080-42516600',
+          website: center.website || prev.website || 'www.chanreallergy.com',
+          labWebsite: center.labWebsite || prev.labWebsite || 'www.chanrelabresults.com',
+          missCallNumber: center.missCallNumber || prev.missCallNumber || '080-42516666',
+          mobileNumber: center.mobileNumber || prev.mobileNumber || '9686197153',
+          logoUrl: resolveCenterLogo(center.logoUrl, prev.logoUrl)
+        }));
         console.log('✅ Center info updated successfully');
       } else {
         console.warn('⚠️ Center data not found in response, using default values');
@@ -365,6 +526,17 @@ export default function ConsultationBilling() {
         }
         if (response.data?.discountSettings) {
           setCenterDiscountSettings(response.data.discountSettings);
+        }
+        if (response.data) {
+          setCenterInfo((prev) => ({
+            ...prev,
+            fax: response.data.fax || prev.fax,
+            missCallNumber: response.data.missCallNumber || prev.missCallNumber,
+            mobileNumber: response.data.mobileNumber || prev.mobileNumber,
+            website: response.data.website || prev.website,
+            labWebsite: response.data.labWebsite || prev.labWebsite,
+          logoUrl: resolveCenterLogo(response.data.logoUrl, prev.logoUrl)
+          }));
         }
       } catch (error) {
         console.error('Error fetching center fees:', error);
@@ -432,7 +604,10 @@ export default function ConsultationBilling() {
     paymentMethod: 'cash',
     notes: '',
     appointmentTime: '',
-    consultationType: 'OP' // OP, IP, or followup
+    consultationType: 'OP', // OP, IP, or followup
+    bloodPressure: '',
+    pulseRate: '',
+    spo2: ''
   });
   const [paymentDocuments, setPaymentDocuments] = useState([]);
   const paymentDocsInputRef = useRef(null);
@@ -529,7 +704,7 @@ export default function ConsultationBilling() {
   // Fetch available slots when appointment date or assigned doctor changes
   useEffect(() => {
     if (showPaymentModal && selectedPatient && selectedAppointmentDate) {
-      const assignedDoctorId = selectedPatient.assignedDoctor?._id || selectedPatient.assignedDoctor;
+      const assignedDoctorId = getAssignedDoctorId(selectedPatient);
       if (assignedDoctorId) {
         fetchAvailableSlots(assignedDoctorId, selectedAppointmentDate);
       } else {
@@ -729,57 +904,57 @@ export default function ConsultationBilling() {
 
   // Primary search filter - show both regular and reassigned patients separately
   useEffect(() => {
-    let filtered = [];
-    
-    // Add regular patients (including original patients who have been reassigned)
-    const regularPatients = patients.filter(patient => {
-      const matchesSearch = !searchTerm || 
-        patient.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.uhId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.assignedDoctor?.name?.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      // Include all patients (both regular and reassigned) as regular entries
+    const normalizedSearch = (searchTerm || '').trim().toLowerCase();
+    const regularPatients = patients.filter((patient) => {
+      const doctorNameLower = getAssignedDoctorName(patient)?.toLowerCase() || '';
+      const matchesSearch =
+        !normalizedSearch ||
+        patient.name?.toLowerCase().includes(normalizedSearch) ||
+        patient.email?.toLowerCase().includes(normalizedSearch) ||
+        patient.phone?.toLowerCase().includes(normalizedSearch) ||
+        patient.uhId?.toLowerCase().includes(normalizedSearch) ||
+        doctorNameLower.includes(normalizedSearch);
+
       return matchesSearch;
     });
-    
-    // Only show regular patients (no reassigned patients on this page)
-    filtered = regularPatients;
-    setFilteredPatients(filtered);
-    setShowSubSearch(filtered.length > 0 && searchTerm.trim() !== '');
-    setCurrentPage(1); // Reset to first page when search changes
+
+    setFilteredPatients(regularPatients);
+    setShowSubSearch(regularPatients.length > 0 && normalizedSearch !== '');
+    setCurrentPage(1);
   }, [patients, searchTerm]);
 
   // Sub-search filter - simplified without reassignment logic
   useEffect(() => {
+    const subSearchLower = (subSearchTerm || '').trim().toLowerCase();
+
     let subFiltered = filteredPatients.filter(patient => {
-      if (!subSearchTerm) return true;
-      
-      const searchLower = subSearchTerm.toLowerCase();
-      
+      if (!subSearchLower) return true;
+
+      const doctorNameLower = getAssignedDoctorName(patient)?.toLowerCase() || '';
+
       switch (searchField) {
         case 'name':
-          return patient.name?.toLowerCase().includes(searchLower);
+          return patient.name?.toLowerCase().includes(subSearchLower);
         case 'email':
-          return patient.email?.toLowerCase().includes(searchLower);
+          return patient.email?.toLowerCase().includes(subSearchLower);
         case 'phone':
-          return patient.phone?.toLowerCase().includes(searchLower);
+          return patient.phone?.toLowerCase().includes(subSearchLower);
         case 'uhId':
-          return patient.uhId?.toLowerCase().includes(searchLower);
+          return patient.uhId?.toLowerCase().includes(subSearchLower);
         case 'assignedDoctor':
-          return patient.assignedDoctor?.name?.toLowerCase().includes(searchLower);
+          return doctorNameLower.includes(subSearchLower);
         case 'status':
-          const status = getPatientStatus(patient);
-          return status.toLowerCase().includes(searchLower);
+          return getPatientStatus(patient).toLowerCase().includes(subSearchLower);
         case 'all':
         default:
-          return patient.name?.toLowerCase().includes(searchLower) ||
-                 patient.email?.toLowerCase().includes(searchLower) ||
-                 patient.phone?.toLowerCase().includes(searchLower) ||
-                 patient.uhId?.toLowerCase().includes(searchLower) ||
-                 patient.assignedDoctor?.name?.toLowerCase().includes(searchLower) ||
-                 getPatientStatus(patient).toLowerCase().includes(searchLower);
+          return (
+            patient.name?.toLowerCase().includes(subSearchLower) ||
+            patient.email?.toLowerCase().includes(subSearchLower) ||
+            patient.phone?.toLowerCase().includes(subSearchLower) ||
+            patient.uhId?.toLowerCase().includes(subSearchLower) ||
+            doctorNameLower.includes(subSearchLower) ||
+            getPatientStatus(patient).toLowerCase().includes(subSearchLower)
+          );
       }
     });
     
@@ -1005,6 +1180,12 @@ export default function ConsultationBilling() {
         return;
       }
 
+      const assignedDoctorId = getAssignedDoctorId(selectedPatient);
+      if (!assignedDoctorId) {
+        toast.error('Please assign a doctor to the patient before generating an invoice.');
+        return;
+      }
+
       const effectiveDiscountReason = invoiceFormData.discountReason === 'other'
         ? invoiceFormData.customDiscountReason.trim()
         : invoiceFormData.discountReason;
@@ -1031,7 +1212,7 @@ export default function ConsultationBilling() {
 
       const invoiceData = {
         patientId: selectedPatient._id,
-        doctorId: selectedPatient.assignedDoctor?._id || selectedPatient.assignedDoctor,
+        doctorId: assignedDoctorId,
         registrationFee: invoiceFormData.registrationFee,
         consultationFee: invoiceFormData.consultationFee,
         serviceCharges: invoiceFormData.serviceCharges.filter(s => s.name && s.amount),
@@ -1445,7 +1626,7 @@ export default function ConsultationBilling() {
     }
 
     // Validate assigned doctor exists
-    const assignedDoctorId = selectedPatient.assignedDoctor?._id || selectedPatient.assignedDoctor;
+    const assignedDoctorId = getAssignedDoctorId(selectedPatient);
     if (!assignedDoctorId) {
       toast.error('Patient must have an assigned doctor to book an appointment');
       return;
@@ -1496,7 +1677,10 @@ export default function ConsultationBilling() {
         notes: paymentData.notes,
         appointmentTime: paymentData.appointmentTime,
         consultationType: paymentData.consultationType,
-        slotId: selectedSlotId // Include slot ID in payment payload
+        slotId: selectedSlotId, // Include slot ID in payment payload
+        bloodPressure: paymentData.bloodPressure,
+        pulseRate: paymentData.pulseRate,
+        spo2: paymentData.spo2
       };
 
       const formData = new FormData();
@@ -1537,7 +1721,10 @@ export default function ConsultationBilling() {
           paymentMethod: 'cash',
           notes: '',
           appointmentTime: '',
-          consultationType: 'OP'
+          consultationType: 'OP',
+          bloodPressure: '',
+          pulseRate: '',
+          spo2: ''
         });
         setSelectedAppointmentDate('');
         setSelectedSlotId(null);
@@ -2105,7 +2292,7 @@ export default function ConsultationBilling() {
         address: patient.address
       },
       doctor: {
-        name: patient.assignedDoctor?.name || 'Not Assigned',
+        name: getAssignedDoctorName(patient) || 'Not Assigned',
         specializations: (() => {
           const doctor = patient.assignedDoctor;
           console.log('🔍 Processing specializations for doctor:', doctor?.name);
@@ -2276,12 +2463,15 @@ export default function ConsultationBilling() {
     if (!selectedPatient) return;
 
     try {
-      // For regular patients, use assignedDoctor
-      const currentDoctor = selectedPatient.assignedDoctor;
+      const currentDoctorId = getAssignedDoctorId(selectedPatient);
+      if (!currentDoctorId) {
+        toast.error('Please assign a doctor to the patient before creating consultation billing.');
+        return;
+      }
       
       const billData = {
         patientId: selectedPatient._id,
-        doctorId: currentDoctor?._id || currentDoctor,
+        doctorId: currentDoctorId,
         amount: parseFloat(paymentData.amount),
         notes: paymentData.notes,
         // Create billing entry without marking as paid
@@ -2414,12 +2604,15 @@ export default function ConsultationBilling() {
     }
 
     try {
-      // For regular patients, use assignedDoctor
-      const currentDoctor = selectedPatient.assignedDoctor;
+      const currentDoctorId = getAssignedDoctorId(selectedPatient);
+      if (!currentDoctorId) {
+        toast.error('Please assign a doctor to the patient before creating service charges.');
+        return;
+      }
       
       const billData = {
         patientId: selectedPatient._id,
-        doctorId: currentDoctor?._id || currentDoctor,
+        doctorId: currentDoctorId,
         services: validServices,
         notes: serviceData.notes
       };
@@ -2477,6 +2670,8 @@ export default function ConsultationBilling() {
   };
 
   const stats = getStats();
+  const selectedPatientDoctorId = selectedPatient ? getAssignedDoctorId(selectedPatient) : '';
+  const selectedPatientDoctorName = selectedPatient ? getAssignedDoctorName(selectedPatient) : '';
 
   const appointmentDocuments = useMemo(() => {
     if (patientAppointment?.medicalHistoryDocs?.length) {
@@ -2544,13 +2739,30 @@ export default function ConsultationBilling() {
           {/* Header */}
           <div className="mb-8">
             <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-2xl font-bold text-slate-800 mb-2">
-                  Consultation Billing Workflow
-                </h1>
-                <p className="text-slate-600 text-sm">
-                  Create invoices, process payments, and manage billing with full tracking
-                </p>
+              <div className="flex items-start gap-4">
+                {centerInfo.logoUrl && (
+                  <div className="hidden sm:flex h-14 w-14 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                    <img
+                      src={centerInfo.logoUrl}
+                      alt={`${centerInfo.name || 'Center'} logo`}
+                      className="object-contain max-h-full max-w-full p-1"
+                    />
+                  </div>
+                )}
+                <div>
+                  <h1 className="text-2xl font-bold text-slate-800 mb-2">
+                    Consultation Billing Workflow
+                  </h1>
+                  <p className="text-slate-600 text-sm">
+                    Create invoices, process payments, and manage billing with full tracking
+                  </p>
+                  {centerInfo.name && (
+                    <div className="mt-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                      <Building className="mr-1 h-4 w-4" />
+                      {centerInfo.name}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 <button
@@ -2799,7 +3011,7 @@ export default function ConsultationBilling() {
                             </td>
                             <td className="px-4 py-4 whitespace-nowrap">
                               <div className="text-xs text-slate-900">
-                                {patient.assignedDoctor?.name || 'Not Assigned'}
+                                {getAssignedDoctorName(patient) || 'Not Assigned'}
                               </div>
                             </td>
                             <td className="px-4 py-4 whitespace-nowrap">
@@ -3113,9 +3325,25 @@ export default function ConsultationBilling() {
           <div className="bg-white rounded-xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col my-4">
             {/* Header - Fixed */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
-              <h3 className="text-lg font-semibold text-slate-800">
-                Create Invoice for {selectedPatient.name}
-              </h3>
+              <div className="flex items-start gap-3">
+                {centerInfo.logoUrl && (
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-lg border border-blue-100 bg-white shadow-sm">
+                    <img
+                      src={centerInfo.logoUrl}
+                      alt={`${centerInfo.name || 'Center'} logo`}
+                      className="object-contain max-h-full max-w-full p-1"
+                    />
+                  </div>
+                )}
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800">
+                    Create Invoice for {selectedPatient.name}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {centerInfo.name}
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={() => setShowCreateInvoiceModal(false)}
                 className="text-slate-400 hover:text-slate-600"
@@ -3677,49 +3905,20 @@ export default function ConsultationBilling() {
             {/* Modal Header with Actions */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 rounded-t-xl">
               <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold">Invoice</h2>
+                <div className="flex items-center gap-3">
+                 
+                  <div>
+                    <h2 className="text-xl font-bold">Invoice</h2>-
+                    {centerInfo.name && (
+                      <p className="text-xs text-blue-100 mt-1">
+                        {centerInfo.name}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   {/* Action Buttons */}
-                  <button
-                    onClick={() => {
-                      // Filter out superconsultation billing - only use consultation billing
-                      const consultationBilling = filterConsultationBilling(selectedPatient.billing || []);
-                      // Calculate outstanding amount (only from consultation billing)
-                      const totalAmount = consultationBilling.reduce((sum, bill) => sum + (bill.amount || 0), 0);
-                      const totalPaid = consultationBilling.reduce((sum, bill) => sum + (bill.paidAmount || 0), 0);
-                      const outstandingAmount = totalAmount - totalPaid;
-                      
-                      // Create a mock invoice object for payment processing
-                      const mockInvoice = {
-                        invoiceNumber: consultationBilling[0]?.invoiceNumber || `INV-${selectedPatient._id.toString().slice(-6)}`,
-                        patientId: selectedPatient._id,
-                        total: totalAmount,
-                        paid: totalPaid,
-                        outstanding: outstandingAmount
-                      };
-                      
-                      // Set the generated invoice for payment processing
-                      setGeneratedInvoice(mockInvoice);
-                      
-      // Pre-populate payment data
-      setPaymentData({
-        amount: outstandingAmount > 0 ? outstandingAmount.toString() : '',
-        paymentMethod: 'cash',
-        notes: `Payment for patient: ${selectedPatient.name}`,
-        appointmentTime: '',
-        consultationType: 'OP'
-      });
-                      
-                      setShowInvoicePreviewModal(false);
-                      setShowPaymentModal(true);
-                    }}
-                    className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2"
-                  >
-                    <CreditCard className="h-4 w-4" />
-                    Process Payment
-                  </button>
+                 
                   
                   <button
                     onClick={() => {
@@ -3929,19 +4128,30 @@ export default function ConsultationBilling() {
                   {/* Content - Watermark removed */}
                   {/* Header */}
                   <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h1 className="text-2xl font-bold text-slate-900 mb-1">
-                        {centerInfo.name}
-                      </h1>
-                      <p className="text-sm text-slate-700 mb-0.5">
-                        {centerInfo.address}
-                      </p>
-                      <p className="text-sm text-slate-700 mb-0.5">
-                        <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
-                      </p>
-                      <p className="text-sm text-slate-700">
-                        <span className="font-medium">Website:</span> {centerInfo.website}
-                      </p>
+                    <div className="flex items-start gap-3">
+                      {/* {centerInfo.logoUrl && (
+                        <div className="h-16 w-16 border border-slate-200 rounded-lg flex items-center justify-center bg-white shadow-sm">
+                          <img
+                            src={centerInfo.logoUrl}
+                            alt={`${centerInfo.name || 'Center'} logo`}
+                            className="object-contain max-h-full max-w-full p-1"
+                          />
+                        </div>
+                      )} */}
+                      <div>
+                        <h1 className="text-2xl font-bold text-slate-900 mb-1">
+                          {centerInfo.name}
+                        </h1>
+                        <p className="text-sm text-slate-700 mb-0.5">
+                          {centerInfo.address}
+                        </p>
+                        <p className="text-sm text-slate-700 mb-0.5">
+                          <span className="font-medium">Phone:</span> {centerInfo.phone} | <span className="font-medium">Fax:</span> {centerInfo.fax}
+                        </p>
+                        <p className="text-sm text-slate-700">
+                          <span className="font-medium">Website:</span> {centerInfo.website}
+                        </p>
+                      </div>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-medium text-slate-700">
@@ -4751,9 +4961,9 @@ export default function ConsultationBilling() {
                         min={new Date().toISOString().split('T')[0]}
                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
                         required
-                        disabled={!selectedPatient?.assignedDoctor}
+                        disabled={!selectedPatientDoctorId}
                       />
-                      {!selectedPatient?.assignedDoctor && (
+                      {!selectedPatientDoctorId && (
                         <p className="text-xs text-amber-600 mt-1">
                           Please assign a doctor to the patient first
                         </p>
@@ -4761,7 +4971,7 @@ export default function ConsultationBilling() {
                     </div>
 
                     {/* Slot Selector */}
-                    {selectedPatient?.assignedDoctor ? (
+                    {selectedPatientDoctorId ? (
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
                           Available Time Slots *
@@ -4818,7 +5028,7 @@ export default function ConsultationBilling() {
                         )}
                         {!slotsLoading && selectedAppointmentDate && availableSlots.length === 0 && (
                           <p className="text-xs text-amber-600 mt-1">
-                            No slots available for {selectedPatient.assignedDoctor?.name || 'the assigned doctor'} on this date. 
+                            No slots available for {selectedPatientDoctorName || 'the assigned doctor'} on this date. 
                             {(() => {
                               const today = new Date().toISOString().split('T')[0];
                               const selectedDate = selectedAppointmentDate;
@@ -4938,6 +5148,48 @@ export default function ConsultationBilling() {
                           ))}
                         </ul>
                       )}
+                    </div>
+                  </div>
+                  
+                  <div className="border border-slate-200 rounded-lg p-4 bg-white">
+                    <h4 className="text-sm font-semibold text-slate-700 mb-3">General Examination (optional)</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Blood Pressure
+                        </label>
+                        <input
+                          type="text"
+                          value={paymentData.bloodPressure}
+                          onChange={(e) => setPaymentData({ ...paymentData, bloodPressure: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                          placeholder="e.g., 120/80 mmHg"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Pulse Rate
+                        </label>
+                        <input
+                          type="text"
+                          value={paymentData.pulseRate}
+                          onChange={(e) => setPaymentData({ ...paymentData, pulseRate: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                          placeholder="e.g., 72 bpm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          SpO2
+                        </label>
+                        <input
+                          type="text"
+                          value={paymentData.spo2}
+                          onChange={(e) => setPaymentData({ ...paymentData, spo2: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                          placeholder="e.g., 98%"
+                        />
+                      </div>
                     </div>
                   </div>
                   

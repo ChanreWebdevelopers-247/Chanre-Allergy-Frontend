@@ -17,6 +17,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 import API from "../../../../services/api";
+import { API_CONFIG } from "../../../../config/environment";
 
 const DEFAULT_CENTER_INFO = {
   name: "CHANRE RHEUMATOLOGY & IMMUNOLOGY CENTER & RESEARCH",
@@ -32,6 +33,23 @@ const DEFAULT_CENTER_INFO = {
   website: "www.chanreicr.com | www.mychanreclinic.com",
   labWebsite: "www.chanrelabresults.com",
   code: "",
+  logoUrl: "",
+};
+
+const resolveLogoUrl = (value) => {
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value) || value.startsWith("data:")) {
+    return value;
+  }
+  const normalized = value.startsWith("/") ? value : `/${value}`;
+  return `${API_CONFIG.BASE_URL}${normalized}`;
+};
+
+const resolveCenterLogo = (entity, previous = "") => {
+  if (!entity || !Object.prototype.hasOwnProperty.call(entity, "logoUrl")) {
+    return previous;
+  }
+  return entity.logoUrl ? resolveLogoUrl(entity.logoUrl) : "";
 };
 
 export default function AddMedications() {
@@ -129,6 +147,12 @@ export default function AddMedications() {
             ...prev,
             code: user.centerCode || prev.code,
             name: user.hospitalName || prev.name,
+            logoUrl:
+              typeof user.centerLogo !== "undefined"
+                ? user.centerLogo
+                  ? resolveLogoUrl(user.centerLogo)
+                  : ""
+                : prev.logoUrl,
           }));
         }
         return;
@@ -137,7 +161,7 @@ export default function AddMedications() {
       setCenterLoading(true);
       try {
         const response = await API.get(`/centers/${centerId}`);
-        const center = response.data || {};
+        const center = response.data?.data || response.data || {};
 
         const formattedAddress = [center.address, center.location]
           .filter(Boolean)
@@ -157,6 +181,7 @@ export default function AddMedications() {
           website: center.website || prev.website,
           labWebsite: center.labWebsite || prev.labWebsite,
           code: center.code || prev.code,
+          logoUrl: resolveCenterLogo(center, prev.logoUrl),
         }));
       } catch (centerError) {
         console.error("Failed to fetch center info", centerError);
