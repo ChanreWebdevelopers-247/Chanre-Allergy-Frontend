@@ -103,72 +103,6 @@ const normalizeTests = (list) => {
     .filter(Boolean);
 };
 
-const buildContactLines = (info = {}) =>
-  [
-    [
-      info.phone ? `Phone: ${info.phone}` : "",
-      info.fax ? `Fax: ${info.fax}` : "",
-      info.code ? `Center Code: ${info.code}` : "",
-    ],
-    [
-      info.email ? `Email: ${info.email}` : "",
-      info.website || "",
-    ],
-    [
-      info.labWebsite ? `Lab: ${info.labWebsite}` : "",
-      info.missCallNumber ? `Missed Call: ${info.missCallNumber}` : "",
-      info.appointmentNumber ? `Appointment: ${info.appointmentNumber}` : "",
-    ],
-  ]
-    .map((row) => row.filter(Boolean).join(" | "))
-    .filter(Boolean);
-
-const resolveLogoUrl = (value) => {
-  if (!value) return '';
-  if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
-    return value;
-  }
-  const normalized = value.startsWith('/') ? value : `/${value}`;
-  return `${API_CONFIG.BASE_URL}${normalized}`;
-};
-
-const buildHeader = ({ centerInfo = {} }) => {
-  const contactRows = buildContactLines(centerInfo);
-  if (!centerInfo.name && contactRows.length === 0 && !centerInfo.address) {
-    return "";
-  }
-
-  return `
-    <div class="header">
-      ${centerInfo.logoUrl ? `<img src="${centerInfo.logoUrl}" alt="Center Logo" class="header-logo" />` : ""}
-      <div class="header-content">
-        ${centerInfo.name ? `<h1>${centerInfo.name}</h1>` : ""}
-        ${centerInfo.subTitle ? `<p class="subtitle">${centerInfo.subTitle}</p>` : ""}
-        ${centerInfo.address ? `<p class="address">${centerInfo.address}</p>` : ""}
-        ${contactRows
-          .map((row) => row.filter(Boolean).join(" | "))
-          .filter(Boolean)
-          .map((line) => `<p class="contact">${line}</p>`)
-          .join("")}
-      </div>
-    </div>
-  `;
-};
-
-const buildFooter = () => `
-  <div class="footer">
-    <p>
-      Other Services: 24/7 Inpatient & outpatient, Pharmacy x-ray, Ultrasound, Doppler, ECG, EMG, NCV, PFT,
-      Diagnostic Laboratory, Home blood sample collection, Diet & Nutrition & counselling.
-    </p>
-    <p>
-      Our Clinics: Lifestyle & Obesity, Chronic pain management, Physiotherapy & rehabilitation, Yoga & acupuncture
-    </p>
-    <p class="footer-contact">
-      Facebook.com/ChanRelief | youtube.com/user/chanre1
-    </p>
-  </div>
-`;
 
 export const buildPrescriptionPrintHTML = ({
   centerInfo = {},
@@ -177,8 +111,6 @@ export const buildPrescriptionPrintHTML = ({
   fallbackRemarks = DEFAULT_REMARKS,
   hideHeaderFooter = false,
 }) => {
-  const mergedCenter = { ...DEFAULT_CENTER_INFO, ...centerInfo };
-  const centerLogoUrl = resolveLogoUrl(mergedCenter.logoUrl);
   const medications = normalizeMedications(prescription.medications);
 
   const possibleTestSources = [
@@ -270,10 +202,7 @@ export const buildPrescriptionPrintHTML = ({
         .join("")
       : `<tr class="empty-row"><td>—</td><td>—</td></tr>`;
 
-  const contactRows = buildContactLines(mergedCenter);
-
-  const headerMarkup = hideHeaderFooter ? "" : buildHeader({ centerInfo: mergedCenter });
-  const footerMarkup = hideHeaderFooter ? "" : buildFooter();
+  const pageClass = hideHeaderFooter ? "page minimal" : "page";
 
   return `<!DOCTYPE html>
     <html>
@@ -281,15 +210,62 @@ export const buildPrescriptionPrintHTML = ({
         <meta charset="utf-8" />
         <title>Prescription - ${patient?.name || "Patient"}</title>
         <style>
+          * {
+            box-sizing: border-box;
+          }
+          html, body {
+            width: 100%;
+            margin: 0;
+            padding: 0;
+          }
           body {
-            font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            margin: 25px;
+            font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
+            margin: ${hideHeaderFooter ? "0" : "10px"};
             color: #111;
-            font-size: 12px;
+            font-size: 16px;
+            width: 100%;
           }
           .page {
             width: 100%;
-            line-height: 1.35;
+            line-height: 1.25;
+            margin: 0;
+            padding: 0;
+          }
+          .page.minimal {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 15mm 5mm 15mm;
+            box-sizing: border-box;
+          }
+          .page.minimal .info-table td {
+            padding: 8px 12px;
+            font-size: 16px;
+          }
+          .page.minimal .section-title {
+            margin: 16px 0 8px;
+            font-size: 16px;
+          }
+          .page.minimal .data-table th,
+          .page.minimal .data-table td {
+            padding: 8px 12px;
+            font-size: 16px;
+          }
+          .page.minimal .data-table th {
+            font-size: 15px;
+          }
+          .page.minimal .note-block {
+            padding: 10px 12px;
+            font-size: 16px;
+          }
+          .page.minimal .footer-block {
+            padding: 10px 12px;
+            line-height: 1.8;
+            font-size: 16px;
+          }
+          .page.minimal .footer-block > div {
+            margin-bottom: 4px;
+            line-height: 1.8;
           }
           .clinic-header {
             display: flex;
@@ -329,25 +305,24 @@ export const buildPrescriptionPrintHTML = ({
             border-bottom: 1px solid #000;
           }
           .info-table td {
-            padding: 6px 8px;
+            padding: 8px 12px;
             vertical-align: top;
+            font-size: 16px;
           }
           .info-label {
             font-weight: 600;
             text-transform: uppercase;
-            font-size: 9px;
+            font-size: 13px;
             display: block;
-            margin-bottom: 3px;
-            letter-spacing: 0.6px;
-            
+            margin-bottom: 4px;
+            letter-spacing: 0.5px;
           }
           .section-title {
-            margin: 14px 0 5px;
+            margin: 16px 0 8px;
             font-weight: 600;
             text-transform: uppercase;
-            font-size: 11px;
-            letter-spacing: 0.8px;
-            
+            font-size: 16px;
+            letter-spacing: 0.7px;
           }
           .medicines-table{
             border-bottom: 1px solid #000;
@@ -360,20 +335,22 @@ export const buildPrescriptionPrintHTML = ({
           .data-table {
             width: 100%;
             table-layout: fixed;
-            margin-top: 6px;
+            margin-top: 3px;
+            margin-bottom: 8px;
           }
           .data-table th,
           .data-table td {
-            
-            padding: 7px 10px;
+            padding: 8px 12px;
             vertical-align: middle;
             text-align: left;
+            font-size: 16px;
           }
           .data-table th {
             text-transform: uppercase;
-            font-size: 10px;
-            letter-spacing: 0.4px;
+            font-size: 15px;
+            letter-spacing: 0.3px;
             background: #f4f4f4;
+            font-weight: 600;
           }
           .medicines-table th:nth-child(2),
           .medicines-table th:nth-child(3),
@@ -399,44 +376,45 @@ export const buildPrescriptionPrintHTML = ({
             font-style: italic;
           }
           .notes-grid {
-            margin-top: 12px;
+            margin-top: 8px;
+            margin-bottom: 8px;
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
+            gap: 12px;
           }
           .note-block {
-            padding: 6px 8px;
-            min-height: 64px;
+            padding: 10px 12px;
+            min-height: 50px;
+            font-size: 16px;
           }
           .note-block .info-label {
             margin-bottom: 4px;
           }
           .footer-grid {
-            margin-top: 14px;
+            margin-top: 16px;
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
+            gap: 12px;
           }
           .footer-block {
-            padding: 6px 8px;
-            line-height: 1.45;
+            padding: 10px 12px;
+            line-height: 1.8;
+            font-size: 16px;
           }
           .footer-block strong {
             display: inline-block;
-            min-width: 120px;
+            min-width: auto;
+            font-weight: 600;
+            margin-right: 4px;
           }
-          .signature-line {
-            margin-top: 22px;
-            text-align: right;
-            font-size: 10px;
+          .footer-block > div {
+            margin-bottom: 4px;
+            line-height: 1.8;
           }
-          .signature-line span {
-            display: inline-block;
-            border-top: 1px solid #000;
-            padding-top: 3px;
-            min-width: 150px;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
+          .footer-credentials {
+            font-size: 12px;
+            font-weight: normal;
+            margin-left: 4px;
           }
           .footer-note {
             margin-top: 20px;
@@ -447,16 +425,44 @@ export const buildPrescriptionPrintHTML = ({
             line-height: 1.3;
           }
           @media print {
+            html, body {
+              width: 100%;
+              margin: 0;
+              padding: 0;
+            }
             body {
-              margin: 18mm;
+              margin: ${hideHeaderFooter ? "0" : "0"};
               -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              width: 100%;
+            }
+            .page {
+              page-break-inside: avoid;
+              width: 100%;
+              max-width: 100%;
+              margin: 0;
+              padding: 0;
+            }
+            .page.minimal {
+              width: 100%;
+              max-width: 100%;
+              margin: 0;
+              padding: 15mm 5mm 15mm;
+            }
+            .footer-grid {
+              page-break-inside: avoid;
+            }
+            .data-table {
+              page-break-inside: avoid;
+            }
+            .notes-grid {
+              page-break-inside: avoid;
             }
           }
         </style>
       </head>
       <body>
-        <div class="page">
-          ${headerMarkup}
+        <div class="${pageClass}">
           <table class="info-table">
             <tr>
               <td>
@@ -529,19 +535,14 @@ export const buildPrescriptionPrintHTML = ({
 
           <div class="footer-grid">
             <div class="footer-block">
-              <div><strong>Prescribed By:</strong> ${prescribedByDisplay}</div>
-              <div><strong>Prepared By:</strong> ${preparedByDisplay}</div>
-              ${prescription.preparedByCredentials ? `<div>${prescription.preparedByCredentials}</div>` : ""}
-              ${prescription.medicalCouncilNumber ? `<div>Medical Council Reg. No.: ${prescription.medicalCouncilNumber}</div>` : ""}
-            </div>
-            <div class="footer-block">
               <div><strong>Printed By:</strong> ${printedByDisplay}</div>
-              <div><strong>Report Generated:</strong> ${reportGeneratedDisplay}</div>
               <div><strong>Printed On:</strong> ${printedOnDisplay}</div>
             </div>
+            <div class="footer-block">
+              <div><strong>Prescription Prepared By:</strong> ${prescribedByDisplay}${prescription.preparedByCredentials ? `<span class="footer-credentials">${prescription.preparedByCredentials}</span>` : ""}</div>
+              ${prescription.medicalCouncilNumber ? `<div>Medical Council Reg. No.: ${prescription.medicalCouncilNumber}</div>` : ""}
+            </div>
           </div>
-
-          <div class="signature-line"><span>Doctor Signature</span></div>
 
           
         <script>

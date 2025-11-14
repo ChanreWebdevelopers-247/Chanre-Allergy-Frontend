@@ -701,7 +701,7 @@ export default function SlitTherapyBilling() {
 
   const renderLabStatus = (labStatus) => (
     <span className="text-sm text-slate-600">
-      Lab Status: <span className="font-medium capitalize">{labStatus || 'pending'}</span>
+      SLIT Therapy Status: <span className="font-medium capitalize">{labStatus || 'pending'}</span>
     </span>
   );
 
@@ -743,7 +743,7 @@ export default function SlitTherapyBilling() {
               <option value="all">All</option>
               <option value="Billing_Generated">Billing Generated</option>
               <option value="Billing_Paid">Billing Paid</option>
-              <option value="Lab_Received">Lab Received</option>
+              <option value="Lab_Received">SLIT Therapy Received</option>
               <option value="Ready">Ready</option>
               <option value="Delivered">Delivered</option>
               <option value="Received">Received</option>
@@ -849,7 +849,7 @@ export default function SlitTherapyBilling() {
                           </td>
                           <td className="px-4 py-3 align-top text-sm text-slate-700 space-y-1">
                             {renderStatusBadge(request.status)}
-                            <div className="text-xs text-slate-500">Lab: <span className="font-semibold capitalize">{request.labStatus || 'pending'}</span></div>
+                            <div className="text-xs text-slate-500">SLIT Therapy: <span className="font-semibold capitalize">{request.labStatus || 'pending'}</span></div>
                             <div className="text-xs text-slate-500">Billing: <span className="font-semibold">{request.billing?.status || 'generated'}</span></div>
                           </td>
                           <td className="px-4 py-3 align-top text-sm text-slate-700">
@@ -864,7 +864,7 @@ export default function SlitTherapyBilling() {
                             )}
                             {request.labNotes && (
                               <div>
-                                <span className="font-semibold text-slate-700">Lab:</span> {request.labNotes}
+                                <span className="font-semibold text-slate-700">SLIT Therapy:</span> {request.labNotes}
                               </div>
                             )}
                             {!request.notes && !request.labNotes && <span className="text-slate-400">—</span>}
@@ -892,7 +892,7 @@ export default function SlitTherapyBilling() {
                                     Payment
                                   </button>
                                 )}
-                                {request.billing?.paidAmount > 0 && request.billing?.status === 'paid' && (
+                                {request.billing?.paidAmount > 0 && request.billing?.status === 'paid' && (request.status === 'Billing_Generated' || request.status === 'Billing_Paid') && (
                                   <button
                                     onClick={() => openRefundModal(request)}
                                     className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-500 rounded-md hover:bg-amber-600"
@@ -900,7 +900,7 @@ export default function SlitTherapyBilling() {
                                     Refund
                                   </button>
                                 )}
-                                {request.status !== 'Received' && request.status !== 'Cancelled' && (
+                                {(request.status === 'Billing_Generated' || request.status === 'Billing_Paid') && (
                                   <button
                                     onClick={() => openCancelModal(request)}
                                     className="px-3 py-1.5 text-xs font-semibold text-white bg-rose-500 rounded-md hover:bg-rose-600"
@@ -1124,7 +1124,7 @@ export default function SlitTherapyBilling() {
                   onChange={(e) => setNewRequest((prev) => ({ ...prev, notes: e.target.value }))}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
                   rows={3}
-                  placeholder="Add any special instructions or details for lab"
+                  placeholder="Add any special instructions or details for SLIT therapy"
                 />
               </div>
 
@@ -1408,7 +1408,7 @@ export default function SlitTherapyBilling() {
                 />
               </div>
               <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">
-                Cancelling this billing will update the status for both receptionist and SLIT lab dashboards. This action cannot be undone without creating a new billing.
+                Cancelling this billing will update the status for both receptionist and SLIT therapy dashboards. This action cannot be undone without creating a new billing.
               </div>
               <div className="flex justify-end gap-2">
                 <button

@@ -1005,6 +1005,7 @@ const ViewProfile = () => {
           remarks: prepared.remarks || DEFAULT_REMARKS,
         },
         fallbackRemarks: DEFAULT_REMARKS,
+        hideHeaderFooter: true,
       });
       openPrintPreview(html);
     } catch (error) {

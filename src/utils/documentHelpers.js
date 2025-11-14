@@ -1,5 +1,6 @@
 import API from '../services/api';
 import { SERVER_CONFIG } from '../config/environment';
+import axios from 'axios';
 
 const trimSlashes = (value = '') => value.replace(/^\/+|\/+$/g, '');
 
@@ -249,18 +250,72 @@ export const openDocumentWithFallback = async ({ doc, toast, errorMessage = 'Fai
     doc.addEventListener('keydown', handleKeydown);
   };
 
-  const tryOpenViaApi = async (path) => {
+  const tryOpenViaApi = async (path, isApiPath = true) => {
     try {
       const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-      const backendBase = (SERVER_CONFIG.BACKEND_URL || '').replace(/\/+$/, '');
-      const requestUrl = normalizedPath.startsWith('http')
-        ? normalizedPath
-        : `${backendBase}${normalizedPath}`;
+      
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast?.error?.('Authentication required. Please log in again.');
+        return false;
+      }
 
-      const response = await API.get(requestUrl, {
-        responseType: 'blob',
-        preserveAuthOn401: true,
-      });
+      let response;
+      
+      if (isApiPath) {
+        // For API paths, use relative path with API.get() to ensure baseURL and interceptors work
+        // The API interceptor will automatically add the Authorization header
+        // If path is a full URL, extract just the path portion
+        let apiPath = normalizedPath;
+        if (normalizedPath.startsWith('http')) {
+          try {
+            const url = new URL(normalizedPath);
+            apiPath = url.pathname + url.search;
+          } catch (e) {
+            // If URL parsing fails, use the path as-is
+            apiPath = normalizedPath;
+          }
+        }
+
+        // Remove /api prefix if present, since API baseURL already includes /api
+        if (apiPath.startsWith('/api/')) {
+          apiPath = apiPath.substring(4); // Remove '/api' prefix
+        }
+
+        // Ensure the path starts with / for API.get()
+        if (!apiPath.startsWith('/')) {
+          apiPath = `/${apiPath}`;
+        }
+
+        // Use API.get() - the interceptor will add the token automatically
+        // This ensures the request goes through the API instance with proper baseURL and interceptors
+        // Always use API.get() for API paths to ensure proper authentication
+        try {
+          response = await API.get(apiPath, {
+            responseType: 'blob',
+            preserveAuthOn401: true,
+          });
+        } catch (apiGetError) {
+          // If API.get() fails, re-throw to be handled by outer catch
+          throw apiGetError;
+        }
+      } else {
+        // For non-API paths (like /uploads/...), construct full URL and use axios directly
+        // We need to explicitly add the token since we're not using the API instance
+        const backendBase = (SERVER_CONFIG.BACKEND_URL || '').replace(/\/+$/, '');
+        const fullUrl = normalizedPath.startsWith('http')
+          ? normalizedPath
+          : `${backendBase}${normalizedPath}`;
+
+        // Use axios directly for non-API paths to avoid baseURL issues
+        // Explicitly add token since we're bypassing the API interceptor
+        response = await axios.get(fullUrl, {
+          responseType: 'blob',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
       const contentType = response.headers['content-type'] || 'application/pdf';
       const blob = new Blob([response.data], {
         type: response.headers['content-type'] || 'application/pdf',
@@ -273,9 +328,16 @@ export const openDocumentWithFallback = async ({ doc, toast, errorMessage = 'Fai
       return true;
     } catch (apiError) {
       console.error('Error opening document via authenticated API request:', apiError);
-      if (apiError?.response?.status === 401) {
+      const status = apiError?.response?.status;
+      if (status === 401) {
         toast?.error?.('Session expired. Please log in again to access documents.');
-        return true; // prevent fallback to avoid repeated errors
+        return false; // Don't prevent fallback, but show error
+      } else if (status === 403) {
+        toast?.error?.('Access denied. You do not have permission to view this document.');
+        return false;
+      } else if (status === 404) {
+        toast?.error?.('Document not found. The file may have been moved or deleted.');
+        return false;
       }
       return false;
     }
@@ -293,34 +355,48 @@ export const openDocumentWithFallback = async ({ doc, toast, errorMessage = 'Fai
   if (!isApi) {
     const relativePath = stripBackendPrefix(url);
     if (relativePath) {
-      const opened = await tryOpenViaApi(relativePath);
+      // For non-API paths (like /uploads/...), pass isApiPath = false
+      const opened = await tryOpenViaApi(relativePath, false);
       if (opened) return;
     }
 
-    showPreviewOverlay(url, { title: doc?.originalName || doc?.filename });
-    return;
+    // Only fall back to direct URL loading for non-authenticated, non-API paths
+    // (e.g., external URLs or public static files)
+    if (url.startsWith('http') && !url.includes(SERVER_CONFIG.BACKEND_URL)) {
+      showPreviewOverlay(url, { title: doc?.originalName || doc?.filename });
+      return;
+    } else {
+      toast?.error?.('Unable to open document. The file may not be accessible.');
+      return;
+    }
   }
 
   try {
-    const normalizedApiPath = apiPath || stripBackendPrefix(url) || url;
-    const pathWithSlash = normalizedApiPath.startsWith('/') ? normalizedApiPath : `/${normalizedApiPath}`;
-    const opened = await tryOpenViaApi(pathWithSlash);
+    // For API paths, always use the apiPath if available, otherwise construct from url
+    let pathToUse = apiPath;
+    if (!pathToUse) {
+      const stripped = stripBackendPrefix(url);
+      if (stripped) {
+        pathToUse = stripped;
+      } else if (url.startsWith('/api/')) {
+        pathToUse = url;
+      } else {
+        pathToUse = url;
+      }
+    }
+    
+    const pathWithSlash = pathToUse.startsWith('/') ? pathToUse : `/${pathToUse}`;
+    
+    // Always use API.get() for API paths - never fall back to axios.get() for API endpoints
+    const opened = await tryOpenViaApi(pathWithSlash, true);
     if (opened) return;
-    throw new Error('Failed to open via API helper');
+    
+    // If the API path failed with 403, it's a permission issue - don't try fallback
+    // The error message is already shown in tryOpenViaApi
+    toast?.error?.(errorMessage || 'Unable to access document. Please check your permissions.');
   } catch (error) {
     console.error('Error opening document via API:', error);
-    const fallbackUrl = buildLegacyFallbackUrl(doc);
-    if (fallbackUrl) {
-      const relativeFallbackPath = stripBackendPrefix(fallbackUrl);
-      if (relativeFallbackPath) {
-        const openedFallback = await tryOpenViaApi(relativeFallbackPath);
-        if (openedFallback) return;
-      }
-
-      showPreviewOverlay(fallbackUrl, { title: doc?.originalName || doc?.filename });
-      return;
-    }
-    toast?.error?.(errorMessage);
+    toast?.error?.(errorMessage || 'Failed to open document. Please try again.');
   }
 };
 

@@ -496,14 +496,14 @@ export default function AddMedications() {
         patient,
         prescription: printablePrescription,
         fallbackRemarks: DEFAULT_REMARKS,
-        hideHeaderFooter: isSuperadminPrescriptionFlow
+        hideHeaderFooter: true
       });
       openPrintPreview(html);
     } catch (error) {
       // eslint-disable-next-line no-alert
       alert(error?.message || "Unable to open print preview. Please allow pop-ups and try again.");
     }
-  }, [centerInfo, patient, printablePrescription, isSuperadminPrescriptionFlow]);
+  }, [centerInfo, patient, printablePrescription]);
 
   const contactRows = useMemo(
     () => (isSuperadminPrescriptionFlow ? [] : buildContactRows({ ...DEFAULT_CENTER_INFO, ...centerInfo })),

@@ -650,6 +650,7 @@ const ViewProfile = () => {
           patient,
           prescription: prepared,
           fallbackRemarks: DEFAULT_REMARKS,
+          hideHeaderFooter: true,
         });
 
         openPrintPreview(html, {
