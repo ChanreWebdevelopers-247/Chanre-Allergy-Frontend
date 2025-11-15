@@ -17,7 +17,8 @@ const CategoryWiseReport = () => {
     consultation: { count: 0, amount: 0 },
     superconsultant: { count: 0, amount: 0 },
     reassignment: { count: 0, amount: 0 },
-    lab: { count: 0, amount: 0 }
+    lab: { count: 0, amount: 0 },
+    slitTherapy: { count: 0, amount: 0 }
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
@@ -42,6 +43,7 @@ const CategoryWiseReport = () => {
       const superconsultant = bills.filter(b => b.billType === 'Superconsultant' && b.status !== 'cancelled' && b.status !== 'refunded');
       const reassignment = bills.filter(b => b.billType === 'Reassignment' && b.status !== 'cancelled' && b.status !== 'refunded');
       const lab = bills.filter(b => b.billType === 'Lab/Test' && b.status !== 'cancelled' && b.status !== 'refunded');
+      const slitTherapy = bills.filter(b => (b.billType === 'Slit Therapy' || b.billType === 'slit_therapy') && b.status !== 'cancelled' && b.status !== 'refunded');
       
       setSummary({
         consultation: {
@@ -59,6 +61,10 @@ const CategoryWiseReport = () => {
         lab: {
           count: lab.length,
           amount: lab.reduce((sum, b) => sum + (b.amount || 0), 0)
+        },
+        slitTherapy: {
+          count: slitTherapy.length,
+          amount: slitTherapy.reduce((sum, b) => sum + (b.amount || 0), 0)
         }
       });
     } catch (error) {
@@ -78,14 +84,15 @@ const CategoryWiseReport = () => {
       ['Category', 'Bill Count', 'Total Amount', 'Average Amount', 'Percentage']
     ];
 
-    const totalAmount = summary.consultation.amount + summary.superconsultant.amount + summary.reassignment.amount + summary.lab.amount;
-    const totalCount = summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count;
+    const totalAmount = summary.consultation.amount + summary.superconsultant.amount + summary.reassignment.amount + summary.lab.amount + summary.slitTherapy.amount;
+    const totalCount = summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count + summary.slitTherapy.count;
 
     const categories = [
       { name: 'Consultation', ...summary.consultation },
       { name: 'Superconsultant', ...summary.superconsultant },
       { name: 'Reassignment', ...summary.reassignment },
-      { name: 'Lab/Test', ...summary.lab }
+      { name: 'Lab/Test', ...summary.lab },
+      { name: 'Slit Therapy', ...summary.slitTherapy }
     ];
 
     categories.forEach(cat => {
@@ -116,7 +123,7 @@ const CategoryWiseReport = () => {
     toast.success('Report exported successfully!');
   };
 
-  const totalAmount = summary.consultation.amount + summary.superconsultant.amount + summary.reassignment.amount + summary.lab.amount;
+  const totalAmount = summary.consultation.amount + summary.superconsultant.amount + summary.reassignment.amount + summary.lab.amount + summary.slitTherapy.amount;
   const totalPages = Math.ceil(data.length / itemsPerPage);
   const paginatedData = data.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
@@ -146,7 +153,7 @@ const CategoryWiseReport = () => {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
           <div className="bg-white rounded-lg shadow-sm p-4 border border-blue-100">
             <div className="flex items-center justify-between mb-2">
               <Tag className="h-6 w-6 text-blue-500" />
@@ -218,6 +225,24 @@ const CategoryWiseReport = () => {
               </p>
             )}
           </div>
+
+          <div className="bg-white rounded-lg shadow-sm p-4 border border-pink-100">
+            <div className="flex items-center justify-between mb-2">
+              <Tag className="h-6 w-6 text-pink-500" />
+              <span className="px-2 py-1 text-xs font-semibold rounded-full bg-pink-100 text-pink-800">
+                Slit Therapy
+              </span>
+            </div>
+            <p className="text-xs font-medium text-slate-600 uppercase mb-1">Total Bills</p>
+            <p className="text-xl font-bold text-slate-800 mb-1">{summary.slitTherapy.count}</p>
+            <p className="text-xs font-medium text-slate-600 uppercase mb-1">Total Amount</p>
+            <p className="text-lg font-bold text-slate-800">₹{summary.slitTherapy.amount.toLocaleString()}</p>
+            {totalAmount > 0 && (
+              <p className="text-xs text-slate-600 mt-1">
+                {((summary.slitTherapy.amount / totalAmount) * 100).toFixed(2)}% of total
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Filters */}
@@ -281,7 +306,8 @@ const CategoryWiseReport = () => {
                   { name: 'Consultation', ...summary.consultation, color: 'blue' },
                   { name: 'Superconsultant', ...summary.superconsultant, color: 'teal' },
                   { name: 'Reassignment', ...summary.reassignment, color: 'orange' },
-                  { name: 'Lab/Test', ...summary.lab, color: 'purple' }
+                  { name: 'Lab/Test', ...summary.lab, color: 'purple' },
+                  { name: 'Slit Therapy', ...summary.slitTherapy, color: 'pink' }
                 ].map((cat, index) => {
                   const percentage = totalAmount > 0 ? ((cat.amount / totalAmount) * 100).toFixed(2) : 0;
                   const avgAmount = cat.count > 0 ? (cat.amount / cat.count).toFixed(2) : 0;
@@ -313,12 +339,12 @@ const CategoryWiseReport = () => {
                 <tr className="bg-gray-50 font-bold">
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">TOTAL</td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">
-                    {summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count}
+                    {summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count + summary.slitTherapy.count}
                   </td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">₹{totalAmount.toLocaleString()}</td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">
-                    ₹{((summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count) > 0 
-                      ? (totalAmount / (summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count)).toFixed(2)
+                    ₹{((summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count + summary.slitTherapy.count) > 0 
+                      ? (totalAmount / (summary.consultation.count + summary.superconsultant.count + summary.reassignment.count + summary.lab.count + summary.slitTherapy.count)).toFixed(2)
                       : 0)}
                   </td>
                   <td className="px-4 py-2 text-sm font-bold text-slate-900">100%</td>

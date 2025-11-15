@@ -38,8 +38,8 @@ const formatDateTime = (date) => {
   return `${day}-${month}-${year} ${formattedHours}:${minutes}:${seconds} ${ampm}`;
 };
 
-// Format date for CSV export (Excel-compatible format)
-// Using single quote prefix to force Excel to treat as text, preventing "###" display
+// Format date for CSV export (Excel-compatible format: YYYY-MM-DD HH:MM:SS)
+// Using ISO-like format that Excel recognizes, or tab-prefixed text format
 const formatDateForCSV = (date) => {
   if (!date) return 'N/A';
   const dt = new Date(date);
@@ -55,9 +55,9 @@ const formatDateForCSV = (date) => {
   hours = hours % 12;
   hours = hours || 12;
   const formattedHours = String(hours).padStart(2, '0');
-  // Use DD-MM-YYYY format with single quote prefix to force Excel to treat as text
-  // This prevents Excel from showing "###" and ensures the date displays correctly
-  return `'${day}-${month}-${year} ${formattedHours}:${minutes}:${seconds} ${ampm}`;
+  // Use format that Excel recognizes: YYYY-MM-DD HH:MM:SS AM/PM
+  // Format as text by using a format Excel can parse
+  return `${year}-${month}-${day} ${formattedHours}:${minutes}:${seconds} ${ampm}`;
 };
 
 const formatPrintedTimestamp = (date) => {
@@ -118,20 +118,19 @@ const CollectionReport = () => {
   const today = useMemo(() => new Date(), []);
   
   // Report type: 'daily', 'weekly', 'monthly', 'yearly', 'custom'
-  const [reportType, setReportType] = useState('daily'); // Default to daily (today)
+  const [reportType, setReportType] = useState('custom');
   const [dateRange, setDateRange] = useState(() => {
-    // Default to today's date
-    const todayDate = new Date(today);
+    const start = new Date(today);
+    start.setDate(start.getDate() - 7);
     return {
-      startDate: formatDateInput(todayDate),
-      endDate: formatDateInput(todayDate)
+      startDate: formatDateInput(start),
+      endDate: formatDateInput(today)
     };
   });
   const [consultationType, setConsultationType] = useState('both');
   const [loading, setLoading] = useState(false);
   const [collectionData, setCollectionData] = useState([]);
   const [refundData, setRefundData] = useState([]);
-  const [penaltyData, setPenaltyData] = useState([]);
   const [summary, setSummary] = useState({
     amountCollectedInCash: 0,
     amountCollectedInCard: 0,
@@ -142,17 +141,13 @@ const CollectionReport = () => {
     cancelledCount: 0,
     cancelledAmount: 0,
     refundedCount: 0,
-    refundedAmount: 0,
-    totalPenalty: 0,
-    penaltyCount: 0
+    refundedAmount: 0
   });
   const [lastUpdated, setLastUpdated] = useState(null);
   const [collectionPage, setCollectionPage] = useState(1);
   const [collectionItemsPerPage, setCollectionItemsPerPage] = useState(25);
   const [refundPage, setRefundPage] = useState(1);
   const [refundItemsPerPage, setRefundItemsPerPage] = useState(25);
-  const [penaltyPage, setPenaltyPage] = useState(1);
-  const [penaltyItemsPerPage, setPenaltyItemsPerPage] = useState(25);
 
   // Calculate date range based on report type
   const calculateDateRange = useCallback((type) => {
@@ -162,7 +157,7 @@ const CollectionReport = () => {
     switch (type) {
       case 'daily':
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+        endDate = new Date(startDate);
         break;
       case 'weekly':
         startDate = new Date(now);
@@ -229,25 +224,6 @@ const CollectionReport = () => {
       const response = await getBillingData(params);
       const bills = response?.bills || [];
       const transactions = response?.transactions || [];
-      
-      console.log('🔍 API Response:', {
-        billsCount: bills.length,
-        transactionsCount: transactions.length,
-        sampleBill: bills[0] ? {
-          invoiceNumber: bills[0].invoiceNumber || bills[0].billNo,
-          status: bills[0].status,
-          paidAmount: bills[0].paidAmount,
-          amount: bills[0].amount,
-          hasPaymentHistory: Array.isArray(bills[0].paymentHistory) && bills[0].paymentHistory.length > 0,
-          paymentHistory: bills[0].paymentHistory
-        } : null,
-        sampleTransaction: transactions[0] ? {
-          invoiceNumber: transactions[0].invoiceNumber,
-          amount: transactions[0].amount,
-          date: transactions[0].date,
-          status: transactions[0].status
-        } : null
-      });
 
       // Debug: Check for refunded bills
       const refundedBills = bills.filter(b => 
@@ -272,7 +248,6 @@ const CollectionReport = () => {
 
       const payments = [];
       const refunds = [];
-      const penalties = [];
 
       let amountCollectedInCash = 0;
       let amountCollectedInCard = 0;
@@ -283,8 +258,6 @@ const CollectionReport = () => {
       let cancelledAmount = 0;
       let refundedCount = 0;
       let refundedAmount = 0;
-      let totalPenalty = 0;
-      let penaltyCount = 0;
 
       const isWithinRange = (date) => {
         if (!date) return true;
@@ -343,27 +316,6 @@ const CollectionReport = () => {
         const billConsultationType = bill.consultationType || 'OP';
         const billType = getBillType(bill);
         let hasPaymentEntry = false;
-        
-        console.log('🔍 Processing bill (FULL STRUCTURE):', {
-          invoiceNumber: bill.invoiceNumber || bill.billNo,
-          status: bill.status,
-          paidAmount: bill.paidAmount,
-          amount: bill.amount,
-          billingAmount: bill.billing?.amount,
-          billingPaidAmount: bill.billing?.paidAmount,
-          hasPaymentHistory: Array.isArray(bill.paymentHistory) && bill.paymentHistory.length > 0,
-          paymentHistoryLength: bill.paymentHistory?.length || 0,
-          paymentHistory: bill.paymentHistory, // Log full payment history
-          billDate: billDate,
-          paidAt: bill.paidAt,
-          paymentDate: bill.paymentDate,
-          updatedAt: bill.updatedAt,
-          fullBill: JSON.stringify(bill, null, 2).substring(0, 2000), // Log first 2000 chars of bill
-          dateRange: {
-            start: startDateObj,
-            end: endDateObj
-          }
-        });
 
         // Check for cancelled bills - only count if cancellation date is within selected range
         const billStatus = bill.status?.toLowerCase() || '';
@@ -387,34 +339,8 @@ const CollectionReport = () => {
         }
 
         const pushPayment = (payment, fallbackDate) => {
-          // Check multiple possible date fields for payment date
-          const paymentDate = payment?.date || 
-                             payment?.paidAt || 
-                             payment?.paymentDate ||
-                             payment?.transactionDate ||
-                             payment?.processedAt ||
-                             payment?.createdAt || 
-                             payment?.timestamp ||
-                             payment?.updatedAt ||
-                             fallbackDate;
-          
-          // Convert to Date object if it's a string
-          const paymentDateObj = paymentDate ? getSafeDate(paymentDate) : null;
-          
-          if (!paymentDateObj || !isWithinRange(paymentDateObj)) {
-            // Debug: Log if payment is being skipped
-            if (payment?.amount > 0) {
-              console.log('⚠️ Payment skipped - date out of range:', {
-                invoiceNumber: bill.invoiceNumber || bill.billNo,
-                paymentDate: paymentDate,
-                paymentDateObj: paymentDateObj,
-                startDate: startDateObj,
-                endDate: endDateObj,
-                amount: payment?.amount || payment?.paidAmount
-              });
-            }
-            return;
-          }
+          const paymentDate = payment?.date || payment?.paidAt || payment?.createdAt || payment?.timestamp || fallbackDate;
+          if (!isWithinRange(paymentDate)) return;
 
           const method = payment?.paymentMethod || payment?.method || payment?.paymentMode || bill.paymentMethod || 'cash';
           const bucket = getPaymentBucket(method);
@@ -422,7 +348,6 @@ const CollectionReport = () => {
           if (amount === undefined || amount === null || amount <= 0) return;
 
           // Get receptionist name from multiple possible sources (prioritize generatedBy, then processedBy)
-          // Check all possible nested locations and field names
           const paymentUserName = payment?.generatedBy || 
                                   payment?.invoice?.generatedBy ||
                                   payment?.bill?.generatedBy ||
@@ -438,54 +363,33 @@ const CollectionReport = () => {
                                   payment?.handledBy?.name || 
                                   payment?.recordedBy;
           
-          // Extract receptionist name - check all possible locations and formats
           let billUserName = null;
-          
-          // First priority: generatedBy field (could be name string, user object, or ID)
           if (bill.generatedBy) {
             if (typeof bill.generatedBy === 'string') {
-              if (bill.generatedBy.match(/^[0-9a-fA-F]{24}$/)) {
-                billUserName = bill.generatedByUser?.name || bill.generatedByUser?.userName || null;
-              } else {
-                billUserName = bill.generatedBy;
-              }
+              billUserName = bill.generatedBy.match(/^[0-9a-fA-F]{24}$/) 
+                ? (bill.generatedByUser?.name || bill.generatedByUser?.userName || null)
+                : bill.generatedBy;
             } else if (typeof bill.generatedBy === 'object' && bill.generatedBy !== null) {
               billUserName = bill.generatedBy.name || bill.generatedBy.userName || bill.generatedBy.fullName || null;
             }
           }
-          
           if (!billUserName) {
-            billUserName = bill.invoice?.generatedBy || 
-                          bill.billing?.generatedBy ||
+            billUserName = bill.invoice?.generatedBy || bill.billing?.generatedBy ||
                           (bill.invoice?.generatedBy && typeof bill.invoice.generatedBy === 'object' ? bill.invoice.generatedBy.name : null) ||
                           (bill.billing?.generatedBy && typeof bill.billing.generatedBy === 'object' ? bill.billing.generatedBy.name : null);
           }
-          
           if (!billUserName && bill.createdBy) {
-            if (typeof bill.createdBy === 'string') {
-              if (!bill.createdBy.match(/^[0-9a-fA-F]{24}$/)) {
-                billUserName = bill.createdBy;
-              } else {
-                billUserName = bill.createdByUser?.name || bill.createdByUser?.userName || null;
-              }
+            if (typeof bill.createdBy === 'string' && !bill.createdBy.match(/^[0-9a-fA-F]{24}$/)) {
+              billUserName = bill.createdBy;
             } else if (typeof bill.createdBy === 'object') {
               billUserName = bill.createdBy.name || bill.createdBy.userName || bill.createdBy.fullName || null;
             }
           }
-          
           if (!billUserName) {
             billUserName = (bill.user && typeof bill.user === 'object' ? (bill.user.name || bill.user.userName) : null) ||
                           (bill.userId && typeof bill.userId === 'object' ? (bill.userId.name || bill.userId.userName) : null) ||
-                          bill.processedByName || 
-                          bill.processedBy?.name || 
-                          bill.createdByName || 
-                          bill.generatedByName || 
-                          bill.collectedByName || 
-                          bill.collectedBy?.name || 
-                          bill.handledByName || 
-                          bill.createdBy?.name || 
-                          bill.paidBy?.name ||
-                          'N/A';
+                          bill.processedByName || bill.processedBy?.name || bill.createdByName || bill.generatedByName || 
+                          bill.collectedByName || bill.collectedBy?.name || bill.handledByName || bill.createdBy?.name || bill.paidBy?.name || 'N/A';
           }
 
           // Get receipt number from multiple possible sources
@@ -498,7 +402,7 @@ const CollectionReport = () => {
           else if (bucket === 'neft') amountCollectedInNEFT += amount;
 
           payments.push({
-            date: paymentDateObj,
+            date: paymentDate,
             patientId: patientUhId,
             patientName,
             userName: paymentUserName || billUserName || 'N/A',
@@ -508,31 +412,10 @@ const CollectionReport = () => {
             billType
           });
           hasPaymentEntry = true;
-          
-          // Debug: Log successful payment addition
-          console.log('✅ Payment added to report:', {
-            invoiceNumber: receiptNumber,
-            paymentDate: paymentDateObj,
-            amount,
-            method
-          });
         };
 
         // Process payment history (most accurate source)
         if (Array.isArray(bill.paymentHistory) && bill.paymentHistory.length > 0) {
-          console.log('🔍 Processing payment history for bill:', {
-            invoiceNumber: bill.invoiceNumber || bill.billNo,
-            paymentHistoryCount: bill.paymentHistory.length,
-            paymentHistory: bill.paymentHistory.map(p => ({
-              date: p.date,
-              paidAt: p.paidAt,
-              paymentDate: p.paymentDate,
-              transactionDate: p.transactionDate,
-              amount: p.amount,
-              status: p.status
-            }))
-          });
-          
           bill.paymentHistory.forEach((payment) => {
             const paymentStatus = payment?.status?.toLowerCase() || '';
             
@@ -579,114 +462,23 @@ const CollectionReport = () => {
           });
         }
         
-        console.log('🔍 Checking bill-level payment conditions:', {
-          invoiceNumber: bill.invoiceNumber || bill.billNo,
-          hasPaymentEntry,
-          status: bill.status,
-          billingStatus: bill.billing?.status,
-          paidAmount: bill.paidAmount,
-          amount: bill.amount,
-          billingPaidAmount: bill.billing?.paidAmount,
-          billingAmount: bill.billing?.amount,
-          willProcess: !hasPaymentEntry && (bill.status === 'paid' || bill.status === 'completed' || bill.status === 'payment_received' || bill.billing?.status === 'paid')
-        });
-        
         if (!hasPaymentEntry && (bill.status === 'paid' || bill.status === 'completed' || bill.status === 'payment_received' || bill.billing?.status === 'paid')) {
-          // Check multiple possible fields for paid amount (including nested billing object)
-          const paidAmount = Number(
-            bill.paidAmount || 
-            bill.billing?.paidAmount ||
-            bill.amount || 
-            bill.billing?.amount ||
-            bill.totalAmount ||
-            bill.billing?.totalAmount ||
-            0
-          );
-          console.log('🔍 Bill-level payment check:', {
-            invoiceNumber: bill.invoiceNumber || bill.billNo,
-            paidAmount,
-            willProcess: paidAmount > 0
-          });
+          const paidAmount = Number(bill.paidAmount || bill.amount || 0);
           if (paidAmount > 0) {
-            // Check multiple possible date fields for when payment was made
-            // Prioritize payment-specific dates over bill generation dates
-            const billPaymentDate = bill.paidAt || 
-                                  bill.paymentDate ||
-                                  bill.transactionDate ||
-                                  bill.paymentProcessedAt ||
-                                  bill.lastPaymentDate ||
-                                  bill.updatedAt || // UpdatedAt might be when payment was processed
-                                  bill.date || 
-                                  bill.createdAt || 
-                                  bill.generatedAt;
-            
-            console.log('🔍 Processing bill-level payment:', {
-              invoiceNumber: bill.invoiceNumber || bill.billNo,
-              amount: paidAmount,
-              paidAt: bill.paidAt,
-              paymentDate: bill.paymentDate,
-              transactionDate: bill.transactionDate,
-              updatedAt: bill.updatedAt,
-              billDate: bill.date,
-              selectedPaymentDate: billPaymentDate,
-              isInRange: isWithinRange(billPaymentDate)
-            });
-            
             pushPayment({ 
               ...bill, 
               amount: paidAmount,
-              date: billPaymentDate,
-              paidAt: billPaymentDate,
-              paymentDate: billPaymentDate
+              date: bill.paidAt || bill.date || bill.createdAt || bill.generatedAt
             }, billDate);
           }
         }
 
-        // Final fallback: If bill is paid but no payment entry was created, and bill date is in range
-        // Try to extract payment info from bill structure even if amounts are 0
-        if (!hasPaymentEntry && isWithinRange(billDate) && (bill.status === 'paid' || bill.status === 'completed')) {
-          // Try multiple sources for amount - sometimes it's in services array or other nested structures
-          let fallbackAmount = Number(
-            bill.paidAmount || 
-            bill.billing?.paidAmount ||
-            bill.amount || 
-            bill.billing?.amount ||
-            bill.totalAmount ||
-            bill.billing?.totalAmount ||
-            bill.grandTotal ||
-            bill.billing?.grandTotal ||
-            (bill.services && Array.isArray(bill.services) ? bill.services.reduce((sum, s) => sum + (Number(s.paid || s.amount || 0)), 0) : 0) ||
-            0
-          );
-          
-          // If amount is still 0 but bill is paid, check if we can calculate from services
-          if (fallbackAmount === 0 && bill.services && Array.isArray(bill.services)) {
-            fallbackAmount = bill.services.reduce((sum, service) => {
-              return sum + (Number(service.charges || service.amount || service.price || 0));
-            }, 0);
-          }
-          
-          const fallbackMethod = bill.paymentMethod || bill.billing?.paymentMethod || bill.method || 'cash';
+        if (!hasPaymentEntry && isWithinRange(billDate)) {
+          const fallbackAmount = Number(bill.paidAmount || 0);
+          const fallbackMethod = bill.paymentMethod || bill.billing?.paymentMethod || 'cash';
           const fallbackUserName = bill.generatedBy || bill.processedByName || bill.processedBy?.name || bill.createdByName || bill.generatedByName || bill.collectedByName || bill.collectedBy?.name || bill.handledByName || bill.createdBy?.name || bill.paidBy?.name || 'N/A';
-          
-          // Use updatedAt as payment date if available (might be when payment was processed)
-          const fallbackPaymentDate = bill.paidAt || 
-                                     bill.paymentDate ||
-                                     bill.transactionDate ||
-                                     bill.updatedAt || // UpdatedAt might be when payment was processed
-                                     billDate;
 
-          console.log('🔍 Final fallback payment check:', {
-            invoiceNumber: bill.invoiceNumber || bill.billNo,
-            status: bill.status,
-            fallbackAmount,
-            fallbackMethod,
-            fallbackPaymentDate,
-            isInRange: isWithinRange(fallbackPaymentDate),
-            services: bill.services
-          });
-
-          if (fallbackAmount > 0 && isWithinRange(fallbackPaymentDate)) {
+          if (fallbackAmount > 0) {
             const bucket = getPaymentBucket(fallbackMethod);
             if (bucket === 'cash') amountCollectedInCash += fallbackAmount;
             else if (bucket === 'card') amountCollectedInCard += fallbackAmount;
@@ -694,7 +486,7 @@ const CollectionReport = () => {
             else if (bucket === 'neft') amountCollectedInNEFT += fallbackAmount;
 
             payments.push({
-              date: fallbackPaymentDate,
+              date: billDate,
               patientId: patientUhId,
               patientName,
               userName: fallbackUserName,
@@ -704,12 +496,6 @@ const CollectionReport = () => {
               billType
             });
             hasPaymentEntry = true;
-            
-            console.log('✅ Fallback payment added:', {
-              invoiceNumber: bill.invoiceNumber || bill.billNo,
-              amount: fallbackAmount,
-              date: fallbackPaymentDate
-            });
           }
         }
 
@@ -882,8 +668,8 @@ const CollectionReport = () => {
         }
       });
 
-      // Process transactions from the transactions array
-      // Create a map of invoice numbers to bills for matching
+      // Process refunded transactions from the transactions array
+      // Create a map of invoice numbers to bills for matching refunds
       const invoiceToBillMap = new Map();
       bills.forEach(bill => {
         const invoiceNum = bill.invoiceNumber || bill.billNo;
@@ -892,24 +678,8 @@ const CollectionReport = () => {
         }
       });
 
-      // Track processed invoice numbers from bills to avoid duplicates
-      const processedInvoiceNumbers = new Set();
-      payments.forEach(payment => {
-        if (payment.receiptNumber && payment.receiptNumber !== 'N/A') {
-          processedInvoiceNumbers.add(payment.receiptNumber);
-        }
-      });
-      
-      console.log('🔍 Processing transactions array:', {
-        totalTransactions: transactions.length,
-        processedInvoices: Array.from(processedInvoiceNumbers)
-      });
-
       transactions.forEach((transaction) => {
         const transactionStatus = transaction?.status?.toLowerCase() || '';
-        const receiptNumber = transaction?.invoiceNumber || transaction?.receiptNumber || transaction?.transactionId || '-';
-        
-        // Process refunded transactions
         if (transactionStatus === 'refunded' || (transaction?.refund && transaction?.refund?.refundedAmount > 0)) {
           const refundAmount = Number(transaction?.refund?.refundedAmount || transaction?.refund?.amount || transaction?.amount || 0);
           if (refundAmount <= 0) return;
@@ -978,185 +748,16 @@ const CollectionReport = () => {
             amount: refundAmount,
             billType: transactionBillType
           });
-        } 
-        // Process regular (non-refunded) transactions that might not be in bills
-        // IMPORTANT: Only process if this transaction is NOT already represented in the bills
-        else if ((transactionStatus === 'completed' || transactionStatus === 'paid' || !transactionStatus) && 
-                 !processedInvoiceNumbers.has(receiptNumber)) {
-          const transactionDate = transaction?.date || transaction?.createdAt || transaction?.paidAt || transaction?.transactionDate;
-          if (!transactionDate || !isWithinRange(transactionDate)) {
-            return;
-          }
-
-          const transactionAmount = Number(transaction?.amount || transaction?.paidAmount || 0);
-          if (transactionAmount <= 0) return;
-
-          // Check multiple possible field names for payment method
-          const transactionPaymentMethod = transaction?.paymentMethod || transaction?.method || transaction?.paymentMode || transaction?.mode || 'cash';
-          const bucket = getPaymentBucket(transactionPaymentMethod);
-          
-          console.log('💳 Processing transaction from transactions array:', {
-            invoiceNumber: receiptNumber,
-            amount: transactionAmount,
-            paymentMethod: transactionPaymentMethod,
-            date: transactionDate,
-            isInRange: isWithinRange(transactionDate)
-          });
-
-          const patientUhId = transaction?.uhId || transaction?.patientId || 'N/A';
-          const patientName = transaction?.patientName || 'N/A';
-          
-          const transactionUserName = transaction?.generatedBy ||
-                                     transaction?.processedByName || 
-                                     transaction?.processedBy?.name || 
-                                     transaction?.createdByName || 
-                                     transaction?.createdBy?.name || 
-                                     'N/A';
-          
-          const transactionRef = transaction?.transactionId || transaction?.reference || '';
-
-          // Track payment method breakdown
-          if (bucket === 'cash') amountCollectedInCash += transactionAmount;
-          else if (bucket === 'card') amountCollectedInCard += transactionAmount;
-          else if (bucket === 'upi') amountCollectedInUPI += transactionAmount;
-          else if (bucket === 'neft') amountCollectedInNEFT += transactionAmount;
-
-          let transactionBillType = 'Consultation';
-          const matchingBill = invoiceToBillMap.get(receiptNumber);
-          if (matchingBill) {
-            transactionBillType = getBillType(matchingBill);
-          } else {
-            transactionBillType = transaction?.transactionType === 'test' || transaction?.transactionType === 'lab_test' ? 'Lab/Test' : 
-                                 transaction?.description?.toLowerCase().includes('slit') ? 'Slit Therapy' :
-                                 transaction?.description?.toLowerCase().includes('reassignment') ? 'Reassignment' :
-                                 'Consultation';
-          }
-
-          payments.push({
-            date: transactionDate,
-            patientId: patientUhId,
-            patientName,
-            userName: transactionUserName,
-            receiptNumber,
-            payMode: formatPayMode(transactionPaymentMethod, transactionRef),
-            amount: transactionAmount,
-            billType: transactionBillType
-          });
-          
-          // Mark this invoice as processed to avoid duplicates
-          processedInvoiceNumbers.add(receiptNumber);
-          
-          console.log('✅ Transaction added to payments:', {
-            invoiceNumber: receiptNumber,
-            amount: transactionAmount,
-            date: transactionDate
-          });
-        }
-      });
-
-      // Process penalty collections from cancelled bills
-      bills.forEach((bill) => {
-        // Check if bill is cancelled
-        if (bill.status?.toLowerCase() === 'cancelled') {
-          const cancelledDate = bill.cancelledAt || bill.cancelledDate || bill.updatedAt || bill.date || bill.createdAt;
-          
-          // Only process if cancellation date is within the selected range
-          if (!isWithinRange(cancelledDate)) {
-            return;
-          }
-
-          // Extract penalty amount
-          const penaltyFromInfo = bill.penaltyInfo?.penaltyAmount || 0;
-          const paidAmount = bill.paidAmount || 0;
-          
-          // For consultation bills, penalty is ₹150 (registration fee)
-          // Use penalty from info if available, otherwise default to 150 for consultation
-          let penaltyAmount = 0;
-          if (penaltyFromInfo > 0) {
-            penaltyAmount = penaltyFromInfo;
-          } else if (bill.billType === 'Consultation' && bill.status === 'cancelled') {
-            // Default penalty for consultation is ₹150
-            penaltyAmount = 150;
-          }
-          
-          // Skip if no penalty
-          if (penaltyAmount <= 0) {
-            return;
-          }
-          
-          // Calculate refunded amount
-          let refundedAmount = 0;
-          const refundsFromArray = bill.refunds ? bill.refunds.reduce((sum, r) => sum + (r.amount || 0), 0) : 0;
-          const refundedAmountField = bill.refundedAmount || 0;
-          
-          if (refundsFromArray > 0) {
-            refundedAmount = refundsFromArray;
-          } else if (refundedAmountField > 0) {
-            refundedAmount = refundedAmountField;
-          } else if (paidAmount > 0 && penaltyAmount > 0) {
-            refundedAmount = Math.max(0, paidAmount - penaltyAmount);
-          }
-          
-          const patientUhId = bill.uhId || bill.patient?.uhId || bill.patientUHID || bill.patient?.patientUHID || bill.patient?.patientId || bill.patient?.uhid || bill.patientId?.uhId || bill.patientId || 'N/A';
-          const patientName = bill.patientName || bill.patient?.name || bill.patient?.fullName || bill.patientId?.name || 'N/A';
-          const billType = getBillType(bill);
-          
-          // Extract receptionist name
-          let billUserName = null;
-          if (bill.generatedBy) {
-            if (typeof bill.generatedBy === 'string') {
-              if (bill.generatedBy.match(/^[0-9a-fA-F]{24}$/)) {
-                billUserName = bill.generatedByUser?.name || bill.generatedByUser?.userName || null;
-              } else {
-                billUserName = bill.generatedBy;
-              }
-            } else if (typeof bill.generatedBy === 'object' && bill.generatedBy !== null) {
-              billUserName = bill.generatedBy.name || bill.generatedBy.userName || bill.generatedBy.fullName || null;
-            }
-          }
-          
-          if (!billUserName) {
-            billUserName = bill.processedByName || 
-                          bill.processedBy?.name || 
-                          bill.createdByName || 
-                          bill.generatedByName || 
-                          bill.collectedByName || 
-                          bill.collectedBy?.name || 
-                          bill.handledByName || 
-                          bill.createdBy?.name || 
-                          bill.paidBy?.name ||
-                          'N/A';
-          }
-          
-          const receiptNumber = bill.invoiceNumber || bill.billNo || bill._id?.toString().slice(-8) || 'N/A';
-          const originalAmount = bill.amount || bill.totalAmount || 0;
-          
-          totalPenalty += penaltyAmount;
-          penaltyCount++;
-          
-          penalties.push({
-            date: cancelledDate,
-            patientId: patientUhId,
-            patientName,
-            userName: billUserName,
-            receiptNumber,
-            billType,
-            originalAmount,
-            refundedAmount,
-            penaltyAmount
-          });
         }
       });
 
       payments.sort((a, b) => new Date(a.date) - new Date(b.date));
       refunds.sort((a, b) => new Date(a.date) - new Date(b.date));
-      penalties.sort((a, b) => new Date(a.date) - new Date(b.date));
 
       const totalCollected = payments.reduce((sum, item) => sum + (item.amount || 0), 0);
 
       setCollectionData(payments);
       setRefundData(refunds);
-      setPenaltyData(penalties);
       setSummary({
         amountCollectedInCash,
         amountCollectedInCard,
@@ -1167,14 +768,11 @@ const CollectionReport = () => {
         cancelledCount,
         cancelledAmount,
         refundedCount,
-        refundedAmount,
-        totalPenalty,
-        penaltyCount
+        refundedAmount
       });
       setLastUpdated(new Date());
       setCollectionPage(1);
       setRefundPage(1);
-      setPenaltyPage(1);
     } catch (error) {
       console.error('Error fetching collection report:', error);
       toast.error('Failed to load collection report');
@@ -1197,14 +795,8 @@ const CollectionReport = () => {
     return refundData.slice(start, start + refundItemsPerPage);
   }, [refundData, refundItemsPerPage, refundPage]);
 
-  const penaltyPaginated = useMemo(() => {
-    const start = (penaltyPage - 1) * penaltyItemsPerPage;
-    return penaltyData.slice(start, start + penaltyItemsPerPage);
-  }, [penaltyData, penaltyItemsPerPage, penaltyPage]);
-
   const collectionTotalPages = Math.max(1, Math.ceil(collectionData.length / collectionItemsPerPage));
   const refundTotalPages = Math.max(1, Math.ceil(refundData.length / refundItemsPerPage));
-  const penaltyTotalPages = Math.max(1, Math.ceil(penaltyData.length / penaltyItemsPerPage));
 
   const handleExportCSV = () => {
     const headerTitle = `${reportTypeLabel} Collection Report ${formatDateDisplay(dateRange.startDate)} to ${formatDateDisplay(dateRange.endDate)} ${consultationLabel}`;
@@ -1247,25 +839,6 @@ const CollectionReport = () => {
     });
 
     csvRows.push([]);
-    csvRows.push(['Penalty Collection Report']);
-    csvRows.push([]);
-    csvRows.push(['S.No.', 'Date', 'Patient Id', 'Patient Name', 'Receptionist', 'Invoice', 'Bill Type', 'Original Amount', 'Refunded Amount', 'Penalty Amount']);
-    penaltyData.forEach((item, index) => {
-      csvRows.push([
-        index + 1,
-        item.date ? formatDateForCSV(item.date) : 'N/A',
-        item.patientId,
-        item.patientName,
-        item.userName,
-        item.receiptNumber,
-        item.billType || 'Consultation',
-        (item.originalAmount || 0).toFixed(2),
-        (item.refundedAmount || 0).toFixed(2),
-        (item.penaltyAmount || 0).toFixed(2)
-      ]);
-    });
-
-    csvRows.push([]);
     csvRows.push(['Summary']);
     csvRows.push([
       'Amount Collected In Cash',
@@ -1277,9 +850,7 @@ const CollectionReport = () => {
       'Cancelled Bills Count',
       'Cancelled Bills Amount',
       'Refunded Bills Count',
-      'Refunded Bills Amount',
-      'Penalty Count',
-      'Total Penalty Amount'
+      'Refunded Bills Amount'
     ]);
     csvRows.push([
       summary.amountCollectedInCash.toFixed(2),
@@ -1291,9 +862,7 @@ const CollectionReport = () => {
       summary.cancelledCount,
       summary.cancelledAmount.toFixed(2),
       summary.refundedCount,
-      summary.refundedAmount.toFixed(2),
-      summary.penaltyCount,
-      summary.totalPenalty.toFixed(2)
+      summary.refundedAmount.toFixed(2)
     ]);
 
     const csvContent = csvRows
@@ -1303,7 +872,7 @@ const CollectionReport = () => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `accountant_${reportType}_collection_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `centeradmin_${reportType}_collection_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
     toast.success('CSV report exported successfully');
@@ -1324,7 +893,7 @@ const CollectionReport = () => {
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
     doc.text(subtitle, 14, 22);
-    doc.text(`Printed at: ${formatPrintedTimestamp(new Date())} by ${user?.name || 'Accountant'}`, 14, 27);
+    doc.text(`Printed at: ${formatPrintedTimestamp(new Date())} by ${user?.name || 'Center Admin'}`, 14, 27);
 
     let yPos = 35;
 
@@ -1416,53 +985,6 @@ const CollectionReport = () => {
       yPos = doc.lastAutoTable.finalY + 10;
     }
 
-    // Penalty Collection Report Table
-    if (penaltyData.length > 0) {
-      if (yPos > 180) {
-        doc.addPage();
-        yPos = 15;
-      }
-
-      doc.setFontSize(12);
-      doc.setFont(undefined, 'bold');
-      doc.text('Penalty Collection Report', 14, yPos);
-      yPos += 5;
-
-      const penaltyTableData = penaltyData.map((item, index) => [
-        index + 1,
-        item.date ? formatDateForCSV(item.date) : 'N/A',
-        item.patientId,
-        item.patientName,
-        item.userName,
-        item.receiptNumber,
-        item.billType || 'Consultation',
-        `₹${(item.originalAmount || 0).toFixed(2)}`,
-        `₹${(item.refundedAmount || 0).toFixed(2)}`,
-        `₹${(item.penaltyAmount || 0).toFixed(2)}`
-      ]);
-
-      autoTable(doc, {
-        startY: yPos,
-        head: [['S.No.', 'Date', 'Patient Id', 'Patient Name', 'Receptionist', 'Invoice', 'Bill Type', 'Original Amount', 'Refunded Amount', 'Penalty Amount']],
-        body: penaltyTableData,
-        theme: 'striped',
-        headStyles: { fillColor: [234, 179, 8], textColor: 255, fontStyle: 'bold' },
-        styles: { fontSize: 7, cellPadding: 2 },
-        margin: { left: 14, right: 14 },
-        didDrawPage: function (data) {
-          doc.setFontSize(8);
-          doc.text(
-            `Page ${doc.internal.getNumberOfPages()}`,
-            doc.internal.pageSize.getWidth() / 2,
-            doc.internal.pageSize.getHeight() - 10,
-            { align: 'center' }
-          );
-        }
-      });
-
-      yPos = doc.lastAutoTable.finalY + 10;
-    }
-
     // Summary Section
     if (yPos > 200) {
       doc.addPage();
@@ -1484,9 +1006,7 @@ const CollectionReport = () => {
       ['Cancelled Bills Count', summary.cancelledCount],
       ['Cancelled Bills Amount', `₹${summary.cancelledAmount.toFixed(2)}`],
       ['Refunded Bills Count', summary.refundedCount],
-      ['Refunded Bills Amount', `₹${summary.refundedAmount.toFixed(2)}`],
-      ['Penalty Count', summary.penaltyCount],
-      ['Total Penalty Amount', `₹${summary.totalPenalty.toFixed(2)}`]
+      ['Refunded Bills Amount', `₹${summary.refundedAmount.toFixed(2)}`]
     ];
 
     autoTable(doc, {
@@ -1516,7 +1036,7 @@ const CollectionReport = () => {
       );
     }
 
-    doc.save(`accountant_${reportType}_collection_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`centeradmin_${reportType}_collection_${new Date().toISOString().split('T')[0]}.pdf`);
     toast.success('PDF report exported successfully');
   };
 
@@ -1528,18 +1048,14 @@ const CollectionReport = () => {
     return refundData.reduce((sum, item) => sum + (item.amount || 0), 0);
   }, [refundData]);
 
-  const totalPenaltyAmount = useMemo(() => {
-    return penaltyData.reduce((sum, item) => sum + (item.penaltyAmount || 0), 0);
-  }, [penaltyData]);
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 sm:p-6">
-      <div className="w-full space-y-3">
-        <div className="bg-white rounded-lg shadow-sm border border-blue-100 p-3">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="bg-white rounded-lg shadow-sm border border-blue-100 p-4 sm:p-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-sm font-bold text-slate-800">Accountant Collection Report</h1>
-              <p className="text-[10px] text-slate-600 mt-0.5">
+              <h1 className="text-lg sm:text-xl font-bold text-slate-800">Center Admin Collection Report</h1>
+              <p className="text-xs sm:text-sm text-slate-600 mt-1">
                 {reportTypeLabel} Collection {formatDateDisplay(dateRange.startDate)} {dateRange.startDate !== dateRange.endDate ? `to ${formatDateDisplay(dateRange.endDate)}` : ''} ({consultationLabel})
               </p>
               {lastUpdated && (
@@ -1575,10 +1091,10 @@ const CollectionReport = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm border border-blue-100 p-3">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-3">
+        <div className="bg-white rounded-lg shadow-sm border border-blue-100 p-4 sm:p-6">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
             <div className="md:col-span-2">
-              <label className="block text-[10px] font-medium text-slate-700 mb-1">Report Type</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Report Type</label>
               <select
                 value={reportType}
                 onChange={(e) => {
@@ -1590,7 +1106,7 @@ const CollectionReport = () => {
                     }
                   }
                 }}
-                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly (Last 7 Days)</option>
@@ -1600,7 +1116,7 @@ const CollectionReport = () => {
               </select>
             </div>
             <div className="md:col-span-2">
-              <label className="block text-[10px] font-medium text-slate-700 mb-1">Start Date</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Start Date</label>
               <input
                 type="date"
                 value={dateRange.startDate}
@@ -1608,11 +1124,11 @@ const CollectionReport = () => {
                   setDateRange((prev) => ({ ...prev, startDate: e.target.value }));
                   setReportType('custom');
                 }}
-                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-[10px] font-medium text-slate-700 mb-1">End Date</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">End Date</label>
               <input
                 type="date"
                 value={dateRange.endDate}
@@ -1620,17 +1136,17 @@ const CollectionReport = () => {
                   setDateRange((prev) => ({ ...prev, endDate: e.target.value }));
                   setReportType('custom');
                 }}
-                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
-              <label className="block text-[10px] font-medium text-slate-700 mb-1">Consultation Type</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Consultation Type</label>
               <select
                 value={consultationType}
                 onChange={(e) => setConsultationType(e.target.value)}
-                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="both">Both IP & OP</option>
                 <option value="OP">OP</option>
@@ -1638,13 +1154,13 @@ const CollectionReport = () => {
               </select>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
               onClick={() => fetchReport()}
               disabled={loading}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] text-white bg-blue-600 rounded-md hover:bg-blue-700 transition shadow-sm"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
             >
-              <Filter className="h-3 w-3" />
+              <Filter className="h-4 w-4" />
               Apply Filters
             </button>
             <div className="inline-flex items-center gap-2 px-3 py-2 text-xs text-slate-500 bg-slate-100 rounded-lg">
@@ -1663,30 +1179,30 @@ const CollectionReport = () => {
             </h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse">
-              <thead>
-                <tr className="bg-gradient-to-r from-slate-50 to-gray-50">
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">S.No.</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Date</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Id</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Name</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Receptionist</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Receipt Number</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Pay Mode</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Bill Type</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Amount</th>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">S.No.</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Patient Id</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Patient Name</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Receptionist</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Receipt Number</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Pay Mode</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Bill Type</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Amount</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
+              <tbody className="bg-white divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan="9" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-slate-500">
+                    <td colSpan="9" className="px-4 py-8 text-center text-sm text-slate-500">
                       Loading collection data...
                     </td>
                   </tr>
                 ) : collectionPaginated.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-slate-500">
+                    <td colSpan="9" className="px-4 py-8 text-center text-sm text-slate-500">
                       No collection entries found for the selected filters.
                     </td>
                   </tr>
@@ -1694,16 +1210,16 @@ const CollectionReport = () => {
                   collectionPaginated.map((item, index) => {
                     const serial = (collectionPage - 1) * collectionItemsPerPage + index + 1;
                     return (
-                      <tr key={`${item.receiptNumber}-${index}`} className="hover:bg-blue-50/50 transition-colors">
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{serial}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{formatDateTime(item.date)}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.patientId}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.patientName}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.userName}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 font-medium">{item.receiptNumber}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.payMode}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.billType || 'Consultation'}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-medium text-green-600">{(item.amount || 0).toFixed(2)}</td>
+                      <tr key={`${item.receiptNumber}-${index}`} className="hover:bg-slate-50">
+                        <td className="px-4 py-2 text-sm text-slate-700">{serial}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{formatDateTime(item.date)}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.patientId}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700 capitalize">{item.patientName}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700 capitalize">{item.userName}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.receiptNumber}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.payMode}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700 capitalize">{item.billType || 'Consultation'}</td>
+                        <td className="px-4 py-2 text-sm font-semibold text-green-600">{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     );
                   })
@@ -1737,30 +1253,30 @@ const CollectionReport = () => {
             </h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse">
-              <thead>
-                <tr className="bg-gradient-to-r from-slate-50 to-gray-50">
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">S.No.</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Date</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Id</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Name</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Receptionist</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Receipt Number</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Pay Mode</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Bill Type</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Amount</th>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">S.No.</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Patient Id</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Patient Name</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Receptionist</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Receipt Number</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Pay Mode</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Bill Type</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase">Amount</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
+              <tbody className="bg-white divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan="9" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-slate-500">
+                    <td colSpan="9" className="px-4 py-8 text-center text-sm text-slate-500">
                       Loading refund data...
                     </td>
                   </tr>
                 ) : refundPaginated.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-slate-500">
+                    <td colSpan="9" className="px-4 py-8 text-center text-sm text-slate-500">
                       No refund entries found for the selected filters.
                     </td>
                   </tr>
@@ -1768,16 +1284,16 @@ const CollectionReport = () => {
                   refundPaginated.map((item, index) => {
                     const serial = (refundPage - 1) * refundItemsPerPage + index + 1;
                     return (
-                      <tr key={`${item.receiptNumber}-${index}`} className="hover:bg-blue-50/50 transition-colors">
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{serial}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.date ? formatDateTime(item.date) : 'N/A'}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.patientId}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.patientName}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.userName}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 font-medium">{item.receiptNumber}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.payMode || 'N/A'}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.billType || 'Consultation'}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-medium text-red-600">{(item.amount || 0).toFixed(2)}</td>
+                      <tr key={`${item.receiptNumber}-${index}`} className="hover:bg-slate-50">
+                        <td className="px-4 py-2 text-sm text-slate-700">{serial}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.date ? formatDateTime(item.date) : 'N/A'}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.patientId}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700 capitalize">{item.patientName}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700 capitalize">{item.userName}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.receiptNumber}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700">{item.payMode || 'N/A'}</td>
+                        <td className="px-4 py-2 text-sm text-slate-700 capitalize">{item.billType || 'Consultation'}</td>
+                        <td className="px-4 py-2 text-sm font-semibold text-red-600">{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     );
                   })
@@ -1805,82 +1321,6 @@ const CollectionReport = () => {
         </div>
 
         <div className="bg-white rounded-lg shadow-sm border border-blue-100 overflow-hidden">
-          <div className="px-4 sm:px-6 py-4 border-b border-blue-100 bg-yellow-50">
-            <h2 className="text-sm sm:text-base font-semibold text-slate-800">
-              {reportTypeLabel} Penalty Collection Report {formatDateDisplay(dateRange.startDate)} to {formatDateDisplay(dateRange.endDate)} ({consultationLabel})
-            </h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse">
-              <thead>
-                <tr className="bg-gradient-to-r from-slate-50 to-gray-50">
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">S.No.</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Date</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Id</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Name</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Receptionist</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Invoice</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Bill Type</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Original Amount</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Refunded Amount</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Penalty Amount</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan="10" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-slate-500">
-                      Loading penalty data...
-                    </td>
-                  </tr>
-                ) : penaltyPaginated.length === 0 ? (
-                  <tr>
-                    <td colSpan="10" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-slate-500">
-                      No penalty collections found for the selected filters.
-                    </td>
-                  </tr>
-                ) : (
-                  penaltyPaginated.map((item, index) => {
-                    const serial = (penaltyPage - 1) * penaltyItemsPerPage + index + 1;
-                    return (
-                      <tr key={`${item.receiptNumber}-${index}`} className="hover:bg-blue-50/50 transition-colors">
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{serial}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.date ? formatDateTime(item.date) : 'N/A'}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.patientId}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.patientName}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.userName}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 font-medium">{item.receiptNumber}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 capitalize">{item.billType || 'Consultation'}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">₹{(item.originalAmount || 0).toFixed(2)}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-purple-600 font-medium">₹{(item.refundedAmount || 0).toFixed(2)}</td>
-                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-medium text-red-600">₹{(item.penaltyAmount || 0).toFixed(2)}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-          {penaltyData.length > penaltyItemsPerPage && (
-            <Pagination
-              currentPage={penaltyPage}
-              totalPages={penaltyTotalPages}
-              totalItems={penaltyData.length}
-              itemsPerPage={penaltyItemsPerPage}
-              onPageChange={setPenaltyPage}
-              onItemsPerPageChange={(value) => {
-                setPenaltyItemsPerPage(value);
-                setPenaltyPage(1);
-              }}
-            />
-          )}
-          <div className="px-4 sm:px-6 py-3 border-t border-blue-100 bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-slate-700">
-            <span>Total Penalty Records: {penaltyData.length}</span>
-            <span>Total Penalty Amount: <strong className="text-yellow-600">₹{summary.totalPenalty.toFixed(2)}</strong></span>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-blue-100 overflow-hidden">
           <div className="px-4 sm:px-6 py-4 border-b border-blue-100 bg-gray-50">
             <h2 className="text-sm sm:text-base font-semibold text-slate-800">Summary</h2>
           </div>
@@ -1904,7 +1344,7 @@ const CollectionReport = () => {
               </tbody>
             </table>
           </div>
-          <div className="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 bg-white">
+          <div className="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 bg-white">
             <div className="p-3 border border-slate-200 rounded-lg">
               <p className="text-xs text-slate-500">Refund (Total)</p>
               <p className="text-base font-semibold text-red-600">{summary.totalRefund.toFixed(2)}</p>
@@ -1927,11 +1367,6 @@ const CollectionReport = () => {
               <p className="text-xs text-slate-500">Refunded Bills</p>
               <p className="text-base font-semibold text-orange-700">{summary.refundedCount}</p>
               <p className="text-xs text-slate-400 mt-1">Amount: ₹{summary.refundedAmount.toFixed(2)}</p>
-            </div>
-            <div className="p-3 border border-yellow-200 rounded-lg bg-yellow-50">
-              <p className="text-xs text-slate-500">Penalty Collection</p>
-              <p className="text-base font-semibold text-yellow-700">{summary.penaltyCount}</p>
-              <p className="text-xs text-slate-400 mt-1">Amount: ₹{summary.totalPenalty.toFixed(2)}</p>
             </div>
           </div>
         </div>

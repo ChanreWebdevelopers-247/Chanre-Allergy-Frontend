@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchReceptionistPatients } from '../../features/receptionist/receptionistThunks';
 import { updatePatient } from '../../features/receptionist/receptionistSlice';
-import ReceptionistLayout from './ReceptionistLayout';
+import AccountantLayout from './AccountantLayout';
 import PendingBillsNotification from '../../components/PendingBillsNotification';
 // InvoiceDisplay component removed - now integrated inline
 import { 
@@ -3091,7 +3091,7 @@ const getAssignedDoctorId = (patient) => {
   };
 
   return (
-    <ReceptionistLayout>
+    <AccountantLayout>
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 sm:p-6">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
@@ -5957,6 +5957,6 @@ const getAssignedDoctorId = (patient) => {
         isOpen={showPendingBillsNotification} 
         onClose={() => setShowPendingBillsNotification(false)} 
       />
-    </ReceptionistLayout>
+    </AccountantLayout>
   );
 }

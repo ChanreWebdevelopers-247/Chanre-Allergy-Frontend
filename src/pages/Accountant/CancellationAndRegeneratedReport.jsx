@@ -33,7 +33,7 @@ const CancellationAndRegeneratedReport = () => {
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, itemsPerPage]);
+  }, []);
 
   const fetchData = async () => {
     try {
@@ -177,62 +177,83 @@ const CancellationAndRegeneratedReport = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 sm:p-6">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full">
         {/* Header */}
-        <div className="mb-4">
-          <h1 className="text-lg font-bold text-slate-800">Cancel & Regenerate Report</h1>
-          <p className="text-xs text-slate-600 mt-1">
-            {dateRange.startDate && dateRange.endDate 
-              ? `from ${dateRange.startDate} to ${dateRange.endDate}`
-              : 'View bills that were cancelled and then regenerated'}
-          </p>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h1 className="text-sm font-bold text-slate-800">Cancel & Regenerate Report</h1>
+            <p className="text-[10px] text-slate-600 mt-0.5">
+              {dateRange.startDate && dateRange.endDate 
+                ? `from ${dateRange.startDate} to ${dateRange.endDate}`
+                : 'View bills that were cancelled and then regenerated'}
+            </p>
+          </div>
           {user?.centerId && (
-            <div className="mt-2">
-              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                <Building2 className="mr-1 h-3 w-3" />
-                {user?.centerId?.name || 'Center'}
-              </span>
-            </div>
+            <span className="inline-flex items-center px-2 py-1 text-[10px] font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">
+              <Building2 className="mr-1 h-2.5 w-2.5" />
+              {user?.centerId?.name || 'Center'}
+            </span>
           )}
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-          <div className="bg-white rounded-lg shadow-sm p-4 border border-red-100">
-            <p className="text-xs font-medium text-slate-600 uppercase">Total Cancelled Amount</p>
-            <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.totalCancelledAmount.toFixed(2)}</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 mt-4">
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-red-100 hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-medium text-slate-600 uppercase">Total Cancelled Amount</p>
+                <p className="text-sm font-bold text-slate-800 mt-0.5">₹{summary.totalCancelledAmount.toFixed(2)}</p>
+              </div>
+              <div className="bg-red-100 p-2 rounded-full">
+                <RotateCcw className="h-4 w-4 text-red-600" />
+              </div>
+            </div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-4 border border-green-100">
-            <p className="text-xs font-medium text-slate-600 uppercase">Total Regenerated Amount</p>
-            <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.totalRegeneratedAmount.toFixed(2)}</p>
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-green-100 hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-medium text-slate-600 uppercase">Total Regenerated Amount</p>
+                <p className="text-sm font-bold text-slate-800 mt-0.5">₹{summary.totalRegeneratedAmount.toFixed(2)}</p>
+              </div>
+              <div className="bg-green-100 p-2 rounded-full">
+                <RotateCcw className="h-4 w-4 text-green-600" />
+              </div>
+            </div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-4 border border-blue-100">
-            <p className="text-xs font-medium text-slate-600 uppercase">Difference</p>
-            <p className={`text-xl font-bold mt-1 ${summary.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              ₹{summary.difference.toFixed(2)}
-            </p>
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100 hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-medium text-slate-600 uppercase">Difference</p>
+                <p className={`text-sm font-bold mt-0.5 ${summary.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  ₹{summary.difference.toFixed(2)}
+                </p>
+              </div>
+              <div className={`p-2 rounded-full ${summary.difference >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
+                <RotateCcw className={`h-4 w-4 ${summary.difference >= 0 ? 'text-green-600' : 'text-red-600'}`} />
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4 border border-blue-100">
+        <div className="bg-white rounded-lg shadow-sm p-3 mb-3 border border-blue-100">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Start Date</label>
+              <label className="block text-[10px] font-medium text-slate-700 mb-1">Start Date</label>
               <input
                 type="date"
                 value={dateRange.startDate}
                 onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">End Date</label>
+              <label className="block text-[10px] font-medium text-slate-700 mb-1">End Date</label>
               <input
                 type="date"
                 value={dateRange.endDate}
                 onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div className="flex items-end gap-2">
@@ -241,16 +262,16 @@ const CancellationAndRegeneratedReport = () => {
                   setCurrentPage(1);
                   fetchData();
                 }}
-                className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="flex items-center px-3 py-1.5 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors shadow-sm"
               >
-                <Filter className="mr-1 h-4 w-4" />
+                <Filter className="mr-1 h-3 w-3" />
                 Apply
               </button>
               <button
                 onClick={handleExport}
-                className="flex items-center px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                className="flex items-center px-3 py-1.5 text-[11px] bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors shadow-sm"
               >
-                <Download className="mr-1 h-4 w-4" />
+                <Download className="mr-1 h-3 w-3" />
                 Export
               </button>
             </div>
@@ -260,34 +281,34 @@ const CancellationAndRegeneratedReport = () => {
         {/* Table */}
         <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+            <table className="min-w-full border-collapse">
+              <thead>
                 <tr>
-                  <th colSpan="6" className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-red-50 border-r-2 border-gray-300">
+                  <th colSpan="6" className="border border-gray-200 px-2 py-1.5 text-center text-[10px] font-semibold text-gray-700 uppercase bg-red-50 border-r-2 border-gray-300">
                     Cancelled Bill Details
                   </th>
-                  <th colSpan="5" className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-green-50">
+                  <th colSpan="5" className="border border-gray-200 px-2 py-1.5 text-center text-[10px] font-semibold text-gray-700 uppercase bg-green-50">
                     New Bill Details
                   </th>
                 </tr>
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">S.No.</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Can. Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Can. Bill No</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Can. By</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase border-r-2 border-gray-300">Comments</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Bill No</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created by</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Old Items</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Items</th>
+                <tr className="bg-gradient-to-r from-slate-50 to-gray-50">
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">S.No.</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Order Date</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Can. Date</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Can. Bill No</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Can. By</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase border-r-2 border-gray-300">Comments</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Order Date</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">New Bill No</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Created by</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Old Items</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">New Items</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-gray-100">
                 {paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan="11" className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan="11" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-gray-500">
                       No cancelled and regenerated bills found for the selected period.
                     </td>
                   </tr>
@@ -295,20 +316,20 @@ const CancellationAndRegeneratedReport = () => {
                   paginatedData.map((item, index) => {
                     const globalIndex = (currentPage - 1) * itemsPerPage + index;
                     return (
-                      <tr key={index} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-sm text-slate-700">{globalIndex + 1}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{formatDate(item.cancelledBill.orderDate)}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{formatDate(item.cancelledBill.canDate)}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{item.cancelledBill.canBillNo}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{item.cancelledBill.canBy}</td>
-                        <td className="px-4 py-2 text-sm text-slate-600 border-r-2 border-gray-300">{item.cancelledBill.comments}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{formatDate(item.regeneratedBill.orderDate)}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{item.regeneratedBill.newBillNo}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{item.regeneratedBill.createdBy}</td>
-                        <td className="px-4 py-2 text-sm text-slate-600 max-w-xs truncate" title={item.cancelledBill.oldItems}>
+                      <tr key={index} className="hover:bg-blue-50/50 transition-colors">
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{globalIndex + 1}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{formatDate(item.cancelledBill.orderDate)}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{formatDate(item.cancelledBill.canDate)}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 font-medium">{item.cancelledBill.canBillNo}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.cancelledBill.canBy}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-600 border-r-2 border-gray-300">{item.cancelledBill.comments || 'N/A'}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{formatDate(item.regeneratedBill.orderDate)}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 font-medium">{item.regeneratedBill.newBillNo}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{item.regeneratedBill.createdBy}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-600 max-w-xs truncate" title={item.cancelledBill.oldItems}>
                           {item.cancelledBill.oldItems}
                         </td>
-                        <td className="px-4 py-2 text-sm text-slate-600 max-w-xs truncate" title={item.regeneratedBill.newItems}>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-600 max-w-xs truncate" title={item.regeneratedBill.newItems}>
                           {item.regeneratedBill.newItems}
                         </td>
                       </tr>
@@ -317,22 +338,22 @@ const CancellationAndRegeneratedReport = () => {
                 )}
                 {paginatedData.length > 0 && (
                   <>
-                    <tr className="bg-gray-50 font-bold">
-                      <td colSpan="5" className="px-4 py-2 text-sm font-bold text-slate-900 text-right">Grand Total</td>
-                      <td className="px-4 py-2 text-sm font-bold text-slate-900 border-r-2 border-gray-300">
+                    <tr className="bg-gray-50 font-semibold">
+                      <td colSpan="5" className="border border-gray-200 px-2 py-1.5 text-[11px] font-bold text-slate-900 text-right">Grand Total</td>
+                      <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-bold text-slate-900 border-r-2 border-gray-300">
                         {(summary.totalCancelledAmount || 0).toFixed(2)}
                       </td>
-                      <td colSpan="4" className="px-4 py-2"></td>
-                      <td className="px-4 py-2 text-sm font-bold text-slate-900">
+                      <td colSpan="4" className="border border-gray-200 px-2 py-1.5"></td>
+                      <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-bold text-slate-900">
                         {(summary.totalRegeneratedAmount || 0).toFixed(2)}
                       </td>
                     </tr>
-                    <tr className="bg-gray-50 font-bold">
-                      <td colSpan="5" className="px-4 py-2 text-sm font-bold text-slate-900 text-right">Difference</td>
-                      <td className={`px-4 py-2 text-sm font-bold border-r-2 border-gray-300 ${summary.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <tr className="bg-gray-50 font-semibold">
+                      <td colSpan="5" className="border border-gray-200 px-2 py-1.5 text-[11px] font-bold text-slate-900 text-right">Difference</td>
+                      <td className={`border border-gray-200 px-2 py-1.5 text-[11px] font-bold border-r-2 border-gray-300 ${summary.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {summary.difference.toFixed(2)}
                       </td>
-                      <td colSpan="5" className="px-4 py-2"></td>
+                      <td colSpan="5" className="border border-gray-200 px-2 py-1.5"></td>
                     </tr>
                   </>
                 )}
@@ -343,26 +364,56 @@ const CancellationAndRegeneratedReport = () => {
           {/* Footer */}
           {paginatedData.length > 0 && (
             <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
-              <p className="text-xs text-gray-600 text-center">
+              <p className="text-[10px] text-gray-600 text-center">
                 ## - Bill Amount inclusive of Discount
               </p>
-              <p className="text-xs text-gray-500 text-center mt-1">
+              <p className="text-[10px] text-gray-500 text-center mt-1">
                 Printed at {new Date().toLocaleString()} by {user?.name || 'User'}
               </p>
             </div>
           )}
-          
-          {data.length > 0 && (
-            <Pagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalItems={data.length}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
-            />
-          )}
         </div>
+        
+        {/* Pagination - Always show when there's data */}
+        {data.length > 0 && (
+          <div className="mt-3 bg-white rounded-lg shadow-sm border border-blue-100 overflow-hidden">
+            {totalPages > 1 ? (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={data.length}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={setItemsPerPage}
+              />
+            ) : (
+              <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200">
+                <div className="flex items-center">
+                  <p className="text-sm text-gray-700 mr-2">Show:</p>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => setItemsPerPage(parseInt(e.target.value))}
+                    className="border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <p className="text-sm text-gray-700 ml-2">per page</p>
+                </div>
+                <div className="flex-1 flex justify-center">
+                  <p className="text-sm text-gray-700">
+                    Showing <span className="font-medium">1</span> to{' '}
+                    <span className="font-medium">{data.length}</span> of{' '}
+                    <span className="font-medium">{data.length}</span> results
+                  </p>
+                </div>
+                <div className="w-32"></div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

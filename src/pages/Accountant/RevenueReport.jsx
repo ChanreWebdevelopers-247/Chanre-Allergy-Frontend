@@ -57,16 +57,47 @@ const RevenueReport = () => {
   };
 
   const categorizeService = (bill) => {
-    // Check services array first
+    // First check bill type for specific categories
+    if (bill.billType === 'Lab/Test' || bill.billType === 'lab_test') {
+      return 'Investigation';
+    }
+    if (bill.billType === 'Consultation') {
+      return 'Consultation';
+    }
+    if (bill.billType === 'Superconsultant' || bill.billType === 'superconsultant') {
+      return 'Superconsultant';
+    }
+    if (bill.billType === 'Reassignment' || bill.billType === 'reassignment') {
+      return 'Reassignment';
+    }
+    if (bill.billType === 'Slit Therapy' || bill.billType === 'slit_therapy' || bill.billType === 'slitTherapy') {
+      return 'Slit Therapy';
+    }
+    
+    // Check for reassignment indicators
+    if (bill.isReassignment || bill.reassignmentId || bill.reassignedBilling) {
+      return 'Reassignment';
+    }
+    
+    // Check services array
     if (bill.services && bill.services.length > 0) {
       const service = bill.services[0];
       const serviceName = (service.name || service.serviceName || service.description || '').toLowerCase();
       
-      if (serviceName.includes('investigation') || serviceName.includes('lab') || serviceName.includes('test') || bill.billType === 'Lab/Test') {
+      if (serviceName.includes('investigation') || serviceName.includes('lab') || serviceName.includes('test')) {
         return 'Investigation';
       }
-      if (serviceName.includes('consultation') || bill.billType === 'Consultation' || bill.billType === 'Superconsultant') {
+      if (serviceName.includes('consultation')) {
         return 'Consultation';
+      }
+      if (serviceName.includes('superconsultant') || serviceName.includes('super consultant')) {
+        return 'Superconsultant';
+      }
+      if (serviceName.includes('reassignment') || serviceName.includes('reassign')) {
+        return 'Reassignment';
+      }
+      if (serviceName.includes('slit') || serviceName.includes('slit therapy')) {
+        return 'Slit Therapy';
       }
       if (serviceName.includes('registration') || serviceName.includes('registration fee')) {
         return 'Registration Services';
@@ -97,15 +128,36 @@ const RevenueReport = () => {
       }
     }
     
-    // Fallback to bill type
-    if (bill.billType === 'Lab/Test') {
-      return 'Investigation';
-    }
-    if (bill.billType === 'Consultation' || bill.billType === 'Superconsultant') {
-      return 'Consultation';
+    // Check consultation type
+    if (bill.consultationType && bill.consultationType.startsWith('superconsultant')) {
+      return 'Superconsultant';
     }
     
-    return 'Others';
+    // Check description field
+    if (bill.description) {
+      const desc = bill.description.toLowerCase();
+      if (desc.includes('slit') || desc.includes('slit therapy')) {
+        return 'Slit Therapy';
+      }
+      if (desc.includes('reassignment') || desc.includes('reassign')) {
+        return 'Reassignment';
+      }
+      if (desc.includes('superconsultant') || desc.includes('super consultant')) {
+        return 'Superconsultant';
+      }
+    }
+    
+    // Default fallback - try to infer from other fields
+    if (bill.type === 'slit_therapy' || bill.type === 'slitTherapy') {
+      return 'Slit Therapy';
+    }
+    if (bill.type === 'reassignment') {
+      return 'Reassignment';
+    }
+    
+    // Last resort - return a more specific category based on amount or other indicators
+    // If we can't categorize, use "Other Services" instead of just "Others"
+    return 'Other Services';
   };
 
   const fetchData = async () => {
@@ -307,44 +359,44 @@ const RevenueReport = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 sm:p-6">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full">
         {/* Header */}
-        <div className="mb-4">
-          <h1 className="text-lg font-bold text-slate-800">Revenue Report</h1>
-          <p className="text-xs text-slate-600 mt-1">
-            {dateRange.startDate && dateRange.endDate 
-              ? `From ${dateRangeText} By Category`
-              : 'View revenue breakdown by category'}
-          </p>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h1 className="text-sm font-bold text-slate-800">Revenue Report</h1>
+            <p className="text-[10px] text-slate-600 mt-0.5">
+              {dateRange.startDate && dateRange.endDate 
+                ? `From ${dateRangeText} By Category`
+                : 'View revenue breakdown by category'}
+            </p>
+          </div>
           {user?.centerId && (
-            <div className="mt-2">
-              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                <Building2 className="mr-1 h-3 w-3" />
-                {user?.centerId?.name || 'Center'}
-              </span>
-            </div>
+            <span className="inline-flex items-center px-2 py-1 text-[10px] font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">
+              <Building2 className="mr-1 h-2.5 w-2.5" />
+              {user?.centerId?.name || 'Center'}
+            </span>
           )}
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4 border border-blue-100">
+        <div className="bg-white rounded-lg shadow-sm p-3 mb-3 border border-blue-100">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Start Date</label>
+              <label className="block text-[10px] font-medium text-slate-700 mb-1">Start Date</label>
               <input
                 type="date"
                 value={dateRange.startDate}
                 onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">End Date</label>
+              <label className="block text-[10px] font-medium text-slate-700 mb-1">End Date</label>
               <input
                 type="date"
                 value={dateRange.endDate}
                 onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div className="flex items-end gap-2">
@@ -352,16 +404,16 @@ const RevenueReport = () => {
                 onClick={() => {
                   fetchData();
                 }}
-                className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="flex items-center px-3 py-1.5 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors shadow-sm"
               >
-                <Filter className="mr-1 h-4 w-4" />
+                <Filter className="mr-1 h-3 w-3" />
                 Apply
               </button>
               <button
                 onClick={handleExport}
-                className="flex items-center px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                className="flex items-center px-3 py-1.5 text-[11px] bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors shadow-sm"
               >
-                <Download className="mr-1 h-4 w-4" />
+                <Download className="mr-1 h-3 w-3" />
                 Export
               </button>
             </div>
@@ -369,42 +421,42 @@ const RevenueReport = () => {
         </div>
 
         {/* Revenue by Category Table */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-4">
-          <div className="p-4 border-b border-gray-200">
-            <h2 className="text-md font-semibold text-slate-800">Revenue Report {dateRangeText} By Category</h2>
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-3">
+          <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-slate-50 to-gray-50">
+            <h2 className="text-sm font-semibold text-slate-800">Revenue Report {dateRangeText} By Category</h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">S.No.</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category Name</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+            <table className="min-w-full border-collapse">
+              <thead>
+                <tr className="bg-gradient-to-r from-slate-50 to-gray-50">
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">S.No.</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Category Name</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Quantity</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Price</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-gray-100">
                 {categoryData.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan="4" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-gray-500">
                       No revenue data found for the selected period.
                     </td>
                   </tr>
                 ) : (
                   <>
                     {categoryData.map((category, index) => (
-                      <tr key={index} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-sm text-slate-700">{index + 1}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{category.categoryName}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{category.quantity}</td>
-                        <td className="px-4 py-2 text-sm font-medium text-green-600">
+                      <tr key={index} className="hover:bg-blue-50/50 transition-colors">
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{index + 1}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 font-medium">{category.categoryName}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{category.quantity}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-medium text-green-600">
                           {(category.price || 0).toFixed(2)}
                         </td>
                       </tr>
                     ))}
                     <tr className="bg-gray-50 font-semibold">
-                      <td colSpan="3" className="px-4 py-2 text-sm text-slate-700">Total</td>
-                      <td className="px-4 py-2 text-sm font-bold text-green-700">
+                      <td colSpan="3" className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">Total</td>
+                      <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-bold text-green-700">
                         {summary.totalSales.toFixed(2)}
                       </td>
                     </tr>
@@ -416,115 +468,131 @@ const RevenueReport = () => {
         </div>
 
         {/* Sales Summary */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-4">
-          <div className="p-4 border-b border-gray-200">
-            <h2 className="text-md font-semibold text-slate-800">Sales Summary for {dateRangeText}</h2>
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-3">
+          <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-slate-50 to-gray-50">
+            <h2 className="text-sm font-semibold text-slate-800">Sales Summary for {dateRangeText}</h2>
           </div>
-          <div className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-slate-600">A.</span>
-                  <span className="text-sm text-slate-600">Sales</span>
-                  <span className="text-sm font-medium text-slate-800">{summary.totalSales.toFixed(2)}</span>
+          <div className="p-3">
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">A.</span>
+                  <span className="text-[11px] text-slate-600">Sales</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-slate-600">B.</span>
-                  <span className="text-sm text-slate-600">Sales Discount</span>
-                  <span className="text-sm font-medium text-slate-800">{summary.totalDiscount.toFixed(2)}</span>
+                <span className="text-[11px] font-medium text-slate-800">{summary.totalSales.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">B.</span>
+                  <span className="text-[11px] text-slate-600">Sales Discount</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-slate-600">C.</span>
-                  <span className="text-sm text-slate-600">Sales After Discount (A - B)</span>
-                  <span className="text-sm font-medium text-slate-800">{summary.salesAfterDiscount.toFixed(2)}</span>
+                <span className="text-[11px] font-medium text-slate-800">{summary.totalDiscount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">C.</span>
+                  <span className="text-[11px] text-slate-600">Sales After Discount (A - B)</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-slate-600">D.</span>
-                  <span className="text-sm text-slate-600">Total Sales Return</span>
-                  <span className="text-sm font-medium text-red-600">{summary.totalSalesReturn.toFixed(2)}</span>
+                <span className="text-[11px] font-medium text-slate-800">{summary.salesAfterDiscount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">D.</span>
+                  <span className="text-[11px] text-slate-600">Total Sales Return</span>
                 </div>
-                <div className="flex justify-between border-t pt-2">
-                  <span className="text-sm text-slate-600">E.</span>
-                  <span className="text-sm text-slate-600">Sales After Returns (C - D)</span>
-                  <span className="text-sm font-medium text-slate-800">{summary.salesAfterReturns.toFixed(2)}</span>
+                <span className="text-[11px] font-medium text-red-600">{summary.totalSalesReturn.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-gray-200 pt-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">E.</span>
+                  <span className="text-[11px] text-slate-600">Sales After Returns (C - D)</span>
                 </div>
+                <span className="text-[11px] font-medium text-slate-800">{summary.salesAfterReturns.toFixed(2)}</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Cash Collection Summary */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-4">
-          <div className="p-4 border-b border-gray-200">
-            <h2 className="text-md font-semibold text-slate-800">Cash Collection Summary for {dateRangeText}</h2>
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-3">
+          <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-slate-50 to-gray-50">
+            <h2 className="text-sm font-semibold text-slate-800">Cash Collection Summary for {dateRangeText}</h2>
           </div>
-          <div className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-slate-600">F.</span>
-                  <span className="text-sm text-slate-600">Cash Collection</span>
-                  <span className="text-sm font-medium text-green-600">{summary.cashCollection.toFixed(2)}</span>
+          <div className="p-3">
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">F.</span>
+                  <span className="text-[11px] text-slate-600">Cash Collection</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-slate-600">G.</span>
-                  <span className="text-sm text-slate-600">Cash/Card Refund(Excluding Refund Pending)</span>
-                  <span className="text-sm font-medium text-red-600">{summary.cashRefund.toFixed(2)}</span>
+                <span className="text-[11px] font-medium text-green-600">{summary.cashCollection.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">G.</span>
+                  <span className="text-[11px] text-slate-600">Cash/Card Refund(Excluding Refund Pending)</span>
                 </div>
-                <div className="flex justify-between border-t pt-2">
-                  <span className="text-sm text-slate-600">H.</span>
-                  <span className="text-sm text-slate-600">Cash/Card Collection After Refund</span>
-                  <span className="text-sm font-medium text-green-600">{summary.cashCollectionAfterRefund.toFixed(2)}</span>
+                <span className="text-[11px] font-medium text-red-600">{summary.cashRefund.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-gray-200 pt-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">H.</span>
+                  <span className="text-[11px] text-slate-600">Cash/Card Collection After Refund</span>
                 </div>
+                <span className="text-[11px] font-medium text-green-600">{summary.cashCollectionAfterRefund.toFixed(2)}</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Total Due Pending */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-4">
-          <div className="p-4">
-            <div className="flex justify-between">
-              <span className="text-sm font-semibold text-slate-700">Total Due Pending for {dateRangeText}</span>
-              <span className="text-sm font-bold text-orange-600">{summary.totalDuePending.toFixed(2)}</span>
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-3">
+          <div className="px-4 py-3">
+            <div className="flex justify-between items-center">
+              <span className="text-[11px] font-semibold text-slate-700">Total Due Pending for {dateRangeText}</span>
+              <span className="text-[11px] font-bold text-orange-600">{summary.totalDuePending.toFixed(2)}</span>
             </div>
           </div>
         </div>
 
         {/* Old Due Collection */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-4">
-          <div className="p-4 border-b border-gray-200">
-            <h2 className="text-md font-semibold text-slate-800">Old Due Collection for {dateRangeText}</h2>
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-3">
+          <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-slate-50 to-gray-50">
+            <h2 className="text-sm font-semibold text-slate-800">Old Due Collection for {dateRangeText}</h2>
           </div>
-          <div className="p-4">
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-slate-600">I.</span>
-                <span className="text-sm text-slate-600 flex-1 ml-4">Old Due Collection</span>
-                <span className="text-sm font-medium text-green-600">{summary.oldDueCollection.toFixed(2)}</span>
+          <div className="p-3">
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">I.</span>
+                  <span className="text-[11px] text-slate-600">Old Due Collection</span>
+                </div>
+                <span className="text-[11px] font-medium text-green-600">{summary.oldDueCollection.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between border-t pt-2">
-                <span className="text-sm text-slate-600">J.</span>
-                <span className="text-sm text-slate-600 flex-1 ml-4">Total Collection (H + I)</span>
-                <span className="text-sm font-medium text-green-600">{summary.totalCollection.toFixed(2)}</span>
+              <div className="flex justify-between items-center border-t border-gray-200 pt-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 w-4">J.</span>
+                  <span className="text-[11px] text-slate-600">Total Collection (H + I)</span>
+                </div>
+                <span className="text-[11px] font-medium text-green-600">{summary.totalCollection.toFixed(2)}</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Outstanding Collection */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-4">
-          <div className="p-4">
-            <div className="flex justify-between">
-              <span className="text-sm font-semibold text-slate-700">Outstanding Collection {dateRangeText} (J - L)</span>
-              <span className="text-sm font-bold text-green-700">{summary.totalCollection.toFixed(2)}</span>
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100 mb-3">
+          <div className="px-4 py-3">
+            <div className="flex justify-between items-center">
+              <span className="text-[11px] font-semibold text-slate-700">Outstanding Collection {dateRangeText} (J - L)</span>
+              <span className="text-[11px] font-bold text-green-700">{summary.totalCollection.toFixed(2)}</span>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-blue-100">
-          <p className="text-xs text-slate-500 text-center">
+        <div className="bg-white rounded-lg shadow-sm p-3 border border-blue-100">
+          <p className="text-[10px] text-slate-500 text-center">
             Printed at {formatDateTime(new Date())} by {user?.name || 'User'}
           </p>
         </div>

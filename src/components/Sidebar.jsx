@@ -134,6 +134,7 @@ export default function Sidebar(props) {
                   { to: "/dashboard/superadmin/billing", label: "Billing Management" },
                   { to: "/dashboard/superadmin/consultation-fee-billing", label: "Doctor Fee" },
                   { to: "/dashboard/superadmin/billing-reports", label: "Billing Reports" },
+                  { to: "/dashboard/superadmin/collection-report", label: "Collection Report" },
                 ]}
                 currentPath={location.pathname}
               />
@@ -286,6 +287,7 @@ export default function Sidebar(props) {
                   { to: "/dashboard/centeradmin/consultation-fee-billing", label: "Doctor Fee" },
                   { to: "/dashboard/centeradmin/billing-reports", label: "Billing Reports" },
                   { to: "/dashboard/centeradmin/billing-tracker", label: "Payment Tracker" },
+                  { to: "/dashboard/centeradmin/collection-report", label: "Collection Report" },
                 ]}
                 currentPath={location.pathname}
               />
@@ -301,6 +303,7 @@ export default function Sidebar(props) {
                 icon={<FaHome />}
                 isActive={isActive("/dashboard/accountant/dashboard")}
               />
+              
               <SidebarGroup
                 label="Reports"
                 icon={<FaClipboardList />}

@@ -186,28 +186,8 @@ const AppointmentApprovals = () => {
   };
 
   const handleApprove = async (appointmentId, appointment) => {
-    // Directly approve the appointment using preferred date/time
-    try {
-      setUpdateLoading(true);
-      const response = await updateAppointmentDetails(appointment._id, {
-        confirmedDate: new Date(appointment.preferredDate).toISOString(),
-        confirmedTime: appointment.preferredTime,
-        notes: appointment.notes || '',
-        status: 'confirmed'
-      });
-      
-      if (response.success) {
-        toast.success('Appointment approved successfully!');
-        setFilter('confirmed');
-        setCurrentPage(1);
-        fetchAppointments();
-      }
-    } catch (error) {
-      toast.error('Failed to approve appointment');
-      console.error('Error approving appointment:', error);
-    } finally {
-      setUpdateLoading(false);
-    }
+    // Open the edit modal for approval instead of directly approving
+    openEditModal(appointment);
   };
 
   const handleDirectApprove = async () => {
@@ -1223,7 +1203,10 @@ const AppointmentApprovals = () => {
                 {selectedAppointment.status === 'pending' && (
                   <>
                     <button
-                      onClick={() => handleApprove(selectedAppointment._id, selectedAppointment)}
+                      onClick={() => {
+                        closeModal();
+                        openEditModal(selectedAppointment);
+                      }}
                       disabled={updateLoading}
                       className="inline-flex items-center px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-200 shadow-lg hover:shadow-xl"
                     >

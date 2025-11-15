@@ -451,6 +451,14 @@ const DiscountReport = () => {
     ];
 
     data.forEach((bill, index) => {
+      const discountAmount = (bill.discount || 0).toFixed(2);
+      const discountPercent = bill.discountPercentage 
+        ? bill.discountPercentage 
+        : bill.totalAmount > 0 
+          ? ((bill.discount || 0) / bill.totalAmount * 100).toFixed(2)
+          : '0';
+      const discountDisplay = `${discountAmount}(${discountPercent}%)`;
+      
       csvData.push([
         index + 1,
         formatDateTime(bill.date),
@@ -461,7 +469,7 @@ const DiscountReport = () => {
         bill.userName,
         (bill.totalAmount || 0).toFixed(2),
         bill.discountType || 'Fixed',
-        (bill.discount || 0).toFixed(2),
+        discountDisplay,
         (bill.paidAmount || 0).toFixed(2),
         bill.paymentStatus,
         bill.remarks
@@ -494,66 +502,70 @@ const DiscountReport = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 sm:p-6">
-      <div className="w-full mx-auto">
+      <div className="w-full">
         {/* Header */}
-        <div className="mb-4">
-          <h1 className="text-lg font-bold text-slate-800">Discount Report</h1>
-          <p className="text-xs text-slate-600 mt-1">
-            {dateRange.startDate && dateRange.endDate 
-              ? `${dateRange.startDate} to ${dateRange.endDate}`
-              : 'View all bills with discounts applied'}
-          </p>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h1 className="text-sm font-bold text-slate-800">Discount Report</h1>
+            <p className="text-[10px] text-slate-600 mt-0.5">
+              {dateRange.startDate && dateRange.endDate 
+                ? `${dateRange.startDate} to ${dateRange.endDate}`
+                : 'View all bills with discounts applied'}
+            </p>
+          </div>
           {user?.centerId && (
-            <div className="mt-2">
-              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                <Building2 className="mr-1 h-3 w-3" />
-                {user?.centerId?.name || 'Center'}
-              </span>
-            </div>
+            <span className="inline-flex items-center px-2 py-1 text-[10px] font-medium bg-blue-100 text-blue-800 rounded-full border border-blue-200">
+              <Building2 className="mr-1 h-2.5 w-2.5" />
+              {user?.centerId?.name || 'Center'}
+            </span>
           )}
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-          <div className="bg-white rounded-lg shadow-sm p-4 border border-green-100">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 mt-4">
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-green-100 hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-slate-600 uppercase">Total Discount Given</p>
-                <p className="text-xl font-bold text-slate-800 mt-1">₹{summary.totalDiscount.toFixed(2)}</p>
+                <p className="text-[10px] font-medium text-slate-600 uppercase">Total Discount Given</p>
+                <p className="text-sm font-bold text-slate-800 mt-0.5">₹{summary.totalDiscount.toFixed(2)}</p>
               </div>
-              <Percent className="h-8 w-8 text-green-500" />
+              <div className="bg-green-100 p-2 rounded-full">
+                <Percent className="h-4 w-4 text-green-600" />
+              </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-4 border border-blue-100">
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100 hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-slate-600 uppercase">Bills with Discount</p>
-                <p className="text-xl font-bold text-slate-800 mt-1">{summary.totalBills}</p>
+                <p className="text-[10px] font-medium text-slate-600 uppercase">Bills with Discount</p>
+                <p className="text-sm font-bold text-slate-800 mt-0.5">{summary.totalBills}</p>
               </div>
-              <Percent className="h-8 w-8 text-blue-500" />
+              <div className="bg-blue-100 p-2 rounded-full">
+                <Percent className="h-4 w-4 text-blue-600" />
+              </div>
             </div>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4 border border-blue-100">
+        <div className="bg-white p-3 mb-3 rounded-lg shadow-sm border border-blue-100">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Start Date</label>
+              <label className="block text-[10px] font-medium text-slate-700 mb-1">Start Date</label>
               <input
                 type="date"
                 value={dateRange.startDate}
                 onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">End Date</label>
+              <label className="block text-[10px] font-medium text-slate-700 mb-1">End Date</label>
               <input
                 type="date"
                 value={dateRange.endDate}
                 onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1.5 text-[11px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div className="flex items-end gap-2">
@@ -562,16 +574,16 @@ const DiscountReport = () => {
                   setCurrentPage(1);
                   fetchData();
                 }}
-                className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="flex items-center px-3 py-1.5 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors shadow-sm"
               >
-                <Filter className="mr-1 h-4 w-4" />
+                <Filter className="mr-1 h-3 w-3" />
                 Apply
               </button>
               <button
                 onClick={handleExport}
-                className="flex items-center px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                className="flex items-center px-3 py-1.5 text-[11px] bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors shadow-sm"
               >
-                <Download className="mr-1 h-4 w-4" />
+                <Download className="mr-1 h-3 w-3" />
                 Export
               </button>
             </div>
@@ -579,30 +591,30 @@ const DiscountReport = () => {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-blue-100">
+        <div className="bg-white rounded-lg shadow-sm border border-blue-100 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">S.No.</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bill Number</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bill Type</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Id</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Patient Name</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total Amount</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Discount Type</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Paid Amount</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Payment Status</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+            <table className="min-w-full border-collapse">
+              <thead>
+                <tr className="bg-gradient-to-r from-slate-50 to-gray-50">
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">S.No.</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Date</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Bill Number</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Bill Type</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Id</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Patient Name</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">User</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Total Amount</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Discount Type</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Discount</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Paid Amount</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Payment Status</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-[10px] font-semibold text-gray-700 uppercase">Remarks</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-gray-100">
                 {paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan="13" className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan="13" className="border border-gray-200 px-2 py-3 text-center text-[11px] text-gray-500">
                       No bills with discounts found for the selected period.
                     </td>
                   </tr>
@@ -610,39 +622,45 @@ const DiscountReport = () => {
                   paginatedData.map((bill, index) => {
                     const globalIndex = (currentPage - 1) * itemsPerPage + index;
                     return (
-                      <tr key={bill._id || index} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-sm text-slate-700">{globalIndex + 1}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{formatDateTime(bill.date)}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700 font-medium">{bill.billNumber || '-'}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">
-                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                      <tr key={bill._id || index} className="hover:bg-blue-50/50 transition-colors">
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{globalIndex + 1}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{formatDateTime(bill.date)}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700 font-medium">{bill.billNumber || '-'}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">
+                          <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
                             bill.billType === 'Consultation' ? 'bg-blue-100 text-blue-800' :
                             bill.billType === 'Reassignment' ? 'bg-purple-100 text-purple-800' :
                             bill.billType === 'Superconsultant' ? 'bg-indigo-100 text-indigo-800' :
                             bill.billType === 'Lab/Test' ? 'bg-green-100 text-green-800' :
+                            bill.billType === 'Slit Therapy' || bill.billType === 'slit_therapy' ? 'bg-pink-100 text-pink-800' :
                             'bg-gray-100 text-gray-800'
                           }`}>
                             {bill.billType || 'Unknown'}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.patientId || '-'}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.patientName || '-'}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">{bill.userName || '-'}</td>
-                        <td className="px-4 py-2 text-sm text-slate-900">{(bill.totalAmount || 0).toFixed(2)}</td>
-                        <td className="px-4 py-2 text-sm text-slate-700">
-                          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{bill.patientId || '-'}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{bill.patientName || '-'}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">{bill.userName || '-'}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-900 font-medium">{(bill.totalAmount || 0).toFixed(2)}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-800 rounded">
                             {bill.discountType || 'Fixed'}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-sm font-medium text-green-600">
-                          {(bill.discount || 0).toFixed(2)}
-                          {bill.discountPercentage && (
-                            <span className="text-xs text-slate-500 ml-1">({bill.discountPercentage}%)</span>
-                          )}
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] font-medium text-green-600">
+                          {(() => {
+                            const discountAmount = (bill.discount || 0).toFixed(2);
+                            const discountPercent = bill.discountPercentage 
+                              ? bill.discountPercentage 
+                              : bill.totalAmount > 0 
+                                ? ((bill.discount || 0) / bill.totalAmount * 100).toFixed(2)
+                                : '0';
+                            return `${discountAmount}(${discountPercent}%)`;
+                          })()}
                         </td>
-                        <td className="px-4 py-2 text-sm text-slate-900">{(bill.paidAmount || 0).toFixed(2)}</td>
-                        <td className="px-4 py-2">
-                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-900 font-medium">{(bill.paidAmount || 0).toFixed(2)}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-700">
+                          <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
                             bill.paymentStatus === 'Paid' ? 'bg-green-100 text-green-800' :
                             bill.paymentStatus === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
                             'bg-gray-100 text-gray-800'
@@ -650,7 +668,7 @@ const DiscountReport = () => {
                             {bill.paymentStatus}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-sm text-slate-600">{bill.remarks || '-'}</td>
+                        <td className="border border-gray-200 px-2 py-1.5 text-[11px] text-slate-600">{bill.remarks || '-'}</td>
                       </tr>
                     );
                   })
@@ -658,18 +676,48 @@ const DiscountReport = () => {
               </tbody>
             </table>
           </div>
-          
-          {data.length > 0 && (
-            <Pagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalItems={data.length}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
-            />
-          )}
         </div>
+        
+        {/* Pagination - Always show when there's data */}
+        {data.length > 0 && (
+          <div className="mt-3 bg-white rounded-lg shadow-sm border border-blue-100 overflow-hidden">
+            {totalPages > 1 ? (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={data.length}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={setItemsPerPage}
+              />
+            ) : (
+              <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200">
+                <div className="flex items-center">
+                  <p className="text-sm text-gray-700 mr-2">Show:</p>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => setItemsPerPage(parseInt(e.target.value))}
+                    className="border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <p className="text-sm text-gray-700 ml-2">per page</p>
+                </div>
+                <div className="flex-1 flex justify-center">
+                  <p className="text-sm text-gray-700">
+                    Showing <span className="font-medium">1</span> to{' '}
+                    <span className="font-medium">{data.length}</span> of{' '}
+                    <span className="font-medium">{data.length}</span> results
+                  </p>
+                </div>
+                <div className="w-32"></div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

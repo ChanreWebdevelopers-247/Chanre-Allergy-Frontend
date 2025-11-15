@@ -170,6 +170,8 @@ import ReassignPatient from '../pages/Receptionist/ReassignPatient';
 import ReceptionistBillingTracker from '../pages/Receptionist/BillingTracker';
 import TransactionView from '../pages/Receptionist/TransactionView';
 import ReceptionistCollectionReport from '../pages/Receptionist/CollectionReport';
+import SuperadminCollectionReport from '../pages/Superadmin/CollectionReport';
+import CenterAdminCollectionReport from '../pages/CenterAdmin/CollectionReport';
 import AddReceptionistPatient from '../pages/Receptionist/AddPatient';
 import ReceptionistEditPatient from '../pages/Receptionist/EditPatient';
 import AppointmentManagement from '../pages/Receptionist/AppointmentManagement';
@@ -218,6 +220,10 @@ import RecentlyAssignedPatients from '../pages/Doctor/patients/RecentlyAssignedP
 // Accountant Pages
 import AccountantDashboard from '../pages/Accountant/Dashboard';
 import AccountantProfile from '../pages/Accountant/Profile';
+import AccountantBilling from '../pages/Accountant/Billing';
+import AccountantConsultationBilling from '../pages/Accountant/ConsultationBilling';
+import AccountantSuperConsultantBilling from '../pages/Accountant/SuperConsultantBilling';
+import AccountantSlitTherapyBilling from '../pages/Accountant/SlitTherapyBilling';
 import CancellationReport from '../pages/Accountant/CancellationReport';
 import CancellationAndRegeneratedReport from '../pages/Accountant/CancellationAndRegeneratedReport';
 import CategoryWiseReport from '../pages/Accountant/CategoryWiseReport';
@@ -414,6 +420,7 @@ export default function AppRoutes() {
         <Route path="superadmin/consultation-fee-billing" element={<SuperadminConsultationFeeBilling />} />
         <Route path="superadmin/billing/:billingId" element={<BillingDetails />} />
         <Route path="superadmin/billing-reports" element={<SuperadminBillingReports />} />
+        <Route path="superadmin/collection-report" element={<SuperadminCollectionReport />} />
         
         {/* Doctors Routes */}
         <Route path="superadmin/doctors/superadmindoctorlist" element={<SuperAdminDoctorList />} />
@@ -515,6 +522,7 @@ export default function AppRoutes() {
         <Route path="centeradmin/billing/:billingId" element={<ErrorBoundary><CenterAdminBillingDetails /></ErrorBoundary>} />
         <Route path="centeradmin/billing-reports" element={<ErrorBoundary><CenterAdminBillingReports /></ErrorBoundary>} />
         <Route path="centeradmin/billing-tracker" element={<ErrorBoundary><CenterAdminBillingTracker /></ErrorBoundary>} />
+        <Route path="centeradmin/collection-report" element={<ErrorBoundary><CenterAdminCollectionReport /></ErrorBoundary>} />
         
         {/* Center Admin Followup Routes (lowercase) */}
         <Route path="centeradmin/patients/followup/:id" element={<FollowUp />} />
@@ -669,6 +677,12 @@ export default function AppRoutes() {
         {/* Accountant Routes */}
         <Route path="accountant/dashboard" element={<AccountantRouteProtection><AccountantDashboard /></AccountantRouteProtection>} />
         <Route path="accountant/profile" element={<AccountantRouteProtection><AccountantProfile /></AccountantRouteProtection>} />
+        
+        {/* Accountant Billing Routes */}
+        <Route path="accountant/billing" element={<AccountantRouteProtection><AccountantBilling /></AccountantRouteProtection>} />
+        <Route path="accountant/consultation-billing" element={<AccountantRouteProtection><AccountantConsultationBilling /></AccountantRouteProtection>} />
+        <Route path="accountant/super-consultant-billing" element={<AccountantRouteProtection><AccountantSuperConsultantBilling /></AccountantRouteProtection>} />
+        <Route path="accountant/slit-therapy-billing" element={<AccountantRouteProtection><AccountantSlitTherapyBilling /></AccountantRouteProtection>} />
         
         {/* Accountant Report Routes */}
         <Route path="accountant/reports/cancellation" element={<AccountantRouteProtection><CancellationReport /></AccountantRouteProtection>} />
